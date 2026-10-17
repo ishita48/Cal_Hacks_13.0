@@ -1,0 +1,96 @@
+"""Append-only event log.
+
+SQLite locally (zero setup); the same interface can be backed by Postgres in deploy.
+Runs group events: each scenario reset starts a new run, and replay re-emits one run.
+"""
+
+import json
+import sqlite3
+import threading
+import time
+import uuid
+from pathlib import Path
+
+from pydantic import TypeAdapter
+
+from .events import InputEvent, LoggedEvent
+
+_event_adapter: TypeAdapter[InputEvent] = TypeAdapter(InputEvent)
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    scenario TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    step INTEGER NOT NULL,
+    wall_time REAL NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_run ON events(run_id, seq);
+"""
+
+
+class EventStore:
+    def __init__(self, path: str | Path = ":memory:") -> None:
+        if path != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._lock = threading.Lock()
+        with self._lock:
+            self._conn.executescript(_SCHEMA)
+
+    def create_run(self, scenario: str) -> str:
+        run_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO runs (id, scenario, created_at) VALUES (?, ?, ?)",
+                (run_id, scenario, time.time()),
+            )
+            self._conn.commit()
+        return run_id
+
+    def append(self, run_id: str, step: int, event: InputEvent) -> LoggedEvent:
+        wall_time = time.time()
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO events (run_id, step, wall_time, payload) VALUES (?, ?, ?, ?)",
+                (run_id, step, wall_time, event.model_dump_json()),
+            )
+            self._conn.commit()
+            seq = cur.lastrowid
+        assert seq is not None
+        return LoggedEvent(seq=seq, run_id=run_id, step=step, wall_time=wall_time, event=event)
+
+    def events(self, run_id: str) -> list[LoggedEvent]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT seq, run_id, step, wall_time, payload FROM events WHERE run_id = ? ORDER BY seq",
+                (run_id,),
+            ).fetchall()
+        return [
+            LoggedEvent(
+                seq=seq,
+                run_id=rid,
+                step=step,
+                wall_time=wall_time,
+                event=_event_adapter.validate_python(json.loads(payload)),
+            )
+            for seq, rid, step, wall_time, payload in rows
+        ]
+
+    def runs(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT r.id, r.scenario, r.created_at, COUNT(e.seq)
+                   FROM runs r LEFT JOIN events e ON e.run_id = r.id
+                   GROUP BY r.id ORDER BY r.created_at DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [
+            {"id": rid, "scenario": scenario, "created_at": created_at, "event_count": count}
+            for rid, scenario, created_at, count in rows
+        ]

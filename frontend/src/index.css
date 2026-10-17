@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-ink-950: #07090c;
+  --color-ink-900: #0c1015;
+  --color-ink-800: #131922;
+  --color-ink-700: #1c2430;
+  --color-ink-600: #2a3442;
+  --color-haven-water: #3ba7ff;
+  --color-haven-power: #ffb020;
+  --color-haven-danger: #ff4d4f;
+  --color-haven-safe: #2ecc8f;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-ink-950 text-slate-200 antialiased font-sans; }

@@ -1,0 +1,22 @@
+# deps / builds
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local data + secrets
+backend/data/
+.env
+.env.*
+!.env.example
+
+# reference material (third-party project, not ours)
+*.zip
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
