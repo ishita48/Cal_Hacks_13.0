@@ -42,6 +42,14 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     async def get_state():
         return engine.snapshot()
 
+    @app.get("/api/building")
+    async def get_building():
+        return engine.building.model_dump(mode="json")
+
+    @app.get("/api/people")
+    async def get_people():
+        return engine.roster.model_dump(mode="json")
+
     @app.post("/api/sensor")
     async def post_sensor(reading: SensorReading, x_haven_token: str | None = Header(default=None)):
         if sensor_token and reading.source == "esp32" and x_haven_token != sensor_token:

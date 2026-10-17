@@ -11,6 +11,10 @@ import contextlib
 import logging
 from typing import Any
 
+from ..building.blackwell import build_blackwell_hall
+from ..building.graph import build_graph
+from ..building.model import BuildingSpec
+from ..people.roster import Roster, build_roster
 from .events import InputEvent, LoggedEvent
 from .state import DT, SCENARIO_START_TOD, WorldState, advance, apply_input, initial_state
 from .store import EventStore
@@ -26,8 +30,12 @@ class ReplayActiveError(RuntimeError):
 
 
 class WorldEngine:
-    def __init__(self, store: EventStore, scenario: str = "haven_hall_leak") -> None:
+    def __init__(self, store: EventStore, scenario: str = "blackwell_basement_leak") -> None:
         self.store = store
+        # Static world: the building and who lives in it. Immutable for the life of the process.
+        self.building: BuildingSpec = build_blackwell_hall()
+        self.graph = build_graph(self.building)
+        self.roster: Roster = build_roster(self.building)
         self.scenario = scenario
         self.playing = True
         self.speed = 1.0

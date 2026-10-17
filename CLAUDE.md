@@ -26,6 +26,9 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
 ## Commands
 - Backend: `cd backend && uv run uvicorn haven.api.app:create_app --factory --port 8000 --reload --reload-dir haven`
 - Backend tests: `cd backend && uv run pytest -q`
+- Floor-plan PNG: `cd backend && PYTHONPATH=. uv run python tools/plot_plans.py out.png [LEVEL]`
+- Export spec for Blender: `cd backend && PYTHONPATH=. uv run python tools/export_building.py` → `shared/`
+- Windows note: uvicorn `--reload` can hang on reload; restart the server if endpoints look stale.
 - Frontend: `cd frontend && npm run dev` (proxies `/api` and `/ws` to :8000) · typecheck `npx tsc -b`
 
 ## Conventions
