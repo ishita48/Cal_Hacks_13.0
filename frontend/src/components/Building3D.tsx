@@ -5,7 +5,7 @@ import * as THREE from 'three'
 import { STATUS_COLOR } from '../lib/labels'
 import { useBuilding } from '../state/building'
 import { useWorld } from '../state/world'
-import type { Rect, ResidentImpact, Space, WorldState } from '../state/types'
+import type { ActorState, Rect, ResidentImpact, Space, WorldState } from '../state/types'
 
 /**
  * The building as another view of the one world store. Geometry comes from the GLBs the Blender
@@ -170,6 +170,7 @@ function Scene({ level }: Props) {
       <Halos index={index} />
       <Routes level={level} levelIndex={levelIndex} levelElev={levelElev} spaces={spaces} />
       <People level={level} levelIndex={levelIndex} levelElev={levelElev} spaces={spaces} />
+      <Actors level={level} levelIndex={levelIndex} levelElev={levelElev} spaces={spaces} />
     </>
   )
 }
@@ -409,7 +410,7 @@ function Routes({
   )
 }
 
-function PulsingRing({ position }: { position: [number, number, number] }) {
+function PulsingRing({ position, color = '#ff4d4f' }: { position: [number, number, number]; color?: string }) {
   const ref = useRef<THREE.Mesh>(null)
   useFrame(({ clock }) => {
     const m = ref.current
@@ -421,7 +422,7 @@ function PulsingRing({ position }: { position: [number, number, number] }) {
   return (
     <mesh ref={ref} position={position} rotation={[-Math.PI / 2, 0, 0]}>
       <ringGeometry args={[1.4, 2.0, 40]} />
-      <meshBasicMaterial color="#ff4d4f" transparent opacity={0.8} depthWrite={false} side={THREE.DoubleSide} />
+      <meshBasicMaterial color={color} transparent opacity={0.8} depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   )
 }
@@ -442,11 +443,14 @@ function People({
   const residents = useWorld((s) => s.world?.impact.residents)
   const forecastResidents = useWorld((s) => s.world?.forecast.impact.residents)
   const moved = useWorld((s) => s.world?.moved)
+  const leftBehind = useWorld((s) => s.world?.plan.left_behind)
+  const agents = useWorld((s) => s.world?.agents)
   const roster = useBuilding((b) => b.residents)
   const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
 
   const marks = useMemo(() => {
-    const out: { id: string; name: string; pos: [number, number, number]; color: string; label: boolean; faded: boolean }[] = []
+    const out: { id: string; name: string; pos: [number, number, number]; color: string; label: boolean; faded: boolean; tag: string | null; left: boolean }[] = []
+    const behind = new Set(leftBehind ?? [])
     const src: ResidentImpact[] = residents && residents.length ? residents : (forecastResidents ?? [])
     const predicted = !(residents && residents.length)
     const placed = new Set<string>()
@@ -462,23 +466,29 @@ function People({
       const p = centerOf(sp.rect, (levelElev[sp.level] ?? 0) + 1.2)
       p[0] += ((n % 6) - 2.5) * 0.9
       p[2] += (Math.floor(n / 6) % 6) * 0.9 - 2
-      out.push({ id: rid, name: r?.name ?? rid, pos: p, color: '#2ecc8f', label: NAMED.has(rid), faded: false })
+      out.push({ id: rid, name: r?.name ?? rid, pos: p, color: '#2ecc8f', label: NAMED.has(rid), faded: false, tag: 'safe', left: false })
     }
     for (const r of src) {
       if (placed.has(r.id) || r.severity === 'info') continue
       const sp = spaces[r.room]
       if (!sp || (levelIndex[sp.level] ?? 0) > focus) continue
+      // The Maya moment, in 3D: a person with a hard need nobody spoke for is drawn in violet with a
+      // hollow ring and labelled. An agent that is off while its person is still covered is just noted.
+      const left = behind.has(r.id)
+      const agentOff = agents?.[`resident:${r.id}`] === false
       out.push({
         id: r.id,
         name: r.name,
         pos: centerOf(sp.rect, (levelElev[sp.level] ?? 0) + 1.2),
-        color: r.severity === 'critical' ? '#ff4d4f' : '#ffb020',
-        label: NAMED.has(r.id),
+        color: left ? '#bf5af2' : r.severity === 'critical' ? '#ff4d4f' : '#ffb020',
+        label: NAMED.has(r.id) || left,
         faded: predicted,
+        tag: left ? 'left behind' : agentOff ? 'agent off' : null,
+        left,
       })
     }
     return out
-  }, [residents, forecastResidents, moved, roster, spaces, levelIndex, levelElev, focus])
+  }, [residents, forecastResidents, moved, leftBehind, agents, roster, spaces, levelIndex, levelElev, focus])
 
   return (
     <>
@@ -488,6 +498,7 @@ function People({
             <sphereGeometry args={[m.label ? 0.55 : 0.35, 16, 16]} />
             <meshStandardMaterial color={m.color} emissive={m.color} emissiveIntensity={0.9} transparent opacity={m.faded ? 0.55 : 1} />
           </mesh>
+          {m.left && <PulsingRing position={[0, -1.05, 0]} color="#bf5af2" />}
           {m.label && (
             <Html center position={[0, 1.4, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
               <div
@@ -495,12 +506,113 @@ function People({
                 style={{ borderColor: m.color, color: '#fff', background: 'rgba(5,5,7,0.85)', opacity: m.faded ? 0.7 : 1 }}
               >
                 {m.name.split(' ')[0]}
+                {m.tag && <span style={{ color: m.color, fontWeight: 500 }}> · {m.tag}</span>}
               </div>
             </Html>
           )}
         </group>
       ))}
     </>
+  )
+}
+
+// ---- responders (RAs, facilities, desk staff, the plumber) ---------------------------------------
+//
+// `world.actors` is derived by the backend from the approved plan and the logged action reports:
+// where each responder is, where they are heading, which step they are on. The figure glides
+// toward its heading while a step is assigned and settles where the step leaves it when done.
+
+const ACTOR_COLOR: Record<ActorState['status'], string> = {
+  idle: '#8e8e93',
+  moving: '#64d2ff',
+  done: '#30d158',
+  offsite: '#8e8e93',
+}
+
+function Actors({
+  level,
+  levelIndex,
+  levelElev,
+  spaces,
+}: {
+  level: string
+  levelIndex: Record<string, number>
+  levelElev: Record<string, number>
+  spaces: Record<string, Space>
+}) {
+  const actors = useWorld((s) => s.world?.actors)
+  const steps = useWorld((s) => s.world?.approved_plan?.steps)
+  const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
+
+  const figures = useMemo(() => {
+    const out: { id: string; label: string; task: string | null; from: [number, number, number]; to: [number, number, number]; status: ActorState['status'] }[] = []
+    let slot = 0
+    for (const a of Object.values(actors ?? {})) {
+      if (!a.at) continue
+      const here = spaces[a.at]
+      const there = a.heading ? spaces[a.heading] : undefined
+      const shown = there ?? here
+      if (!here || !shown || (levelIndex[shown.level] ?? 0) > focus) continue
+      const off = (slot++ % 3) * 0.8 - 0.8
+      const from = centerOf(here.rect, (levelElev[here.level] ?? 0) + 0.9)
+      const to = centerOf(shown.rect, (levelElev[shown.level] ?? 0) + 0.9)
+      from[0] += 1.4 + off
+      to[0] += 1.4 + off
+      const step = steps?.find((st) => st.id === a.step_id)
+      out.push({ id: a.actor, label: a.label, task: step?.title ?? null, from, to, status: a.status })
+    }
+    return out
+  }, [actors, steps, spaces, levelIndex, levelElev, focus])
+
+  return (
+    <>
+      {figures.map((f) => (
+        <ActorFigure key={f.id} {...f} />
+      ))}
+    </>
+  )
+}
+
+function ActorFigure({ label, task, from, to, status }: { label: string; task: string | null; from: [number, number, number]; to: [number, number, number]; status: ActorState['status'] }) {
+  const group = useRef<THREE.Group>(null)
+  const body = useRef<THREE.Mesh>(null)
+  const target = useMemo(() => new THREE.Vector3(...to), [to])
+  const start = useMemo(() => new THREE.Vector3(...from), [from])
+  const color = ACTOR_COLOR[status]
+  useFrame(({ clock }, dt) => {
+    const g = group.current
+    if (!g) return
+    // Ease toward the heading: a walk across the building reads as motion, not a jump.
+    g.position.lerp(target, Math.min(1, dt * 1.6))
+    if (status === 'moving') {
+      const t = clock.getElapsedTime()
+      g.position.y = target.y + 0.08 * Math.abs(Math.sin(t * 6))
+      const m = body.current?.material as THREE.MeshStandardMaterial | undefined
+      if (m) m.emissiveIntensity = 0.6 + 0.6 * (0.5 + 0.5 * Math.sin(t * 4))
+    }
+  })
+  return (
+    <group ref={group} position={start}>
+      <mesh ref={body}>
+        <capsuleGeometry args={[0.28, 0.9, 4, 10]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.7} />
+      </mesh>
+      <mesh position={[0, 0.95, 0]}>
+        <sphereGeometry args={[0.24, 12, 12]} />
+        <meshStandardMaterial color="#f5f5f7" emissive={color} emissiveIntensity={0.3} />
+      </mesh>
+      <Html center position={[0, 1.7, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap" style={{ borderColor: color, color: '#fff', background: 'rgba(5,5,7,0.85)' }}>
+          <span className="font-semibold">{label}</span>
+          {task && status !== 'idle' && (
+            <span style={{ color }}>
+              {' '}
+              · {status === 'moving' ? 'on it' : 'done'}: {task.length > 34 ? task.slice(0, 32) + '...' : task}
+            </span>
+          )}
+        </div>
+      </Html>
+    </group>
   )
 }
 

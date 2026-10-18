@@ -91,10 +91,20 @@ def test_approved_plan_executes_in_the_world_and_replays():
         st = eng.state
         assert st.actions["call_plumber"].status == "done"
         assert st.approved_plan.status == "executing"
-        await run(6.5)                                    # escort done at +6, then the cut
+        # Responders are a derived view of the plan + action reports: facilities is heading to the
+        # switchgear to hold the cut, desk staff are still at the front desk, the plumber is off site.
+        acts = eng.state.actors
+        assert acts["facilities"].status == "moving" and acts["facilities"].heading == "B1-elec"
+        assert acts["staff"].status == "idle" and acts["staff"].at == "L1-lobby"
+        assert acts["plumber"].status == "offsite" and acts["plumber"].at is None
+        await run(1.5)
+        staff = eng.state.actors["staff"]
+        assert staff.status == "moving" and staff.step_id == "escort_maya" and staff.heading == "room_412"
+        await run(5)                                      # escort done at +6, then the cut
         st = eng.state
         assert st.actions["escort_maya"].status == "done"
         assert st.moved["maya"] == "L1-lobby"
+        assert st.actors["facilities"].at == "B1-elec" and st.actors["facilities"].status == "done"
         assert st.equipment["msb_b"].status == "isolated" and not st.power.lifts["lift_1"]
         assert st.impact.dark_levels == ["L3", "L4"]
         assert "maya" not in {r.id for r in st.impact.residents if "stranded" in r.impacts}
@@ -105,6 +115,7 @@ def test_approved_plan_executes_in_the_world_and_replays():
         assert st.approved_plan.status == "done"
         assert all(a.status == "done" for a in st.actions.values())
         assert len(st.moved) >= 200 and st.moved["maya"] == "L1-lobby"
+        assert st.actors["plumber"].at == "B1-mech" and st.actors["plumber"].status == "done"
         # The relocated are no longer on dark floors; the ledger reflects where people are now.
         assert st.impact.counts["on_dark_floors"] < 40
         # Replay reproduces the executed world exactly: the actions were inputs.

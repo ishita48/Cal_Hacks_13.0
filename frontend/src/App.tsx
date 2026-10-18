@@ -230,6 +230,8 @@ function Legend() {
       {item('rgba(255,214,10,0.6)', 'dark if nothing is done')}
       {item('#30d158', 'step-free route')}
       {item('#ff453a', 'person at risk', true)}
+      {item('#bf5af2', 'left behind', true)}
+      {item('#64d2ff', 'responder')}
     </div>
   )
 }

@@ -86,6 +86,43 @@ export function FloorPlan({ world, level }: Props) {
     return out
   }, [world.moved, spaces, level, residents])
 
+  // Responders on this level (derived by the backend from the approved plan): a diamond where they
+  // are, a dashed line to where they are heading while a step is assigned.
+  const actors = useMemo(() => {
+    const out: { id: string; label: string; status: string; x: number; y: number; hx: number | null; hy: number | null }[] = []
+    let k = 0
+    for (const a of Object.values(world.actors ?? {})) {
+      if (!a.at) continue
+      const here = spaces[a.at]
+      const there = a.heading ? spaces[a.heading] : undefined
+      const shown = there ?? here
+      if (!shown || shown.level !== level) continue
+      const off = (k++ % 3) * 0.9 - 0.9
+      const x = (shown.rect.x0 + shown.rect.x1) / 2 + 1.6 + off
+      const y = (shown.rect.y0 + shown.rect.y1) / 2 + 0.6
+      const onLevel = here && here.level === level && there
+      out.push({
+        id: a.actor,
+        label: a.label,
+        status: a.status,
+        x,
+        y,
+        hx: onLevel ? (here.rect.x0 + here.rect.x1) / 2 : null,
+        hy: onLevel ? (here.rect.y0 + here.rect.y1) / 2 : null,
+      })
+    }
+    return out
+  }, [world.actors, spaces, level])
+
+  // The Maya moment on the plan: someone with a hard need nobody spoke for gets a violet ring.
+  const leftBehind = useMemo(
+    () =>
+      (world.plan.left_behind ?? [])
+        .map((id) => ({ id, space: spaces[residents[id]?.room ?? ''] }))
+        .filter((m) => m.space && m.space.level === level && !world.moved[m.id]),
+    [world.plan.left_behind, world.moved, spaces, residents, level],
+  )
+
   const routes = useMemo(() => {
     const out: { id: string; points: string }[] = []
     for (const [rid, path] of Object.entries(world.impact.routes)) {
@@ -170,6 +207,25 @@ export function FloorPlan({ world, level }: Props) {
         {stranded.map(({ id, space }) => (
           <circle key={`ring-${id}`} className="fp-ring" cx={(space.rect.x0 + space.rect.x1) / 2} cy={(space.rect.y0 + space.rect.y1) / 2} r={1.6} fill="none" stroke="#ff453a" strokeWidth={0.3} />
         ))}
+        {leftBehind.map(({ id, space }) => (
+          <circle key={`left-${id}`} className="fp-ring" cx={(space.rect.x0 + space.rect.x1) / 2} cy={(space.rect.y0 + space.rect.y1) / 2} r={2.2} fill="none" stroke="#bf5af2" strokeWidth={0.35} />
+        ))}
+
+        {actors.map((a) => {
+          const color = a.status === 'moving' ? '#64d2ff' : a.status === 'done' ? '#30d158' : '#8e8e93'
+          return (
+            <g key={`actor-${a.id}`}>
+              {a.hx != null && a.hy != null && (
+                <line x1={a.hx} y1={a.hy} x2={a.x} y2={a.y} stroke={color} strokeWidth={0.18} strokeDasharray="0.5 0.4" opacity={0.7} />
+              )}
+              <rect className={`mark-in ${a.status === 'moving' ? 'haven-pulse' : ''}`} x={a.x - 0.6} y={a.y - 0.6} width={1.2} height={1.2} transform={`rotate(45 ${a.x} ${a.y})`} fill={color} stroke="rgba(0,0,0,0.6)" strokeWidth={0.12}>
+                <title>
+                  {a.label} · {a.status}
+                </title>
+              </rect>
+            </g>
+          )
+        })}
 
         {equipment.map((e) => {
           const st = world.equipment[e.id]?.status ?? 'online'
@@ -239,6 +295,18 @@ export function FloorPlan({ world, level }: Props) {
           .map((m) => (
             <text key={`moved-label-${m.id}`} className="fp-fade-in" x={m.x} y={depth - m.y - 1.2} textAnchor="middle" fontSize={1.3} fill="#30d158" fontWeight={600}>
               {m.name.split(' ')[0]}
+            </text>
+          ))}
+        {leftBehind.map(({ id, space }) => (
+          <text key={`left-label-${id}`} className="fp-fade-in" x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 + 3.2} textAnchor="middle" fontSize={1.1} fill="#bf5af2" fontWeight={600}>
+            left behind
+          </text>
+        ))}
+        {actors
+          .filter((a) => a.status !== 'idle')
+          .map((a) => (
+            <text key={`actor-label-${a.id}`} className="fp-fade-in" x={a.x} y={depth - a.y - 1.1} textAnchor="middle" fontSize={0.95} fill={a.status === 'moving' ? '#64d2ff' : '#30d158'} fontWeight={600}>
+              {a.label.replace(/\s*\(.*\)/, '')}
             </text>
           ))}
       </g>

@@ -84,6 +84,10 @@ export const world: WorldState = {
   approved_plan: null,
   actions: {},
   moved: {},
+  actors: {
+    staff: { actor: 'staff', label: 'Desk staff', at: 'L1-lobby', heading: 'room_412', step_id: 'escort_maya', status: 'moving', since_step: 280 },
+    plumber: { actor: 'plumber', label: 'Plumber', at: null, heading: null, step_id: null, status: 'offsite', since_step: 0 },
+  },
   equipment: { msb_b: { status: 'online', since_step: 0 }, main_valve: { status: 'online', since_step: 0 }, lift_1: { status: 'online', since_step: 0 } },
   power: { live: ['lift_1', 'lift_2'], levels: { L3: true, L4: true }, lifts: { lift_1: true, lift_2: true } },
   impact: { dark_levels: [], lifts_down: [], fridges_down: [], wet_spaces: ['B1-mech'], residents: [], others: [], routes: { maya: ['room_412', 'L4-cor_spine', 'L4-lift_1', 'L1-lift_1', 'L1-lobby', 'outside'] }, counts: { affected: 0 } },

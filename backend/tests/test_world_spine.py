@@ -64,3 +64,17 @@ def test_replay_endpoint_rejects_live_inputs_until_reset():
         assert client.post("/api/sensor", json={"sensor_id": "x", "value": 1.0}).status_code == 409
         client.post("/api/scenario/reset")
         assert client.post("/api/sensor", json={"sensor_id": "x", "value": 1.0}).status_code == 200
+
+
+def test_responders_start_at_home_and_are_in_every_frame():
+    """`state.actors` is a derived view every client draws from: quiet world = everyone idle at home."""
+    eng = WorldEngine(EventStore())
+    actors = eng.state.actors
+    assert actors["ra_4"].at == "room_415" and actors["ra_4"].status == "idle"
+    assert actors["facilities"].at == "L1-facilities" and actors["staff"].at == "L1-lobby"
+    assert actors["plumber"].status == "offsite" and actors["plumber"].at is None
+    frame = eng.snapshot()["state"]
+    assert set(frame["actors"]) == set(actors)
+    # A leak alone moves nobody: responders move only on approved, executed steps.
+    asyncio.run(eng.submit(SensorReading(sensor_id="basement_mech_1", value=0.9)))
+    assert all(a.status in ("idle", "offsite") for a in eng.state.actors.values())

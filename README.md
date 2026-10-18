@@ -45,5 +45,10 @@ and re-record it after planner or physics changes with `cd backend && PYTHONPATH
 - `frontend/` React + Vite + Tailwind + Zustand; `src/state/world.ts` mirrors `/ws`. `vercel.json` for Vercel
   (set `VITE_HAVEN_WS=wss://<railway-app>/ws` at build time; HTTP goes through the rewrite).
 - `blender/` the building built in Blender from the same spec; GLBs in `frontend/public/models/`.
+  `blender/haven_live.py` makes Blender a live client of the same world: open `blackwell.blend`, press N,
+  HAVEN tab, **Connect**. Water, dark floors, equipment, flagged residents, responders, routes and the
+  headline are drawn from `/api/state`; the panel's buttons (leak, Maya's agent, approve, speed, a spoken
+  rule) submit the same input events the dashboard does. Headless still of the live world:
+  `blender-launcher.exe -b blender/blackwell.blend -P blender/haven_live.py -- --snapshot blender/renders/live_check.png --camera CutawayCam --cutaway L4`.
 - `firmware/haven_sensor/` the ESP32 sketch.
 - `CLAUDE.md` the architecture notes and non-negotiables.

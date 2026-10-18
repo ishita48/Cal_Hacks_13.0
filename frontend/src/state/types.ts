@@ -198,6 +198,19 @@ export interface ActionState {
   detail: string
 }
 
+export type ActorStatus = 'idle' | 'moving' | 'done' | 'offsite'
+
+/** A responder with a body (RA, facilities, desk staff, plumber): derived by the backend from the approved plan. */
+export interface ActorState {
+  actor: string
+  label: string
+  at: string | null
+  heading: string | null
+  step_id: string | null
+  status: ActorStatus
+  since_step: number
+}
+
 export interface RuleParse {
   code: string
   summary: string
@@ -248,6 +261,7 @@ export interface WorldState {
   approved_plan: Plan | null
   actions: Record<string, ActionState>
   moved: Record<string, string>
+  actors: Record<string, ActorState>
   equipment: Record<string, EquipmentState>
   power: PowerState
   impact: Impact

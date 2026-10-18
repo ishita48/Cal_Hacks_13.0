@@ -87,6 +87,22 @@ class PowerState(BaseModel):
     lifts: dict[str, bool] = Field(default_factory=dict)
 
 
+class ActorState(BaseModel):
+    """Where a responder with a body (RA, facilities, desk staff, plumber) is and what they are on.
+
+    A derived view: a pure function of the approved plan and the logged action reports, so the
+    3D twin, the floor plan and Blender all draw the same figure in the same room.
+    """
+
+    actor: str                       # "ra_4" | "facilities" | "staff" | "plumber"
+    label: str
+    at: str | None = None            # space id now (None = off site / not yet arrived)
+    heading: str | None = None       # space id they are moving to while a step is assigned
+    step_id: str | None = None       # plan step they are on
+    status: Literal["idle", "moving", "done", "offsite"] = "idle"
+    since_step: int = 0
+
+
 class WorldState(BaseModel):
     run_id: str
     scenario: str
@@ -112,6 +128,7 @@ class WorldState(BaseModel):
     approved_plan: Plan | None = None            # frozen copy being executed; state.plan keeps advising
     actions: dict[str, ActionState] = Field(default_factory=dict)    # step id -> progress
     moved: dict[str, str] = Field(default_factory=dict)              # resident id -> space they are in now
+    actors: dict[str, ActorState] = Field(default_factory=dict)      # responder id -> where they are (derived)
 
     # -- derived views (recomputed by the reducer, never logged) --
     equipment: dict[str, EquipmentState] = Field(default_factory=dict)
@@ -400,6 +417,132 @@ def _rederive(state: WorldState, ctx: WorldContext, happenings: list[Happening],
     if physical or not state.forecast.events and not state.forecast.settled:
         state.forecast = forecast(h, ctx, state.impact, state.step, moved=state.moved)
     state.plan = compute_plan(ctx, state)
+    state.actors = derive_actors(state, ctx)
+
+
+# ---- responders -----------------------------------------------------------------------------
+
+# Responders that have a body in the building. Everyone else in a plan (haven, housing, manager,
+# the checker) is software or off site and is never drawn.
+PHYSICAL_ACTORS = ("facilities", "staff", "plumber")
+
+
+def actor_home(ctx: WorldContext, actor: str) -> tuple[str, str | None]:
+    """(label, home space) for a responder id; home None = off site until a step brings them in."""
+    if actor.startswith("ra_"):
+        ra = ctx.roster.by_id().get(actor)
+        level = actor[3:]
+        name = f" ({ra.name.split()[0]})" if ra else ""
+        return f"RA floor {level}{name}", (ra.room if ra else None)
+    staff = {s.id: s for s in ctx.roster.staff}
+    if actor == "facilities":
+        tech = staff.get("luis")
+        return (f"Facilities ({tech.name.split()[0]})" if tech else "Facilities"), (tech.location if tech else "L1-facilities")
+    if actor == "staff":
+        return "Desk staff", "L1-lobby"
+    if actor == "plumber":
+        return "Plumber", None
+    return actor, None
+
+
+def _step_sites(ctx: WorldContext, state: "WorldState", step: Any) -> tuple[str | None, str | None]:
+    """(where the responder goes to do a step, where they are when it is done)."""
+    room = None
+    if step.people:
+        r = ctx.roster.by_id().get(step.people[0])
+        room = state.moved.get(step.people[0]) or (r.room if r else None)
+    eq_space = ctx.equipment[step.target].space if step.target in ctx.equipment else None
+    if step.kind == "escort":
+        end = _place(ctx, step.target, "escort")
+        return room, ("L1-lobby" if end in (None, "outside") else end)
+    if step.kind == "shelter":
+        return room, room
+    if step.kind == "move_item":
+        src = None
+        if step.people:
+            r = ctx.roster.by_id().get(step.people[0])
+            if r and r.medication_location in ctx.equipment:
+                src = ctx.equipment[r.medication_location].space
+        return src or room, eq_space or src or room
+    if step.kind == "relocate":
+        end = _place(ctx, step.target, "relocate")
+        return room, ("L1-lobby" if end in (None, "outside") else end)
+    if eq_space:
+        return eq_space, eq_space
+    if step.target in ctx.areas:
+        return step.target, step.target
+    return None, None
+
+
+def derive_actors(state: "WorldState", ctx: WorldContext) -> dict[str, ActorState]:
+    plan = state.approved_plan
+    actors: dict[str, ActorState] = {}
+    ids = [f"ra_{lv[1:]}" for lv in ctx.level_order if lv.startswith("L") and f"ra_{lv[1:]}" in ctx.roster.by_id()]
+    ids += list(PHYSICAL_ACTORS)
+    for a in ids:
+        label, home = actor_home(ctx, a)
+        actors[a] = ActorState(actor=a, label=label, at=home, status="idle" if home else "offsite")
+    if plan is None:
+        return actors
+    # Per responder: the latest confirmed step says where they are; the most urgent assigned step
+    # says where they are heading. A notify step has no site and never moves anyone.
+    for a, cur in actors.items():
+        done: list[tuple[int, int, Any, ActionState]] = []
+        open_: list[tuple[float, int, Any, ActionState]] = []
+        for step in plan.steps:
+            act = state.actions.get(step.id)
+            if act is None or a not in [x.strip() for x in step.actor.split(",")]:
+                continue
+            if act.status == "done":
+                done.append((act.step, step.order, step, act))
+            elif act.status == "assigned":
+                open_.append((step.deadline_s if step.deadline_s is not None else step.at_s + 60.0, step.order, step, act))
+        if done:
+            _, _, step, act = max(done, key=lambda d: (d[0], d[1]))
+            _, end = _step_sites(ctx, state, step)
+            if end:
+                cur.at = end
+            cur.status, cur.step_id, cur.since_step = "done", step.id, act.step
+        if open_:
+            _, _, step, act = min(open_, key=lambda o: (o[0], o[1]))
+            go, _ = _step_sites(ctx, state, step)
+            if go:
+                cur.status, cur.heading, cur.step_id, cur.since_step = "moving", go, step.id, act.step
+                if cur.at is None:          # the plumber appears at the door when dispatched
+                    cur.at = go
+    return actors
+    # The latest reported step per responder wins; "assigned" means on the way, "done" means arrived.
+    latest: dict[str, tuple[int, int, Any, ActionState]] = {}
+    for step in plan.steps:
+        act = state.actions.get(step.id)
+        if act is None:
+            continue
+        for a in step.actor.split(","):
+            a = a.strip()
+            if a not in actors:
+                continue
+            key = (act.step, step.order)
+            if a not in latest or key >= latest[a][:2]:
+                latest[a] = (act.step, step.order, step, act)
+    for a, (_, _, step, act) in latest.items():
+        cur = actors[a]
+        site = _step_site(ctx, state, step)
+        if act.status == "assigned":
+            cur.status, cur.heading = "moving", site
+            if cur.at is None:          # the plumber appears at the door when dispatched
+                cur.at = site
+        elif act.status == "done":
+            cur.status, cur.heading = "done", None
+            if step.kind in ("escort", "relocate", "shelter") and step.people:
+                cur.at = _place(ctx, step.target, step.kind) if step.kind != "shelter" else site
+                if cur.at == "outside":
+                    cur.at = "L1-lobby"
+            elif site:
+                cur.at = site
+        else:
+            cur.status, cur.heading = "idle", None
+        cur.step_id, cur.since_step = step.id, act.step
+    return actors
 
 
 def _status(eid: str, h: Hydraulics, ctx: WorldContext, closing: set[str]) -> EquipmentStatus:

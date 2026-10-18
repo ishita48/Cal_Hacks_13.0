@@ -40,6 +40,9 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   - Execution: approving freezes `state.approved_plan`; `WorldEngine.due_actions()` turns its steps into
     input events at their time (`EquipmentCommand` with `step_id`, `ActionEvent` assigned/done). People moved
     by a done step live in `state.moved`, and `assess` judges them where they are. Replay reproduces it all.
+    `state.actors` (derived, `derive_actors`) says where each responder with a body is (RA per floor, facilities,
+    desk staff, plumber): `at`, `heading`, `step_id`, `status` idle/moving/done/offsite, from the approved plan +
+    action reports. The 3D twin, the floor plan and Blender draw responders from it; nobody re-derives it.
   - `haven/integrations/` optional, key-gated sponsors: `cartesia.py` (`POST /api/speak`, CARTESIA_API_KEY),
     `tiger.py` (sensor readings hypertable, TIGER_DATABASE_URL; `GET /api/sensor/{id}/history` falls back to the
     event log). `GET /api/integrations` says what is on. See `backend/.env.example`.
@@ -53,7 +56,10 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   `blender/README.md`, and reads nothing but the world store). 2D plan is the default; the toggle is in the centre panel.
 - `firmware/haven_sensor/haven_sensor.ino` — ESP32 + resistive probe → `POST /api/sensor` with
   `X-Haven-Token`; posts on every wet/dry crossing and a 15 s heartbeat. Calibrate DRY_RAW / WET_RAW from Serial.
-- `blender/` — scripted exterior built from the same building spec (Phase 3).
+- `blender/` — scripted exterior built from the same building spec (Phase 3). `haven_live.py` is the live link:
+  a sidebar panel that polls `/api/state` (stdlib only), draws the frame into a `Live` collection (water sheets,
+  floor/equipment tints via object-linked material overrides, `person_<id>` / `agent_<actor>` figures, routes,
+  labels, HUD) and POSTs inputs back. `snapshot()` does the same once, headless, for a render.
 
 ## Commands
 - Backend: `cd backend && uv run uvicorn haven.api.app:create_app --factory --port 8000 --reload --reload-dir haven`
