@@ -14,8 +14,10 @@ lounge "lantern" at the Dana St x Durant Ave corner, flat roof with parapet. Int
 published photos: wood-look plank floors and navy beds in rooms, grey carpet lounges with blue
 and purple seating, a dark stone lobby with a timber desk.
 
-Materials are procedural (no texture downloads), so the Blender render is fully textured; the glTF
-export keeps base colours only.
+Materials are procedural, so the scene renders fully textured with nothing downloaded. When
+``blender/fetch_textures.py`` has run, scanned CC0 Poly Haven sets (albedo, roughness, normal) are layered
+over the procedural shaders through box-projected UVs, and a partly cloudy sky HDRI lights the scene; those
+image maps also travel into the GLBs. ``--no-textures`` keeps everything procedural.
 
 Run headless (Store install exposes ``blender-launcher.exe``; a zip install exposes ``blender``):
 
@@ -53,6 +55,16 @@ elif "__file__" in globals():
 else:
     ROOT = Path.cwd()
 SPEC_PATH = ROOT / "shared" / "blackwell_hall.json"
+TEX_DIR = ROOT / "blender" / "textures"                 # written by blender/fetch_textures.py (git-ignored)
+TEXTURES_ON = True                                       # --no-textures turns the scanned layer off
+
+
+def _manifest():
+    p = TEX_DIR / "manifest.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if TEXTURES_ON and p.exists() else {}
+    except (OSError, ValueError):
+        return {}
 
 # ---- tunables (metres) ----------------------------------------------------------------------
 
@@ -289,8 +301,27 @@ def _bevel(ob, width=0.015):
         mod.harden_normals = True
 
 
+def _box_uvs(bm):
+    """Box-project every face onto its dominant axis, in metres: image textures tile in world units and the
+    same UVs go out in the GLBs. Faces of one box share seams at the edges, like a real cladding corner."""
+    uv = bm.loops.layers.uv.get("UVMap") or bm.loops.layers.uv.new("UVMap")
+    for f in bm.faces:
+        n = f.normal
+        ax = max(range(3), key=lambda i: abs(n[i]))
+        for lp in f.loops:
+            c = lp.vert.co
+            if ax == 0:
+                lp[uv].uv = (c.y if n.x > 0 else -c.y, c.z)
+            elif ax == 1:
+                lp[uv].uv = (-c.x if n.y > 0 else c.x, c.z)
+            else:
+                lp[uv].uv = (c.x, c.y if n.z > 0 else -c.y)
+
+
 def mesh_object(name, bm, materials, collection, props=None):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bm.normal_update()
+    _box_uvs(bm)
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -372,6 +403,135 @@ def _finish(mat, bsdf, rgb, roughness, metallic=0.0, emission=None):
         bsdf.inputs["Emission Color"].default_value = (*emission, 1.0)
         bsdf.inputs["Emission Strength"].default_value = 2.0
     mat.diffuse_color = (*rgb, 1.0)
+    return mat
+
+
+def _image(path, srgb):
+    img = bpy.data.images.load(str(path), check_existing=True)
+    img.colorspace_settings.name = "sRGB" if srgb else "Non-Color"
+    return img
+
+
+def _pbr_maps(nt, asset, size=None, rot=0.0):
+    """Image texture nodes for a downloaded set, on the box UVs; None when the set is not on disk."""
+    entry = _manifest().get("textures", {}).get(asset)
+    if not entry or "diff" not in entry["files"]:
+        return None
+    sx, sy = size if size else entry["size"]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    mp = nt.nodes.new("ShaderNodeMapping")
+    mp.inputs["Scale"].default_value = (1.0 / sx, 1.0 / sy, 1.0)
+    mp.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rot))
+    nt.links.new(tc.outputs["UV"], mp.inputs["Vector"])
+    out = {}
+    for key, srgb in (("diff", True), ("rough", False), ("nor", False)):
+        rel = entry["files"].get(key)
+        if not rel:
+            continue
+        node = nt.nodes.new("ShaderNodeTexImage")
+        node.image = _image(TEX_DIR / rel, srgb)
+        node.interpolation = "Cubic" if key == "diff" else "Linear"
+        nt.links.new(mp.outputs["Vector"], node.inputs["Vector"])
+        out[key] = node
+    return out
+
+
+def _texture(mat, asset, mode="albedo", amount=0.6, size=None, rot=0.0, tint=None,
+             normal_strength=1.0, rough_mul=1.0, rough_mix=0.7):
+    """Layer a scanned set over a finished procedural material.
+
+    ``albedo``: the scan's colour, modulated by the procedural large-scale variation (which hides the tile
+    repeat) and an optional tint.  ``overlay``: keep the designed colour, add the scan's detail on top.
+    Roughness comes from the scan; the normal map feeds the existing bump chain so fine grain and the
+    procedural relief (panel joints, paver edges) both survive."""
+    if mat is None or not mat.use_nodes:
+        return mat
+    nt = mat.node_tree
+    bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if bsdf is None or any(n.type == "TEX_IMAGE" for n in nt.nodes):
+        return mat
+    maps = _pbr_maps(nt, asset, size, rot)
+    if not maps:
+        return mat
+
+    def current(name):
+        link = next((lk for lk in nt.links if lk.to_node == bsdf and lk.to_socket.name == name), None)
+        return link.from_socket if link else None
+
+    rgb = tuple(mat.diffuse_color)[:3]
+    cur_col = current("Base Color")
+    col = maps["diff"].outputs["Color"]
+    if mode == "albedo":
+        if tint is not None:
+            m = nt.nodes.new("ShaderNodeMix")
+            m.data_type = "RGBA"
+            m.blend_type = "MULTIPLY"
+            m.inputs["Factor"].default_value = 1.0
+            nt.links.new(col, m.inputs[6])
+            m.inputs[7].default_value = (*tint, 1.0)
+            col = m.outputs[2]
+        if cur_col is not None:
+            # procedural colour / designed colour = a large-scale variation around 1, clamped
+            div = nt.nodes.new("ShaderNodeVectorMath")
+            div.operation = "DIVIDE"
+            nt.links.new(cur_col, div.inputs[0])
+            div.inputs[1].default_value = tuple(max(c, 0.02) for c in rgb)
+            lo = nt.nodes.new("ShaderNodeVectorMath")
+            lo.operation = "MAXIMUM"
+            lo.inputs[1].default_value = (0.55, 0.55, 0.55)
+            nt.links.new(div.outputs[0], lo.inputs[0])
+            hi = nt.nodes.new("ShaderNodeVectorMath")
+            hi.operation = "MINIMUM"
+            hi.inputs[1].default_value = (1.45, 1.45, 1.45)
+            nt.links.new(lo.outputs[0], hi.inputs[0])
+            mul = nt.nodes.new("ShaderNodeVectorMath")
+            mul.operation = "MULTIPLY"
+            nt.links.new(col, mul.inputs[0])
+            nt.links.new(hi.outputs[0], mul.inputs[1])
+            col = mul.outputs[0]
+    else:
+        m = nt.nodes.new("ShaderNodeMix")
+        m.data_type = "RGBA"
+        m.blend_type = "OVERLAY"
+        m.inputs["Factor"].default_value = amount
+        if cur_col is not None:
+            nt.links.new(cur_col, m.inputs[6])
+        else:
+            m.inputs[6].default_value = bsdf.inputs["Base Color"].default_value
+        nt.links.new(col, m.inputs[7])
+        col = m.outputs[2]
+    nt.links.new(col, bsdf.inputs["Base Color"])
+
+    if "rough" in maps:
+        r = maps["rough"].outputs["Color"]
+        if rough_mul != 1.0:
+            mm = nt.nodes.new("ShaderNodeMath")
+            mm.operation = "MULTIPLY"
+            mm.inputs[1].default_value = rough_mul
+            nt.links.new(r, mm.inputs[0])
+            r = mm.outputs[0]
+        cur_r = current("Roughness")
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "FLOAT"
+        mix.inputs["Factor"].default_value = rough_mix if mode == "albedo" else rough_mix * 0.7
+        if cur_r is not None:
+            nt.links.new(cur_r, mix.inputs[2])
+        else:
+            mix.inputs[2].default_value = bsdf.inputs["Roughness"].default_value
+        nt.links.new(r, mix.inputs[3])
+        nt.links.new(mix.outputs[0], bsdf.inputs["Roughness"])
+
+    if "nor" in maps and normal_strength > 0:
+        nm = nt.nodes.new("ShaderNodeNormalMap")
+        nm.space = "TANGENT"
+        nm.uv_map = "UVMap"
+        nm.inputs["Strength"].default_value = normal_strength
+        nt.links.new(maps["nor"].outputs["Color"], nm.inputs["Color"])
+        cur_n = current("Normal")
+        if cur_n is not None and cur_n.node.type == "BUMP":
+            nt.links.new(nm.outputs["Normal"], cur_n.node.inputs["Normal"])
+        else:
+            nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
     return mat
 
 
@@ -564,6 +724,77 @@ def mat_tiles(name, rgb, tile=0.3, roughness=0.25):
     return _finish(mat, bsdf, rgb, roughness)
 
 
+def mat_far_facade(name, rgb, bay=3.6, storey=3.2):
+    """Distant city blocks: wall colour with a grid of dark window rectangles, no geometry needed."""
+    mat, bsdf = _new_mat(name)
+    if bsdf is None:
+        return mat
+    nt = mat.node_tree
+    vec, _ = _wall_coords(nt)
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(vec, sep.inputs[0])
+
+    def frac(sock, period):
+        d = nt.nodes.new("ShaderNodeMath")
+        d.operation = "DIVIDE"
+        nt.links.new(sock, d.inputs[0])
+        d.inputs[1].default_value = period
+        f = nt.nodes.new("ShaderNodeMath")
+        f.operation = "FRACT"
+        nt.links.new(d.outputs[0], f.inputs[0])
+        return f.outputs[0]
+
+    def band(sock, lo, hi):
+        a = nt.nodes.new("ShaderNodeMath")
+        a.operation = "GREATER_THAN"
+        nt.links.new(sock, a.inputs[0])
+        a.inputs[1].default_value = lo
+        b = nt.nodes.new("ShaderNodeMath")
+        b.operation = "LESS_THAN"
+        nt.links.new(sock, b.inputs[0])
+        b.inputs[1].default_value = hi
+        m = nt.nodes.new("ShaderNodeMath")
+        m.operation = "MULTIPLY"
+        nt.links.new(a.outputs[0], m.inputs[0])
+        nt.links.new(b.outputs[0], m.inputs[1])
+        return m.outputs[0]
+
+    win = nt.nodes.new("ShaderNodeMath")
+    win.operation = "MULTIPLY"
+    nt.links.new(band(frac(sep.outputs["X"], bay), 0.22, 0.62), win.inputs[0])
+    nt.links.new(band(frac(sep.outputs["Y"], storey), 0.30, 0.80), win.inputs[1])   # wall coords are (x + y, z)
+    # not below 1 m (ground floor plinth) and never on roofs (faces whose normal is vertical)
+    geo = nt.nodes.new("ShaderNodeNewGeometry")
+    nsep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(geo.outputs["Normal"], nsep.inputs[0])
+    absz = nt.nodes.new("ShaderNodeMath")
+    absz.operation = "ABSOLUTE"
+    nt.links.new(nsep.outputs["Z"], absz.inputs[0])
+    wall = nt.nodes.new("ShaderNodeMath")
+    wall.operation = "LESS_THAN"
+    nt.links.new(absz.outputs[0], wall.inputs[0])
+    wall.inputs[1].default_value = 0.5
+    mask = nt.nodes.new("ShaderNodeMath")
+    mask.operation = "MULTIPLY"
+    nt.links.new(win.outputs[0], mask.inputs[0])
+    nt.links.new(wall.outputs[0], mask.inputs[1])
+    n = _noise(nt, vec, 0.15, detail=2.0)
+    tone = _ramp(nt, n.outputs["Fac"], [(0.3, tuple(c * 0.85 for c in rgb)), (0.7, tuple(min(1.0, c * 1.1) for c in rgb))])
+    mix = nt.nodes.new("ShaderNodeMix")
+    mix.data_type = "RGBA"
+    nt.links.new(mask.outputs[0], mix.inputs["Factor"])
+    nt.links.new(tone.outputs["Color"], mix.inputs[6])
+    mix.inputs[7].default_value = (0.05, 0.07, 0.09, 1.0)
+    nt.links.new(mix.outputs[2], bsdf.inputs["Base Color"])
+    rough = nt.nodes.new("ShaderNodeMix")
+    rough.data_type = "FLOAT"
+    nt.links.new(mask.outputs[0], rough.inputs["Factor"])
+    rough.inputs[2].default_value = 0.9
+    rough.inputs[3].default_value = 0.15
+    nt.links.new(rough.outputs[0], bsdf.inputs["Roughness"])
+    return _finish(mat, bsdf, rgb, 0.9)
+
+
 def mat_carpet(name, rgb):
     mat, bsdf = _new_mat(name)
     if bsdf is None:
@@ -579,10 +810,62 @@ def mat_carpet(name, rgb):
     return _finish(mat, bsdf, rgb, 0.95)
 
 
+# Scanned layer per material key (Poly Haven asset ids; see fetch_textures.py). Sizes in metres.
+SCANS = {
+    "panel_white": dict(asset="concrete_wall_008", mode="overlay", amount=0.35, normal_strength=0.25, size=(2.7, 2.7)),
+    "ochre": dict(asset="concrete_wall_008", mode="overlay", amount=0.30, normal_strength=0.25, size=(2.7, 2.7)),
+    "timber": dict(asset="wood_floor_deck", rot=90.0, tint=(1.0, 0.92, 0.82)),
+    "soffit": dict(asset="wood_planks", tint=(1.05, 0.95, 0.85)),
+    "deck": dict(asset="wood_floor_deck"),
+    "concrete": dict(asset="concrete_wall_008"),
+    "roof": dict(asset="concrete_floor_worn_001", mode="overlay", amount=0.5, normal_strength=0.5),
+    "lawn": dict(asset="leafy_grass", mode="overlay", amount=0.65),   # the scan is dry-leafy; keep the green
+    "gravel": dict(asset="gravel_floor_02"),
+    "soil": dict(asset="brown_mud"),
+    "paving": dict(asset="concrete_tiles_02"),
+    "asphalt": dict(asset="asphalt_01"),
+    "bike_lane": dict(asset="asphalt_01", mode="overlay", amount=0.6),
+    "sidewalk": dict(asset="concrete_pavement"),
+    "ground": dict(asset="asphalt_01", mode="overlay", amount=0.6),
+    "neighbour": dict(asset="grey_plaster_02", mode="overlay", amount=0.5, size=(2.0, 2.0)),
+    "trunk": dict(asset="bark_brown_02", size=(0.9, 0.9)),
+    "paint": dict(asset="plastered_wall_05", mode="overlay", amount=0.3, normal_strength=0.3),
+    "plank": dict(asset="laminate_floor_02"),
+    "carpet": dict(asset="dirty_carpet", size=(1.2, 1.2), tint=(1.3, 1.3, 1.35)),
+    "rug": dict(asset="dirty_carpet", size=(1.2, 1.2), tint=(1.1, 1.0, 1.1)),
+    "tile": dict(asset="interior_tiles", tint=(1.1, 1.1, 1.08)),
+    "stone": dict(asset="concrete_floor_worn_001", mode="overlay", amount=0.6, normal_strength=0.4),
+    "rubber": dict(asset="rubber_tiles"),
+    "desk_wood": dict(asset="wood_planks", size=(1.0, 1.0)),
+    "slat": dict(asset="wood_planks", size=(1.0, 1.0)),
+    "stucco_cream": dict(asset="grey_plaster_02", mode="overlay", amount=0.5, size=(2.0, 2.0)),
+    "stucco_sage": dict(asset="grey_plaster_02", mode="overlay", amount=0.5, size=(2.0, 2.0)),
+    "stucco_terracotta": dict(asset="grey_plaster_02", mode="overlay", amount=0.5, size=(2.0, 2.0)),
+    "stucco_grey": dict(asset="grey_plaster_02", mode="overlay", amount=0.5, size=(2.0, 2.0)),
+    "brick": dict(asset="red_brick_03"),
+    "roof_tile": dict(asset="roof_tiles_14"),
+}
+
+
 def make_materials():
+    mats = _base_materials()
+    for key, mat in mats.items():
+        if key.startswith("car_") and mat.use_nodes:     # car paint: clear coat over the colour
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+            if bsdf is not None:
+                for name, val in (("Coat Weight", 1.0), ("Coat Roughness", 0.03)):
+                    if name in bsdf.inputs:
+                        bsdf.inputs[name].default_value = val
+    for key, spec in SCANS.items():
+        if key in mats:
+            _texture(mats[key], **spec)
+    return mats
+
+
+def _base_materials():
     return {
         # exterior
-        "white": mat_panels("panel white", (0.69, 0.69, 0.60), roughness=0.78),
+        "panel_white": mat_panels("panel white", (0.76, 0.76, 0.68), roughness=0.78),
         "ochre": mat_panels("panel ochre", (0.665, 0.376, 0.028), panel_w=1.2, row_h=1.25, roughness=0.75),
         "glass": mat_glass("glass"),
         "frosted": mat_plain("glass frosted", (0.62, 0.72, 0.76), roughness=0.3),
@@ -599,7 +882,7 @@ def make_materials():
         "paving": mat_ground("paving", (0.70, 0.68, 0.64), scale=2.0, roughness=0.9, pavers=0.6),
         "asphalt": mat_ground("asphalt", (0.11, 0.11, 0.12), scale=1.5, roughness=0.95),
         "sidewalk": mat_ground("sidewalk", (0.60, 0.59, 0.56), scale=2.0, roughness=0.9, pavers=1.5),
-        "ground": mat_ground("ground", (0.30, 0.31, 0.28), scale=0.3, roughness=1.0),
+        "ground": mat_ground("ground", (0.17, 0.17, 0.175), scale=0.3, roughness=0.95),
         "neighbour": mat_panels("neighbour", (0.42, 0.40, 0.38), panel_w=3.0, row_h=3.0, roughness=0.9),
         "trunk": mat_wood("trunk", (0.18, 0.12, 0.07), (0.34, 0.25, 0.15), board_w=0.05),
         "canopy": mat_plain("canopy", (0.22, 0.42, 0.18), roughness=0.9, grain=0.35),
@@ -643,6 +926,26 @@ def make_materials():
         "awning_green": mat_plain("awning green", (0.08, 0.30, 0.14), roughness=0.9, grain=0.1),
         "awning_blue": mat_plain("awning blue", (0.08, 0.16, 0.40), roughness=0.9, grain=0.1),
         "bike_lane": mat_ground("bike lane", (0.10, 0.42, 0.22), scale=1.5, roughness=0.95),
+        "far_cream": mat_far_facade("far cream", (0.66, 0.60, 0.47)),
+        "far_white": mat_far_facade("far white", (0.68, 0.68, 0.64)),
+        "far_grey": mat_far_facade("far grey", (0.42, 0.42, 0.40)),
+        "far_brick": mat_far_facade("far brick", (0.40, 0.21, 0.15)),
+        "far_sage": mat_far_facade("far sage", (0.42, 0.48, 0.37)),
+        "far_tan": mat_far_facade("far tan", (0.54, 0.44, 0.32)),
+        # people
+        "skin_a": mat_plain("skin light", (0.80, 0.60, 0.48), roughness=0.55, grain=0.05),
+        "skin_b": mat_plain("skin medium", (0.60, 0.42, 0.30), roughness=0.55, grain=0.05),
+        "skin_c": mat_plain("skin dark", (0.36, 0.24, 0.17), roughness=0.55, grain=0.05),
+        "hair": mat_plain("hair", (0.08, 0.06, 0.05), roughness=0.7),
+        "jeans": mat_plain("jeans", (0.18, 0.24, 0.38), roughness=0.9, grain=0.15),
+        "slacks": mat_plain("slacks", (0.20, 0.20, 0.22), roughness=0.9, grain=0.1),
+        "shoe": mat_plain("shoe", (0.10, 0.10, 0.10), roughness=0.5),
+        "shirt_white": mat_plain("shirt white", (0.85, 0.85, 0.85), roughness=0.9, grain=0.1),
+        "shirt_navy": mat_plain("shirt navy", (0.10, 0.14, 0.32), roughness=0.9, grain=0.1),
+        "shirt_red": mat_plain("shirt red", (0.60, 0.12, 0.10), roughness=0.9, grain=0.1),
+        "shirt_green": mat_plain("shirt green", (0.15, 0.40, 0.22), roughness=0.9, grain=0.1),
+        "shirt_yellow": mat_plain("shirt yellow", (0.85, 0.70, 0.20), roughness=0.9, grain=0.1),
+        "shirt_grey": mat_plain("shirt grey", (0.50, 0.50, 0.52), roughness=0.9, grain=0.1),
         "car_white": mat_plain("car white", (0.85, 0.85, 0.84), roughness=0.2, metallic=0.1),
         "car_silver": mat_plain("car silver", (0.55, 0.56, 0.58), roughness=0.25, metallic=0.8),
         "car_black": mat_plain("car black", (0.03, 0.03, 0.035), roughness=0.2, metallic=0.3),
@@ -651,12 +954,141 @@ def make_materials():
     }
 
 
+# ---- photoscanned props (Poly Haven models, fetched by fetch_textures.py) --------------------
+
+MODEL_LOD = {"island_tree_02": 0.2, "tree_small_02": 0.12}     # decimate ratio for the million-triangle scans
+MODEL_CENTRE = {"fire_hydrant", "shrub_02", "shrub_04", "covered_car", "modular_street_seating"}
+
+
+class PropLibrary:
+    """Each downloaded model is imported once (decimated and cached as <asset>_lod.blend beside its glTF) into
+    an excluded `Library` collection; placements are collection instances, so thirty trees share one mesh."""
+
+    def __init__(self):
+        self.cols, self.bounds, self.root = {}, {}, None
+
+    def get(self, asset):
+        if asset in self.cols:
+            return self.cols[asset]
+        entry = _manifest().get("models", {}).get(asset)
+        path = TEX_DIR / entry["gltf"] if entry else None
+        if not path or not path.exists():
+            self.cols[asset] = None
+            return None
+        try:
+            objs = self._load(asset, path)
+        except Exception as exc:
+            print(f"prop {asset} failed to load: {exc}")
+            self.cols[asset] = None
+            return None
+        if self.root is None:
+            self.root = bpy.data.collections.new("Library")
+            bpy.context.scene.collection.children.link(self.root)
+        col = bpy.data.collections.new(f"lib_{asset}")
+        self.root.children.link(col)
+        lo = Vector((1e9, 1e9, 1e9))
+        hi = Vector((-1e9, -1e9, -1e9))
+        bpy.context.view_layer.update()      # appended objects have no world matrix until evaluated
+        for ob in objs:
+            for c in list(ob.users_collection):
+                c.objects.unlink(ob)
+            col.objects.link(ob)
+            if ob.type == "MESH":
+                for corner in ob.bound_box:
+                    w = ob.matrix_world @ Vector(corner)
+                    lo = Vector(map(min, lo, w))
+                    hi = Vector(map(max, hi, w))
+        if asset in MODEL_CENTRE:
+            col.instance_offset = ((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, lo.z)
+        try:
+            bpy.context.view_layer.layer_collection.children["Library"].exclude = True
+        except KeyError:
+            pass
+        self.cols[asset], self.bounds[asset] = col, (lo, hi)
+        print(f"prop {asset}: {len(objs)} objects, {hi.z - lo.z:.2f} m tall")
+        return col
+
+    def height(self, asset):
+        lo, hi = self.bounds[asset]
+        return hi.z - lo.z
+
+    def _load(self, asset, path):
+        cache = path.with_name(f"{asset}_lod.blend")
+        if cache.exists():
+            with bpy.data.libraries.load(str(cache), link=False) as (src, dst):
+                dst.objects = list(src.objects)
+            objs = [o for o in dst.objects if o is not None]
+            for o in objs:
+                bpy.context.scene.collection.objects.link(o)
+            return objs
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=str(path))
+        fresh = [o for o in bpy.data.objects if o not in before]
+        objs = [o for o in fresh if "_aged" not in o.name]        # the hydrant ships a fresh and an aged copy
+        for o in fresh:
+            if o not in objs:
+                bpy.data.objects.remove(o, do_unlink=True)
+        ratio = MODEL_LOD.get(asset)
+        if ratio:
+            for ob in objs:
+                if ob.type != "MESH":
+                    continue
+                mod = ob.modifiers.new("lod", "DECIMATE")
+                mod.ratio = ratio
+                mod.use_collapse_triangulate = True
+            dg = bpy.context.evaluated_depsgraph_get()
+            for ob in objs:
+                if ob.type != "MESH":
+                    continue
+                me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg), preserve_all_data_layers=True, depsgraph=dg)
+                old = ob.data
+                ob.modifiers.clear()
+                ob.data = me
+                me.name = old.name
+                bpy.data.meshes.remove(old)
+        for ob in objs:
+            if ob.type != "MESH":
+                continue
+            for mat in ob.data.materials:
+                if mat is None:
+                    continue
+                try:
+                    mat.surface_render_method = "DITHERED"   # sorted blending breaks on leaf cards in EEVEE
+                except AttributeError:
+                    pass
+                mat.use_backface_culling = False
+        try:
+            bpy.data.libraries.write(str(cache), set(objs), path_remap="ABSOLUTE")
+        except Exception as exc:
+            print(f"prop cache for {asset} not written: {exc}")
+        return objs
+
+    def place(self, asset, x, y, z, rot=0.0, scale=1.0, name="prop", collection=None, props=None):
+        col = self.get(asset)
+        if col is None:
+            return None
+        ob = bpy.data.objects.new(name, None)
+        ob.instance_type = "COLLECTION"
+        ob.instance_collection = col
+        ob.location = (x, y, z)
+        ob.rotation_euler = (0.0, 0.0, rot)
+        ob.scale = (scale, scale, scale)
+        ob.empty_display_size = 0.2
+        (collection or bpy.context.scene.collection).objects.link(ob)
+        for k, v in (props or {}).items():
+            ob[k] = v
+        return ob
+
+
 # ---- the build ------------------------------------------------------------------------------
 
 FURN_MATS = ["laminate", "navy", "dark", "purple", "desk_wood", "steel", "red", "frosted", "concrete",
              "blue", "lime", "paint", "tile", "white", "cork", "rug", "lightpanel", "amber", "slat", "mirror",
              "felt", "canopy", "led", "pipe_blue"]
 FM = {k: i for i, k in enumerate(FURN_MATS)}
+PEOPLE_MATS = ["skin_a", "skin_b", "skin_c", "hair", "jeans", "slacks", "shoe",
+               "shirt_white", "shirt_navy", "shirt_red", "shirt_green", "shirt_yellow", "shirt_grey"]
+PM = {k: i for i, k in enumerate(PEOPLE_MATS)}
 
 
 class Builder:
@@ -682,6 +1114,8 @@ class Builder:
         self.col_interior = self._collection("Interior", parent=self.col_building)
         self.col_plant = self._collection("Plant", parent=self.col_building)
         self.col_site = self._collection("Site")
+        self.col_props = self._collection("Props")             # photoscanned instances; never exported
+        self.props = PropLibrary()
         self.col_cutters = self._collection("Cutters")   # boolean cutters; hidden, never exported
         self.massing = {}
         self.cutters = {}          # level id -> [(axis, fixed, sign, a0, a1, z0, z1)]
@@ -721,7 +1155,7 @@ class Builder:
             ring = region.minus(region.eroded(EXT_WALL))
             bm = bmesh.new()
             add_prism(bm, ring, z0 + SLAB, z1, mi=0)
-            skin = m["timber"] if lv["index"] == 1 else (m["white"] if lv["index"] > 1 else m["concrete"])
+            skin = m["timber"] if lv["index"] == 1 else (m["panel_white"] if lv["index"] > 1 else m["concrete"])
             mesh_object(f"walls_ext_{lv['id']}", bm, [skin], self.col_shell, self._props(lv))
             if lv["index"] == 1:
                 # Timber soffit band where the white upper floors meet the street level.
@@ -758,7 +1192,7 @@ class Builder:
         parapet = top.minus(top.eroded(PARAPET_T))
         bm = bmesh.new()
         add_prism(bm, parapet, self.roof_z, self.roof_z + PARAPET_H, mi=0)
-        _bevel(mesh_object("parapet", bm, [m["white"]], self.col_shell, roofp))
+        _bevel(mesh_object("parapet", bm, [m["panel_white"]], self.col_shell, roofp))
         lifts = [s for s in self.spaces_by_level[self.top_level["id"]] if s["kind"] == "lift"]
         if lifts:
             x0 = min(R.of(s["rect"]).x0 for s in lifts) - 0.8
@@ -810,19 +1244,21 @@ class Builder:
         mesh_object("podium_lawn", bm, [m["lawn"]], self.col_shell, p)
         bm = bmesh.new()
         soil = bmesh.new()
-        for (x, y) in ((b.x0 + 3.5, b.y1 - 4.0), (b.x1 - 6.5, b.y1 - 4.0), (b.cx - 1.5, b.y0 + 7.5)):
+        planters = ((b.x0 + 3.5, b.y1 - 4.0), (b.x1 - 6.5, b.y1 - 4.0), (b.cx - 1.5, b.y0 + 7.5))
+        for (x, y) in planters:
             add_box(bm, x, x + 3.0, y, y + 2.0, z + 0.06, z + 0.75, 0)
             add_box(soil, x + 0.1, x + 2.9, y + 0.1, y + 1.9, z + 0.6, z + 0.72, 0)
+        for i, (x, y) in enumerate(planters):
+            self.props.place("shrub_02", x + 1.5, y + 1.0, z + 0.55, scale=0.4, name=f"podium_shrubs_{i}",
+                             collection=self.col_props, props=p)
         mesh_object("podium_planters", bm, [m["concrete"]], self.col_shell, p)
         mesh_object("podium_planter_soil", soil, [m["soil"]], self.col_shell, p)
         rail = garden.minus(garden.eroded(0.12))
         bm = bmesh.new()
         add_prism(bm, rail, z, z + 1.1, mi=0)
         mesh_object("podium_rail", bm, [m["frosted"]], self.col_shell, p)
-        bm = bmesh.new()
-        for (x, y) in ((b.x0 + 5, b.y1 - 3), (b.x1 - 5, b.y1 - 3), (b.x0 + 12, b.y0 + 8.5)):
-            self._tree(bm, x, y, z + 0.18, height=4.5, radius=2.0)
-        mesh_object("podium_trees", bm, [m["trunk"], m["canopy"]], self.col_shell, p)
+        self.trees([(x, y, z + 0.18, 4.5, 2.0) for (x, y) in ((b.x0 + 5, b.y1 - 3), (b.x1 - 5, b.y1 - 3), (b.x0 + 12, b.y0 + 8.5))],
+                   self.col_shell, "podium_trees", p)
 
     # -- facade -------------------------------------------------------------------------
 
@@ -1044,7 +1480,8 @@ class Builder:
                 self.furnish(bm, s, lv, region, z_fin + 0.02, z_top)
             self.doors_and_signs(bm, lv, z_fin + 0.02)
             if bm.faces:
-                mesh_object(f"furniture_{lv['id']}", bm, [m[k] for k in FURN_MATS], self.col_interior, self._props(lv))
+                furn = mesh_object(f"furniture_{lv['id']}", bm, [m[k] for k in FURN_MATS], self.col_interior, self._props(lv))
+                _bevel(furn, 0.02)       # mattresses, desks and chairs stop reading as razor-edged boxes
             else:
                 bm.free()
         self.build_courtyards()
@@ -1801,15 +2238,16 @@ class Builder:
                                  (r.cx - 2.5, r.cy - 1.1, 5.0, 2.2)):
                 add_box(bm, x, x + w, y, y + h, z, z + 0.6, 0)
                 add_box(soil, x + 0.08, x + w - 0.08, y + 0.08, y + h - 0.08, z + 0.5, z + 0.58, 0)
-                for k in range(4):
-                    self._tree(plants, x + 0.7 + k * (w - 1.4) / 3, y + h / 2, z + 0.58, height=1.6, radius=0.55)
+                if not self.props.place("shrub_02", x + w / 2, y + h / 2, z + 0.4, scale=(w - 0.8) / 6.6,
+                                        name=f"court_shrubs_{s['id']}_{int(x)}_{int(y)}", collection=self.col_props,
+                                        props=self._props(lv)):
+                    for k in range(4):
+                        self._tree(plants, x + 0.7 + k * (w - 1.4) / 3, y + h / 2, z + 0.58, height=1.6, radius=0.55)
             mesh_object(f"court_planters_{s['id']}", bm, [m["concrete"]], self.col_interior, self._props(lv))
             mesh_object(f"court_soil_{s['id']}", soil, [m["soil"]], self.col_interior, self._props(lv))
             mesh_object(f"court_plants_{s['id']}", plants, [m["trunk"], m["canopy"]], self.col_interior, self._props(lv))
-            bm = bmesh.new()
-            self._tree(bm, r.x0 + 4.0, r.cy, z + 0.02, height=6.5, radius=2.4)
-            self._tree(bm, r.x1 - 4.0, r.cy, z + 0.02, height=6.0, radius=2.2)
-            mesh_object(f"court_trees_{s['id']}", bm, [m["trunk"], m["canopy"]], self.col_interior, self._props(lv))
+            self.trees([(r.x0 + 4.0, r.cy, z + 0.02, 6.5, 2.4, 0.0), (r.x1 - 4.0, r.cy, z + 0.02, 6.0, 2.2, math.pi)],
+                       self.col_interior, f"court_trees_{s['id']}", self._props(lv))
 
     def build_plant(self):
         """Every equipment item in the spec as its own object, so state can light it up."""
@@ -1877,6 +2315,177 @@ class Builder:
 
     # -- site ---------------------------------------------------------------------------
 
+    def _person(self, bm, x, y, z, rot, pose, rnd):
+        """A mannequin about 1.75 m tall from spheres and bars, facing `rot`; pose "stand" or "walk".
+
+        Built in its own bmesh (so every vertex is the figure's), posed, then appended to `bm`."""
+        pb = bmesh.new()
+        skin = PM[rnd.choice(("skin_a", "skin_b", "skin_c"))]
+        shirt = PM[rnd.choice(("shirt_white", "shirt_navy", "shirt_red", "shirt_green", "shirt_yellow", "shirt_grey"))]
+        pants = PM[rnd.choice(("jeans", "slacks"))]
+        sc = rnd.uniform(0.92, 1.06)
+        walk = pose == "walk"
+        swing = rnd.uniform(0.6, 1.0) if walk else 0.0
+
+        def paint(nf, mi):
+            pb.faces.ensure_lookup_table()
+            for f in pb.faces[nf:]:
+                f.material_index = mi
+
+        def ball(p, r, mi, sz=1.0):
+            nf = len(pb.faces)
+            res = bmesh.ops.create_icosphere(pb, subdivisions=2, radius=r)
+            for v in res["verts"]:
+                v.co = Vector(p) + Vector((v.co.x, v.co.y, v.co.z * sz))
+            paint(nf, mi)
+
+        def tube(p0, p1, r0, r1, mi, flat=1.0):
+            a, b = Vector(p0), Vector(p1)
+            d = b - a
+            nf = len(pb.faces)
+            res = bmesh.ops.create_cone(pb, cap_ends=True, segments=10, radius1=r0, radius2=r1, depth=d.length)
+            m = d.normalized().to_track_quat("Z", "Y").to_matrix()
+            mid = (a + b) / 2
+            for v in res["verts"]:
+                v.co = mid + m @ Vector((v.co.x * flat, v.co.y, v.co.z))
+            paint(nf, mi)
+
+        # local frame: +x forward, +y left, +z up
+        tube((0, 0, 0.92), (0, 0, 1.45), 0.15, 0.19, shirt, flat=0.62)        # torso
+        tube((0, 0, 0.80), (0, 0, 0.93), 0.15, 0.16, pants, flat=0.68)        # hips
+        tube((0, 0, 1.43), (0, 0, 1.56), 0.045, 0.045, skin)                   # neck
+        ball((0, 0, 1.65), 0.105, skin)                                        # head
+        ball((0, 0, 1.69), 0.108, PM["hair"], sz=0.72)                         # hair cap
+        for side in (1, -1):
+            fwd = swing * 0.17 * side                                           # legs scissor, arms counter-swing
+            hip = (0, side * 0.09, 0.84)
+            knee = (fwd, side * 0.09, 0.46)
+            ankle = (fwd * 1.5, side * 0.09, 0.06)
+            tube(hip, knee, 0.075, 0.06, pants)
+            ball(knee, 0.06, pants)
+            tube(knee, ankle, 0.06, 0.05, pants)
+            tube((ankle[0] - 0.06, ankle[1], 0.04), (ankle[0] + 0.14, ankle[1], 0.04), 0.045, 0.04, PM["shoe"])
+            sh = (0, side * 0.23, 1.42)
+            elbow = (-fwd * 0.8, side * 0.25, 1.15)
+            hand = (-fwd * 1.2 + 0.04, side * 0.25, 0.90)
+            tube(sh, elbow, 0.05, 0.045, shirt)
+            ball(elbow, 0.045, shirt)
+            tube(elbow, hand, 0.045, 0.04, skin)
+            ball(hand, 0.045, skin)
+        ball((0, 0.23, 1.42), 0.055, shirt)
+        ball((0, -0.23, 1.42), 0.055, shirt)
+        c, sn = math.cos(rot), math.sin(rot)
+        for v in pb.verts:
+            lx, ly, lz = v.co.x * sc, v.co.y * sc, v.co.z * sc
+            v.co = Vector((x + c * lx - sn * ly, y + sn * lx + c * ly, z + lz))
+        for f in pb.faces:
+            f.smooth = True
+        tmp = bpy.data.meshes.new("tmp_person")
+        pb.to_mesh(tmp)
+        pb.free()
+        bm.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
+
+    def build_people(self):
+        """Mannequins on the sidewalks, at the entrance and bus stop, in the courtyards, lobby, lounges,
+        corridors and a share of the rooms. Static dressing only: the live link draws the real residents."""
+        import random
+        rnd = random.Random(23)
+        m = self.mats
+        mats = [m[k] for k in PEOPLE_MATS]
+        inside = lambda r, x, y: r.x0 + 0.6 <= x <= r.x1 - 0.6 and r.y0 + 0.6 <= y <= r.y1 - 0.6
+        if self.with_site:
+            b = R(min(r.x0 for r in self.footprint), min(r.y0 for r in self.footprint),
+                  max(r.x1 for r in self.footprint), max(r.y1 for r in self.footprint))
+            bm = bmesh.new()
+            for _ in range(9):     # Dana St sidewalk
+                self._person(bm, rnd.uniform(b.x0 - 3.4, b.x0 - 0.9), rnd.uniform(b.y0 - 3, b.y1 + 3), 0.0,
+                             rnd.choice((math.pi / 2, -math.pi / 2)) + rnd.uniform(-0.3, 0.3), "walk", rnd)
+            for _ in range(8):     # Durant Ave sidewalk
+                self._person(bm, rnd.uniform(b.x0 - 3, b.x1 + 3), rnd.uniform(b.y0 - 3.4, b.y0 - 0.9), 0.0,
+                             rnd.choice((0.0, math.pi)) + rnd.uniform(-0.3, 0.3), "walk", rnd)
+            for _ in range(4):     # Bancroft side
+                self._person(bm, rnd.uniform(b.x0 - 3, b.x1 + 3), rnd.uniform(b.y1 + 0.9, b.y1 + 3.4), 0.0,
+                             rnd.choice((0.0, math.pi)) + rnd.uniform(-0.3, 0.3), "walk", rnd)
+            for _ in range(5):     # far sidewalks across the streets
+                if rnd.random() < 0.5:
+                    self._person(bm, rnd.uniform(b.x0 - SITE_PAD + 0.9, b.x0 - SITE_PAD + 3.2), rnd.uniform(b.y0 - 10, b.y1 + 10),
+                                 0.0, rnd.choice((math.pi / 2, -math.pi / 2)), "walk", rnd)
+                else:
+                    self._person(bm, rnd.uniform(b.x0 - 10, b.x1 + 10), rnd.uniform(b.y0 - SITE_PAD + 0.9, b.y0 - SITE_PAD + 3.2),
+                                 0.0, rnd.choice((0.0, math.pi)), "walk", rnd)
+            # a pair talking by the main entrance, two waiting at the bus stop
+            self._person(bm, b.x0 + 5.6, b.y0 - 1.7, 0.0, 0.0, "stand", rnd)
+            self._person(bm, b.x0 + 6.6, b.y0 - 1.9, 0.0, math.pi, "stand", rnd)
+            self._person(bm, b.x0 + 12.6, b.y0 - 2.2, 0.0, -math.pi / 2, "stand", rnd)
+            self._person(bm, b.x0 + 14.2, b.y0 - 1.9, 0.0, -math.pi / 2 - 0.4, "stand", rnd)
+            mesh_object("site_people", bm, mats, self.col_props)
+        if not self.with_interior:
+            return
+        for lv in self.ordered:
+            z = lv["elevation"] + SLAB + 0.02
+            bm = bmesh.new()
+            for sp in self.spaces_by_level.get(lv["id"], []):
+                r = R.of(sp["rect"])
+                kind = sp["kind"]
+                if sp["outdoor"]:
+                    if kind == "courtyard":
+                        for (dx, dy) in ((-4.5, 2.6), (4.2, -3.1), (-1.2, 3.6), (3.6, 3.2)):
+                            if inside(r, r.cx + dx, r.cy + dy):
+                                self._person(bm, r.cx + dx, r.cy + dy, z, rnd.uniform(0, 2 * math.pi), rnd.choice(("stand", "walk")), rnd)
+                    continue
+                if kind == "lobby":
+                    self._person(bm, r.cx - 0.6, r.cy + 1.0, z, 0.3, "stand", rnd)
+                    self._person(bm, r.cx + 0.5, r.cy + 1.1, z, math.pi - 0.3, "stand", rnd)
+                    self._person(bm, r.cx - 3.0, r.cy - 3.0, z, math.pi / 2, "walk", rnd)
+                    self._person(bm, r.cx + 3.5, r.cy - 1.0, z, -math.pi / 2, "walk", rnd)
+                elif kind in ("lounge", "study", "kitchen", "amenity") and r.w > 3 and r.h > 3:
+                    n = 2 if kind == "lounge" else 1
+                    for k in range(n):
+                        self._person(bm, r.cx + rnd.uniform(-0.8, 0.8), r.cy + rnd.uniform(-0.8, 0.8), z,
+                                     rnd.uniform(0, 2 * math.pi), "stand", rnd)
+                elif kind == "corridor":
+                    length = max(r.w, r.h)
+                    for k in range(int(length // 18)):
+                        t = (k + 0.5) / max(1, int(length // 18))
+                        if r.w > r.h:
+                            self._person(bm, r.x0 + t * r.w, r.cy, z, rnd.choice((0.0, math.pi)), "walk", rnd)
+                        else:
+                            self._person(bm, r.cx, r.y0 + t * r.h, z, rnd.choice((math.pi / 2, -math.pi / 2)), "walk", rnd)
+                elif kind == "room" and rnd.random() < 0.22:
+                    self._person(bm, r.cx, r.cy, z, rnd.uniform(0, 2 * math.pi), "stand", rnd)
+            if bm.faces:
+                mesh_object(f"people_{lv['id']}", bm, mats, self.col_props, self._props(lv))
+            else:
+                bm.free()
+
+    def trees(self, items, collection, name, props=None):
+        """Trees at (x, y, z, height, radius): photoscanned instances when the models are downloaded (a small
+        upright species under 5 m, a broad one above), otherwise the procedural clumps into `collection`."""
+        import random
+        rnd = random.Random(sum(map(ord, name)))
+        placed = 0
+        for i, item in enumerate(items):
+            x, y, z, h, r = item[:5]
+            away = item[5] if len(item) > 5 else None
+            # both scans spread furthest along local -y; turn that side towards `away` (radians) when given
+            rot = (away + math.pi / 2 + rnd.uniform(-0.3, 0.3)) if away is not None else rnd.uniform(0, 2 * math.pi)
+            asset = "tree_small_02" if h <= 5.0 else "island_tree_02"
+            if self.props.get(asset) is None:
+                asset = "island_tree_02" if asset == "tree_small_02" else "tree_small_02"
+            if self.props.get(asset) is None:
+                break
+            scale = min(h / self.props.height(asset), 3.2) * rnd.uniform(0.92, 1.08)
+            ob = self.props.place(asset, x, y, z, rot=rot, scale=scale,
+                                  name=f"{name}_{i}", collection=self.col_props, props=props)
+            placed += ob is not None
+        if placed:
+            return
+        bm = bmesh.new()
+        for item in items:
+            self._tree(bm, *item[:5])
+        mesh_object(name, bm, [self.mats["trunk"], self.mats["canopy"]], collection, props)
+
     def _tree(self, bm, x, y, z, height, radius):
         """A street tree: tapered trunk, a few leaning branches, a canopy of jittered leaf clumps."""
         import random
@@ -1932,7 +2541,7 @@ class Builder:
         add_box(bm, b.x0 - SITE_PAD, b.x1 + SITE_PAD, b.y0 - SITE_PAD, b.y1 + SITE_PAD, z - 0.6, z - 0.2, 0)
         mesh_object("site_streets", bm, [m["asphalt"]], self.col_site)
         bm = bmesh.new()
-        add_box(bm, b.x0 - 6000, b.x1 + 6000, b.y0 - 6000, b.y1 + 6000, z - 1.0, z - 0.62, 0)
+        add_box(bm, b.x0 - 6000, b.x1 + 6000, b.y0 - 6000, b.y1 + 6000, z - 1.0, z - 0.21, 0)
         mesh_object("site_ground", bm, [m["ground"]], self.col_site)
         walk = 4.0
         bm = bmesh.new()
@@ -1953,19 +2562,87 @@ class Builder:
             add_box(bm, b.x0 - SITE_PAD + k, b.x0 - SITE_PAD + k + 3, b.y0 - mid - 0.1, b.y0 - mid + 0.1, z - 0.199, z - 0.19, 0)
         mesh_object("site_markings", bm, [m["laminate"]], self.col_site)
         self.build_neighbourhood(b, z)
-        bm = bmesh.new()
-        for y in range(8, int(b.y1) - 4, 12):
-            self._tree(bm, b.x0 - 2.0, y, z, height=7.0, radius=2.4)
+        self.build_far_city(b, z)
+        items = [(b.x0 - 2.7, y, z, 6.5, 2.4, math.pi) for y in range(8, int(b.y1) - 4, 12)]
         for x in range(10, int(b.x1) - 4, 12):
-            self._tree(bm, x, b.y0 - 2.0, z, height=7.0, radius=2.4)
-            self._tree(bm, x, b.y1 + 2.0, z, height=7.0, radius=2.4)
-        mesh_object("site_trees", bm, [m["trunk"], m["canopy"]], self.col_site)
+            items += [(x, b.y0 - 2.7, z, 6.5, 2.4, -math.pi / 2), (x, b.y1 + 2.7, z, 6.5, 2.4, math.pi / 2)]
+        self.trees(items, self.col_site, "site_trees")
         bm = bmesh.new()
         for (x, y) in ((b.x0 - 1.5, b.y0 - 1.5), (b.x1 + 1.5, b.y0 - 1.5), (b.x0 - 1.5, b.y1 + 1.5), (b.x0 - 1.5, 40)):
             add_cyl(bm, x, y, z, z + 7.0, 0.1, 0, 8)
             add_box(bm, x - 0.3, x + 0.3, y - 0.12, y + 0.12, z + 6.8, z + 7.0, 0)
         mesh_object("site_lampposts", bm, [m["metal"]], self.col_site)
         self.build_street_furniture(b)
+
+    def build_far_city(self, b, z):
+        """Blocks of plain buildings from beyond the modelled neighbours out to ~450 m, so the hero and street
+        cameras see a city skyline instead of bare ground. Lower and greener to the north (campus)."""
+        import random
+        rnd = random.Random(11)
+        m = self.mats
+        keys = ["far_cream", "far_white", "far_grey", "far_brick", "far_sage", "far_tan"]
+        meshes = {k: bmesh.new() for k in keys}
+        trees = []
+        pitch, near, far = 38.0, 78.0, 460.0
+        cx, cy = (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2
+        walk = 4.0
+        # right-of-way of Dana St (x range), Durant Ave and Bancroft Way (y ranges), curb to curb plus sidewalks
+        dana = (b.x0 - SITE_PAD, b.x0)
+        durant = (b.y0 - SITE_PAD, b.y0)
+        bancroft = (b.y1, b.y1 + SITE_PAD)
+
+        def on_street(x0, x1, y0, y1):
+            return (x0 < dana[1] and x1 > dana[0]) or (y0 < durant[1] and y1 > durant[0]) or (y0 < bancroft[1] and y1 > bancroft[0])
+
+        roads, walks, dashes = bmesh.new(), bmesh.new(), bmesh.new()
+        # Beyond the modelled blocks only: Dana St runs south (it ends at Bancroft, the campus edge);
+        # Durant Ave and Bancroft Way run east and west.
+        lo, hi = dana
+        ya, yb = cy - far, b.y0 - SITE_PAD - 26
+        add_box(roads, lo + walk, hi - walk, ya, yb, z - 0.6, z - 0.2, 0)
+        add_box(walks, lo, lo + walk, ya, yb, z - 0.2, z, 0)
+        add_box(walks, hi - walk, hi, ya, yb, z - 0.2, z, 0)
+        for k in range(int(ya), int(yb) - 3, 6):
+            add_box(dashes, (lo + hi) / 2 - 0.1, (lo + hi) / 2 + 0.1, k, k + 3, z - 0.199, z - 0.19, 0)
+        for (lo, hi) in (durant, bancroft):
+            for (xa, xb) in ((cx - far, b.x0 - SITE_PAD - 24), (b.x1 + SITE_PAD + 24, cx + far)):
+                add_box(roads, xa, xb, lo + walk, hi - walk, z - 0.6, z - 0.2, 0)
+                add_box(walks, xa, xb, lo, lo + walk, z - 0.2, z, 0)
+                add_box(walks, xa, xb, hi - walk, hi, z - 0.2, z, 0)
+                for k in range(int(xa), int(xb) - 3, 6):
+                    add_box(dashes, k, k + 3, (lo + hi) / 2 - 0.1, (lo + hi) / 2 + 0.1, z - 0.199, z - 0.19, 0)
+        mesh_object("site_far_roads", roads, [m["asphalt"]], self.col_site)
+        mesh_object("site_far_walks", walks, [m["sidewalk"]], self.col_site)
+        mesh_object("site_far_dashes", dashes, [m["laminate"]], self.col_site)
+        gx0, gx1 = int((cx - far) // pitch), int((cx + far) // pitch) + 1
+        gy0, gy1 = int((cy - far) // pitch), int((cy + far) // pitch) + 1
+        for i in range(gx0, gx1):
+            for j in range(gy0, gy1):
+                x, y = i * pitch, j * pitch
+                if b.x0 - near < x + pitch and x < b.x1 + near and b.y0 - near < y + pitch and y < b.y1 + near:
+                    continue                                   # the modelled blocks live here
+                if y > b.y1 + near and rnd.random() < 0.45:   # campus: open ground and trees
+                    if rnd.random() < 0.6:
+                        trees.append((x + rnd.uniform(6, pitch - 6), y + rnd.uniform(6, pitch - 6), z, rnd.uniform(9, 14), 4.0))
+                    continue
+                if rnd.random() < 0.08:
+                    continue
+                w = rnd.uniform(14, pitch - 10)
+                d = rnd.uniform(14, pitch - 10)
+                ox = x + rnd.uniform(3, pitch - 3 - w)
+                oy = y + rnd.uniform(3, pitch - 3 - d)
+                if on_street(ox - 3, ox + w + 3, oy - 3, oy + d + 3):
+                    continue
+                dist = math.hypot(max(0.0, abs(x - cx) - (b.x1 - b.x0) / 2), max(0.0, abs(y - cy) - (b.y1 - b.y0) / 2))
+                h = rnd.choice((6.5, 9.5, 9.5, 12.5, 12.5, 16.0)) * (1.0 + 0.0015 * dist)
+                bm = meshes[rnd.choice(keys)]
+                add_box(bm, ox, ox + w, oy, oy + d, z - 0.6, z + h, 0)
+                if rnd.random() < 0.5:                        # a stair / lift box on the roof
+                    add_box(bm, ox + 2, ox + 6, oy + 2, oy + 5, z + h, z + h + 2.6, 0)
+        for k, bm in meshes.items():
+            mesh_object(f"site_far_{k}", bm, [m[k]], self.col_site)
+        if trees:
+            self.trees(trees, self.col_site, "site_far_trees")
 
     def build_neighbourhood(self, b, z):
         """Berkeley-style neighbours: stucco apartment blocks with punched windows and shopfronts, a few
@@ -2066,11 +2743,10 @@ class Builder:
         add_box(bm, b.x0 - 42, 70, n0, n0 + 0.6, z + 0.1, z + 0.6, 1)
         add_box(bm, 14, 18, n0, n0 + 60, z + 0.1, z + 0.12, 2)
         mesh_object("site_campus", bm, [m["lawn"], m["concrete"], m["paving"]], self.col_site)
-        bm = bmesh.new()
-        for (x, y, hgt, rad) in ((-20, n0 + 10, 14, 5.5), (0, n0 + 18, 16, 6.5), (26, n0 + 8, 13, 5.0),
-                                 (44, n0 + 20, 17, 7.0), (60, n0 + 6, 12, 4.8), (10, n0 + 34, 15, 6.0)):
-            self._tree(bm, x, y, z + 0.1, height=hgt, radius=rad)
-        mesh_object("site_campus_trees", bm, [m["trunk"], m["canopy"]], self.col_site)
+        self.trees([(x, y, z + 0.1, hgt, rad) for (x, y, hgt, rad) in
+                    ((-20, n0 + 10, 14, 5.5), (0, n0 + 18, 16, 6.5), (26, n0 + 8, 13, 5.0),
+                     (44, n0 + 20, 17, 7.0), (60, n0 + 6, 12, 4.8), (10, n0 + 34, 15, 6.0))],
+                   self.col_site, "site_campus_trees")
         # Parked cars along the curbs, utility poles with wires on the far side of Dana, a bus stop.
         bm = bmesh.new()
         colours = [m["car_white"], m["car_silver"], m["car_black"], m["car_red"], m["car_blue"]]
@@ -2085,7 +2761,15 @@ class Builder:
                 self._car(bm, x, b.y0 - 6.2, "x", k % len(colours)); k += 1
             if rnd.random() < 0.6:
                 self._car(bm, x + 3, b.y0 - SITE_PAD + 6.2, "x", k % len(colours)); k += 1
-        mesh_object("site_cars", bm, colours + [m["glass"], m["dark"]], self.col_site)
+        cars = mesh_object("site_cars", bm, colours + [m["glass"], m["dark"]], self.col_site)
+        for poly in cars.data.polygons:
+            poly.use_smooth = True
+        mod = cars.modifiers.new("round", "BEVEL")     # a wide bevel turns the boxes into body shells
+        mod.width, mod.segments = 0.16, 4
+        mod.limit_method = "ANGLE"
+        mod.angle_limit = math.radians(50)
+        if hasattr(mod, "harden_normals"):
+            mod.harden_normals = True
         bm = bmesh.new()
         px = b.x0 - SITE_PAD + 2.0
         poles = [(px, y) for y in range(-30, int(b.y1) + 30, 30)]
@@ -2104,8 +2788,10 @@ class Builder:
         add_box(bm, sx - 0.3, sx + 3.9, sy - 1.2, sy + 1.2, z + 2.5, z + 2.6, 0)
         add_box(bm, sx - 0.3, sx + 3.9, sy + 0.9, sy + 0.95, z + 0.3, z + 2.5, 1)
         add_box(bm, sx, sx + 3.6, sy - 0.2, sy + 0.3, z + 0.45, z + 0.5, 0)
-        add_cyl(bm, sx - 1.0, sy, z, z + 0.75, 0.12, 2, 10)                      # hydrant
-        add_cyl(bm, sx - 1.0, sy, z + 0.75, z + 0.85, 0.08, 2, 10)
+        if not self.props.place("fire_hydrant", sx - 1.0, sy, z, rot=math.radians(90), name="site_hydrant",
+                                collection=self.col_props):
+            add_cyl(bm, sx - 1.0, sy, z, z + 0.75, 0.12, 2, 10)                  # hydrant
+            add_cyl(bm, sx - 1.0, sy, z + 0.75, z + 0.85, 0.08, 2, 10)
         mesh_object("site_bus_stop", bm, [m["metal"], m["frosted"], m["awning_red"]], self.col_site)
         # Bancroft Way bike lane (green) and lane arrows.
         bm = bmesh.new()
@@ -2147,6 +2833,10 @@ class Builder:
     def _car(self, bm, x, y, axis, colour):
         """A parked car: two stacked bodies, glass cabin, four wheels. `x, y` is the centre."""
         L, W = 4.4, 1.8
+        self._car_n = getattr(self, "_car_n", 0) + 1
+        if self._car_n % 4 == 0 and self.props.place("covered_car", x, y, 0.0, rot=0.0 if axis == "y" else math.radians(90),
+                                                     name=f"site_car_covered_{self._car_n}", collection=self.col_props):
+            return
         if axis == "y":
             x0, x1, y0, y1 = x - W / 2, x + W / 2, y - L / 2, y + L / 2
             add_box(bm, x0, x1, y0, y1, 0.3, 0.85, colour)
@@ -2246,7 +2936,7 @@ class Builder:
             fbg.inputs[1].default_value = 0.9
         scene.camera = hero
         sun_data = bpy.data.lights.new("Sun", "SUN")
-        sun_data.energy = 5.5
+        sun_data.energy = 8.0
         sun_data.angle = math.radians(1.5)
         sun_data.color = (1.0, 0.96, 0.9)
         sun = bpy.data.objects.new("Sun", sun_data)
@@ -2271,12 +2961,22 @@ class Builder:
                 sky.sun_rotation = math.radians(230)
             if hasattr(sky, "sun_disc"):
                 sky.sun_disc = False
+            if hasattr(sky, "dust_density"):
+                sky.dust_density = 0.35                 # less haze: a deeper blue down to the horizon
             bg.inputs[1].default_value = 0.03
             world.node_tree.links.new(sky.outputs[0], bg.inputs[0])
+            self.build_hdri(world, bg, sun)
         scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
         try:
             scene.view_settings.view_transform = "AgX"
-            scene.view_settings.look = "AgX - Medium High Contrast"
+            scene.view_settings.exposure = 0.65
+            for look in ("AgX - Punchy", "AgX - High Contrast", "AgX - Medium High Contrast"):
+                try:
+                    scene.view_settings.look = look
+                    break
+                except TypeError:
+                    continue
+            print("view transform:", scene.view_settings.view_transform, "/", scene.view_settings.look)
         except TypeError:
             pass
         for attr, val in (("use_raytracing", True), ("use_shadows", True), ("use_gtao", True),
@@ -2291,6 +2991,63 @@ class Builder:
             except TypeError:
                 pass
         self.build_compositor()
+
+    def build_hdri(self, world, bg, sun):
+        """A partly cloudy sky HDRI (when downloaded) for ambient light and glass reflections, turned so its
+        sun sits behind the Sun lamp, with its hot spot clamped so the lamp stays the only hard shadow."""
+        hdri = _manifest().get("hdri")
+        path = TEX_DIR / hdri["file"] if hdri else None
+        if not path or not path.exists():
+            return
+        nt = world.node_tree
+        for n in list(nt.nodes):
+            if n.type == "TEX_ENVIRONMENT":
+                nt.nodes.remove(n)
+        sky_link = next((lk for lk in nt.links if lk.to_node == bg and lk.to_socket.name == "Color"), None)
+        sky_out = sky_link.from_socket if sky_link else None
+        env = nt.nodes.new("ShaderNodeTexEnvironment")
+        env.image = bpy.data.images.load(str(path), check_existing=True)
+        img = env.image
+        # Brightest pixel -> the HDRI's sun direction (Blender equirect: u = 0.5 - atan2(y, x) / 2pi).
+        try:
+            import numpy as np
+            w, h = img.size
+            buf = np.empty(w * h * img.channels, dtype=np.float32)
+            img.pixels.foreach_get(buf)
+            lum = buf.reshape(h, w, img.channels)[:, :, :3].sum(axis=2)
+            iy, ix = np.unravel_index(int(lum.argmax()), lum.shape)
+            phi_hdri = (0.5 - (ix + 0.5) / w) * 2 * math.pi
+        except Exception as exc:
+            print("hdri sun not located, leaving unrotated:", exc)
+            phi_hdri = None
+        mp = nt.nodes.new("ShaderNodeMapping")
+        tc = nt.nodes.new("ShaderNodeTexCoord")
+        nt.links.new(tc.outputs["Generated"], mp.inputs["Vector"])
+        nt.links.new(mp.outputs["Vector"], env.inputs["Vector"])
+        if phi_hdri is not None:
+            to_sun = sun.rotation_euler.to_matrix() @ Vector((0.0, 0.0, 1.0))
+            phi_lamp = math.atan2(to_sun.y, to_sun.x)
+            mp.inputs["Rotation"].default_value = (0.0, 0.0, phi_hdri - phi_lamp)
+        clamp = nt.nodes.new("ShaderNodeVectorMath")
+        clamp.operation = "MINIMUM"
+        clamp.inputs[1].default_value = (12.0, 12.0, 12.0)
+        nt.links.new(env.outputs["Color"], clamp.inputs[0])
+        out = next((n for n in nt.nodes if n.type == "OUTPUT_WORLD"), None)
+        if sky_out is not None and out is not None:
+            # Camera rays see the physical sky (deep blue, clean horizon); everything else is lit by the HDRI.
+            light_bg = nt.nodes.new("ShaderNodeBackground")
+            nt.links.new(clamp.outputs[0], light_bg.inputs[0])
+            light_bg.inputs[1].default_value = 1.0
+            lp = nt.nodes.new("ShaderNodeLightPath")
+            mix = nt.nodes.new("ShaderNodeMixShader")
+            nt.links.new(lp.outputs["Is Camera Ray"], mix.inputs[0])
+            nt.links.new(light_bg.outputs[0], mix.inputs[1])
+            nt.links.new(bg.outputs[0], mix.inputs[2])
+            nt.links.new(mix.outputs[0], out.inputs["Surface"])
+        else:
+            nt.links.new(clamp.outputs[0], bg.inputs[0])
+            bg.inputs[1].default_value = 1.0
+        print("hdri sky:", path.name)
 
     def build_compositor(self):
         """Camera-like finishing: a touch of bloom and chromatic aberration."""
@@ -2368,6 +3125,7 @@ class Builder:
             self.build_interiors()
         if self.with_site:
             self.build_site()
+        self.build_people()
         self.build_scene()
         self.build_walk_panel()
 
@@ -2451,13 +3209,35 @@ def export_glb(path, collections=("Shell", "Windows"), include=None):
                 if mod.type == "BEVEL" and mod.show_viewport:
                     mod.show_viewport = False        # render-only polish; keeps the GLB small
                     bevels.append(mod)
+    # Scanned albedo + roughness ride along as 1k JPEGs; normal maps stay in Blender (JPEG normals look
+    # worse than none in three.js) so the files stay small.
+    muted = []
+    for mat in bpy.data.materials:
+        if not mat.use_nodes:
+            continue
+        for link in list(mat.node_tree.links):
+            if link.from_node.type == "NORMAL_MAP":
+                muted.append((mat.node_tree, link.from_socket, link.to_socket))
+                mat.node_tree.links.remove(link)
+    shrunk = []
+    for img in bpy.data.images:
+        if img.source == "FILE" and max(img.size) > 1024 and not img.filepath.lower().endswith(".hdr"):
+            img.scale(1024, 1024)
+            shrunk.append(img)
     try:
-        bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True,
-                                  export_apply=True, export_yup=True, export_extras=True,
-                                  export_materials="EXPORT")
+        kwargs = dict(filepath=str(path), export_format="GLB", use_selection=True, export_apply=True,
+                      export_yup=True, export_extras=True, export_materials="EXPORT")
+        try:
+            bpy.ops.export_scene.gltf(**kwargs, export_image_format="JPEG", export_jpeg_quality=72)
+        except TypeError:
+            bpy.ops.export_scene.gltf(**kwargs)
     finally:
         for mod in bevels:
             mod.show_viewport = True
+        for nt, a, b in muted:
+            nt.links.new(a, b)
+        for img in shrunk:
+            img.reload()
     print(f"wrote {path}")
 
 
@@ -2521,6 +3301,10 @@ def main(argv=None):
         elif a == "--no-interior":
             opts["interior"] = False
             i += 1
+        elif a == "--no-textures":
+            global TEXTURES_ON
+            TEXTURES_ON = False
+            i += 1
         else:
             i += 1
 
@@ -2542,6 +3326,16 @@ def main(argv=None):
                    include=lambda n: not n.startswith("furniture_"))
     if opts["glb-furniture"]:
         export_glb(resolve(opts["glb-furniture"]), collections=("Interior",), include=lambda n: n.startswith("furniture_"))
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            for space in area.spaces:
+                if space.type == "VIEW_3D":
+                    space.shading.type = "MATERIAL"
+                    space.shading.use_scene_world = True
+                    space.shading.use_scene_lights = True
+                    space.clip_end = 5000.0
     if opts["blend"]:
         p = resolve(opts["blend"])
         p.parent.mkdir(parents=True, exist_ok=True)

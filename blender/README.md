@@ -26,9 +26,26 @@ Windows and doors are real openings cut into the wall rings (an exact boolean pe
 canopies; the street has curbs, signals, bike racks, benches, bins and the building name on both corner faces.
 The compositor adds a touch of bloom and chromatic aberration.
 
-All materials are procedural (panel joints with rain streaks, timber boards, concrete, asphalt, pavers, carpet, tiles),
-so nothing needs downloading. To go further, tick Poly Haven in the MCP for Blender sidebar in Blender
-(press N in the 3D viewport); `import_asset` can then swap in scanned PBR textures and an HDRI.
+Materials have two layers. The procedural layer (panel joints with rain streaks, timber boards, concrete,
+asphalt, pavers, carpet, tiles) needs nothing downloaded and is always there. On top of it, when
+`python blender/fetch_textures.py` has been run, twenty scanned CC0 texture sets from [Poly Haven](https://polyhaven.com)
+(albedo + roughness + normal; asphalt, pavement slabs, concrete, grass, gravel, soil, bark, brick, plaster, roof
+tiles, deck and plank timber, laminate, carpet, tiles, rubber) are layered over the matching materials, and a
+partly cloudy sky HDRI lights the scene. Every mesh gets box-projected UVs in metres, so scans tile at their
+real-world size across walls, floors and streets, and the same UVs go out in the GLBs. Two blend modes:
+`albedo` uses the scan's colour, modulated by the procedural large-scale variation (which hides the tile repeat)
+and an optional tint; `overlay` keeps the designed colour (the white and ochre panels, stucco, painted walls)
+and adds only the scan's grain and relief. The table is `SCANS` in the script; `--no-textures` (or simply not
+fetching) keeps everything procedural. The HDRI is rotated so its sun sits behind the Sun lamp, with its hot
+spot clamped, so the lamp stays the only hard shadow; the camera sees the physical sky, everything else is
+lit by the HDRI.
+
+Street trees, campus trees, podium and courtyard shrubs, the hydrant and every fourth parked car are
+photoscanned Poly Haven models (`island_tree_02`, `tree_small_02`, `shrub_02`, `fire_hydrant`, `covered_car`).
+Each is imported once, the million-triangle trees decimated to about a fifth and cached beside the glTF as
+`<asset>_lod.blend`, parked in an excluded `Library` collection, and placed as collection instances in a
+`Props` collection (never exported), so thirty trees share one mesh. Without the downloads the trees fall back
+to the procedural trunk-and-clump version. View transform is AgX "Punchy".
 
 ## Walking around in Blender
 
@@ -45,6 +62,19 @@ stores it in the .blend. The tab has:
 If the tab is missing after reopening the file (Blender's "Auto Run Python Scripts" is off), open
 `haven_walk.py` in the Scripting workspace and press Run Script.
 
+## Live link
+
+`haven_live.py` (also embedded in the .blend) adds a **HAVEN: live world** panel to the same HAVEN tab (N in the
+3D viewport). Open `blackwell.blend`, press Connect with the backend at `http://127.0.0.1:8000`, and the panel
+mirrors the world state into a `Live` collection: water sheets per space, dark / soon floor tints, equipment
+status, `person_<id>` figures (violet = left behind), `agent_<actor>` responders, routes and a HUD. Its buttons
+POST inputs back to the backend (start the leak, toggle Maya's agent, approve the plan, speak a rule, speed).
+Headless snapshot of the live state:
+
+```powershell
+blender-launcher.exe -b blender/blackwell.blend -P blender/haven_live.py -- --snapshot blender/renders/live_check.png --camera CutawayCam --cutaway L4
+```
+
 ## The surrounding blocks
 
 The site is a plausible Berkeley block, not a survey: stucco and brick apartment blocks with punched
@@ -55,6 +85,8 @@ utility poles and wires on the far side of Dana, a bus shelter and hydrant, sign
 ## Running
 
 Export the spec first: `cd backend && PYTHONPATH=. uv run python tools/export_building.py`.
+Then (once) fetch the scanned textures: `python blender/fetch_textures.py` (~70 MB into `blender/textures/`,
+git-ignored, standard library only; without it the build is purely procedural).
 
 **Headless** (the Microsoft Store install exposes `blender-launcher.exe`; a portable install exposes `blender`):
 
@@ -66,7 +98,7 @@ Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interi
 `--render <path>` hero camera (plus `street.png` beside it from `StreetCam`) · `--cutaway <LEVEL>` (repeatable) renders `renders/cutaway_<LEVEL>.png` with every
 level above hidden; below grade it uses the close `PlantCam` and a flat backdrop · `--blend <path>` save ·
 `--engine cycles [--samples N]` path-traced stills (GPU if configured, denoised; a few minutes per frame on CPU) ·
-`--no-site` / `--no-interior` skip those parts. Relative paths resolve against the repo root.
+`--no-site` / `--no-interior` skip those parts · `--no-textures` ignores the downloaded scans. Relative paths resolve against the repo root.
 
 **Inside a live Blender** (Python console, or through the Blender MCP):
 
@@ -76,7 +108,8 @@ exec(open(r"C:/path/to/Cal_Hacks_13.0/blender/build_blackwell.py").read(),
       "HAVEN_ARGS": ["--glb", "frontend/public/models/blackwell.glb", "--cutaway", "L4"]})
 ```
 
-Both routes clear the scene first. A full build makes ~550 objects and takes ~1.5 min; renders are EEVEE.
+Both routes clear the scene first. A full build makes ~1200 objects and takes 2-3 min (plus a one-time minute to
+decimate and cache the tree scans); renders are EEVEE. Headless with a log: `blender-launcher.exe -b -P blender/run_build.py -- <same flags>`.
 
 Cameras: `HeroCam` (three-quarter from Dana × Durant, like the reference photo), `StreetCam` (eye level on the
 corner), `CutawayCam` (looking down into a floor), `PlantCam` (into the basement electrical + mechanical rooms).
@@ -101,10 +134,17 @@ three.js. Object names and custom properties survive as `mesh.name` and `mesh.us
 
 So an R3F view can hide levels above the one in focus (`level_index`), tint a room's glass from world state
 (the glass material has an emission colour with strength 0, ready to be driven), and flash the switchgear
-or sensor by equipment id. Procedural textures do not export; the GLBs carry base colours only.
+or sensor by equipment id. The procedural layer does not export (glTF has no node graphs), but the scanned
+albedo / roughness / normal maps do, as JPEGs on the box UVs, so the twin shows real asphalt, concrete, timber
+and brick; without the fetched textures the GLBs carry base colours only.
 
 ## Files
 
 - `build_blackwell.py` — the script (bpy + bmesh only; no add-ons needed).
+- `fetch_textures.py` — downloads the Poly Haven sets, HDRI and photoscanned models into `textures/` and writes
+  `textures/manifest.json` (asset sizes in metres, file paths); the build reads the manifest.
+- `run_build.py` — runs the build with Python output captured to `renders/last_build.log` (the Store
+  `blender-launcher.exe` does not pass its console to a redirected shell).
+- `render_cycles.py` — path-traced stills from the saved .blend in a second headless Blender.
 - `renders/hero.png`, `renders/street.png`, `renders/cutaway_L4.png`, `renders/cutaway_B1.png` — latest full-resolution renders.
 - `blackwell.blend` — saved scene, regenerated by the script; not hand-edited (git-ignored).

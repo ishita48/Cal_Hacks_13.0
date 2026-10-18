@@ -26,3 +26,9 @@ blender/*.blend
 blender/*.blend1
 blender/renders/*_check.png
 blender/renders/*.log
+
+# blender: scanned textures are downloaded by blender/fetch_textures.py (Poly Haven, CC0)
+blender/textures/
+
+# fetch.ai uAgents key-value storage written next to the backend process
+backend/*_data.json
