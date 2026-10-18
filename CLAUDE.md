@@ -56,6 +56,14 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     detail that goes into the ActionEvent: `twilio.py` (plumber call, demo SMS), `linear.py` (ticket);
     simulated text otherwise. `GET /api/memory` + `POST /api/memory/apply`: manager rules from earlier runs
     (`EventStore.rule_history`), the cross-incident memory.
+    `elevenlabs.py` (Phase 8): first voice for `POST /api/speak` (then Cartesia, then the browser; the response
+    carries `X-Voice-Provider`), plus `GET /api/voice/agent` for a Conversational AI session grounded in the world.
+    `sponsors.py`: `GET /api/sponsors` round-trip proof per sponsor (memoised 30 s, `?fresh=true`).
+  - `haven/agents/buds.py` (Phase 8): the on-screen companion. `answer()` is a deterministic intent router over
+    the state (where is X, why the hold, forecast, left behind, counts, messages, plumber, agents) returning
+    `Reply{speech, focus[], actions[]}`; `answer_llm()` is the Claude fallback that may only point at `pointable`
+    ids; `POST /api/buds/ask` / `POST /api/buds/act` (the human approved an action: it becomes the same input
+    event a button sends). Buds never mutates anything on its own.
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
 - `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;
@@ -64,6 +72,10 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   `AgentConsole`, `PlanPanel`, `VoiceRule`, `MessagesPanel`, and `Building3D` (R3F twin, lazy-loaded; loads the GLBs
   from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` / `level_index` per
   `blender/README.md`, and reads nothing but the world store). 2D plan is the default; the toggle is in the centre panel.
+  `Buds` (orb, panel, voice in/out, the pointer that flies to `[data-buds="kind:id"]` elements; App listens for
+  `haven:focus` to switch tab/floor), `src/story/Story.tsx` (+ `story.css`, scoped `.argus`: the editorial page at
+  `/story`, live event log + sponsor proofs), `src/lib/speak.ts` (ElevenLabs → Cartesia → browser, interruptible),
+  `src/lib/voice.ts` (Web Speech push-to-talk / hands-free with echo guard). Routes in `main.tsx`: `/`, `/phone`, `/story`.
 - `firmware/haven_sensor/haven_sensor.ino` — ESP32 + resistive probe → `POST /api/sensor` with
   `X-Haven-Token`; posts on every wet/dry crossing and a 15 s heartbeat. Calibrate DRY_RAW / WET_RAW from Serial.
 - `blender/` — scripted exterior built from the same building spec (Phase 3). `haven_live.py` is the live link:

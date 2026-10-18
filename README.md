@@ -13,11 +13,25 @@ replays exactly.
 ```bash
 cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
-cd backend  && uv run pytest -q                  # 50 tests
+cd backend  && uv run pytest -q                  # 55 tests
 ```
 
 Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live
 (bright) and which are simulated (dim). Copy `backend/.env.example` to `backend/.env` and fill in what you have.
+
+## Buds, the story page and the live stack
+
+- **Buds** is the orb in the corner of the command centre (Alt+B). Type or talk to it (push-to-talk, or
+  hands-free with Alt+Shift+V: talk over it and it stops). It answers from the one world state, points its
+  cursor at the agent card, plan step, floor or panel it is talking about, and offers actions (switch an agent,
+  impose a rule, approve, simulate the leak) that only run after you tap **Approve**: the same input events the
+  buttons send. Deterministic answers first (`backend/haven/agents/buds.py`), Claude only as the fallback.
+- **/story** is the editorial page: the sensor-to-plan cascade, the agents, a "one shared state" room that shows
+  the real event log of the current run, and the sponsor proofs. Light paper, one blue; the dashboard stays dark.
+- **Live stack**: click the sponsor strip in the header for a round-trip proof per integration (`GET /api/sponsors`):
+  a voice name, a model list, a Postgres version, an account, a Linear viewer, the agents' addresses.
+- The 3D twin loads `blackwell_site.glb` when present (streets, neighbours, trees, props, people from the Blender
+  scene) under a daylight environment with shadows. Hard-refresh after the GLBs change; the browser caches them.
 
 ## Keys to make
 
@@ -26,7 +40,8 @@ Nothing needs a key. Every sponsor integration is optional and key-gated; the he
 | *(none)* | — | Fetch.ai resident agents run as local uAgents inside the backend; the plumber call and ticket are simulated and say so |
 | `ANTHROPIC_API_KEY` | console.anthropic.com | Claude parses spoken rules the regex misses, narrates the brief, lets each agent explain itself in its own words |
 | `AGENTVERSE_API_KEY` | agentverse.ai → API keys | The nine resident agents register on Agentverse (mailbox) so they are reachable and inspectable there |
-| `CARTESIA_API_KEY` (+ `CARTESIA_VOICE_ID`) | play.cartesia.ai → API keys | Spoken briefs and the plumber script in a real voice (`POST /api/speak`); browser speech otherwise |
+| `ELEVENLABS_API_KEY` (+ `ELEVENLABS_VOICE_ID`, `ELEVENLABS_AGENT_ID`) | elevenlabs.io → Profile → API keys; Conversational AI → create an agent for the id | HAVEN's voice, first in line: Buds, the plumber script, the briefs (flash v2.5, multilingual). The agent id enables a live, interruptible voice agent grounded in the world (`GET /api/voice/agent`) |
+| `CARTESIA_API_KEY` (+ `CARTESIA_VOICE_ID`) | play.cartesia.ai → API keys | Second voice in line for `POST /api/speak`; the browser's own speech is last |
 | `TIGER_DATABASE_URL` | console.cloud.timescale.com (Tiger Data) → service → connection string | Sensor readings land in a hypertable; `GET /api/sensor/{id}/history` reads it (event log otherwise) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` + `HAVEN_PLUMBER_NUMBER`, `HAVEN_SMS_TO` | console.twilio.com (trial works; verify the two numbers) | On approval the plumber is really phoned with the plan's script, and Maya's message is texted to the demo phone |
 | `LINEAR_API_KEY`, `LINEAR_TEAM_ID` | linear.app → Settings → API (personal key; team id from the team settings URL or the API) | On approval the facilities ticket is filed in Linear; the step shows its identifier and URL |

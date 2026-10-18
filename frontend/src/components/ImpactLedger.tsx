@@ -50,7 +50,7 @@ export function ImpactLedger({ world, clock }: Props) {
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden">
       <div className="flex items-center justify-between">
-        <span className="eyebrow">Impact ledger</span>
+        <span className="eyebrow" data-buds="panel:ledger">Impact ledger</span>
         <div className="seg seg-xs">
           {(['now', 'forecast'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)} className={`seg-item ${showing === v ? 'is-on' : ''}`}>
@@ -107,7 +107,7 @@ export function ImpactLedger({ world, clock }: Props) {
         {total === 0 && <li className="glass-card px-3 py-5 text-center text-[12px] text-t3">Nobody affected.</li>}
         {/* keys are resident ids, so only newly affected rows run the enter animation */}
         {impact.residents.map((r) => (
-          <li key={r.id} className="row enter py-2">
+          <li key={r.id} className="row enter py-2" data-buds={`resident:${r.id}`}>
             <div className="flex items-center gap-2">
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300 ${SEVERITY_DOT[r.severity]}`} />
               <span className="text-[13px] font-medium text-t1">{r.name}</span>

@@ -193,6 +193,7 @@ function AgentCard({
 
   return (
     <div
+      data-buds={`agent:${id}`}
       className={`agent-card glass-card relative ${prominent ? 'p-3.5' : 'p-3'} ${!enabled ? 'opacity-45' : ''} ${shake ? 'haven-shake veto-glow' : ''} ${veto ? 'tint-red' : ''}`}
       style={edge ? { boxShadow: edge } : undefined}
     >

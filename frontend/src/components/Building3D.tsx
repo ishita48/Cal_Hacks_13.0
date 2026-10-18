@@ -1,4 +1,4 @@
-import { Html, Line, OrbitControls, OrthographicCamera, useGLTF } from '@react-three/drei'
+import { Environment, Html, Lightformer, Line, OrbitControls, OrthographicCamera, useGLTF } from '@react-three/drei'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import * as THREE from 'three'
@@ -17,8 +17,10 @@ import type { ActorState, Rect, ResidentImpact, Space, WorldState } from '../sta
 
 const EXTERIOR_URL = '/models/blackwell.glb'
 const INTERIOR_URL = '/models/blackwell_interior.glb'
-// Optional third file: furniture split out so the shell and interior stream first. Missing = fine.
+// Optional files: furniture split out so the shell and interior stream first; the site (streets,
+// neighbours, trees, props, people) exported by blender/build_blackwell.py --glb-site. Missing = fine.
 const FURNITURE_URL = '/models/blackwell_furniture.glb'
+const SITE_URL = '/models/blackwell_site.glb'
 useGLTF.preload(EXTERIOR_URL)
 useGLTF.preload(INTERIOR_URL)
 
@@ -45,10 +47,13 @@ export default function Building3D({ level }: Props) {
         orthographic
         dpr={[1, 1.5]}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
+        shadows
         style={{ background: '#050507' }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.05
+          gl.toneMappingExposure = 1.15
+          gl.shadowMap.enabled = true
+          gl.shadowMap.type = THREE.PCFSoftShadowMap
         }}
       >
         <color attach="background" args={['#050507']} />
@@ -99,6 +104,8 @@ function Scene({ level }: Props) {
         if (!Number.isNaN(li)) out.levelMeshes.push({ mesh: o, index: li })
         const mesh = o as THREE.Mesh
         if (!mesh.isMesh) return
+        mesh.castShadow = true
+        mesh.receiveShadow = true
         const sid = typeof ud.space_id === 'string' ? ud.space_id : undefined
         const eid = typeof ud.equipment_id === 'string' ? ud.equipment_id : undefined
         if (sid || eid) {
@@ -148,12 +155,21 @@ function Scene({ level }: Props) {
         minZoom={3}
         maxZoom={30}
       />
-      <hemisphereLight args={['#e8e8ed', '#0a0a0d', 0.95]} />
-      <directionalLight position={[40, 90, 30]} intensity={1.5} color="#fff4e0" />
-      <directionalLight position={[-60, 40, -80]} intensity={0.35} color="#8fb4ff" />
+      {/* Daylight: the Blender scene's sun and sky, approximated for the textured GLBs. The environment is
+          built from light formers (no network fetch), so glass, panels and cars get real reflections. */}
+      <hemisphereLight args={['#dfe8ff', '#3a3330', 1.1]} />
+      <directionalLight position={[40, 90, 30]} intensity={2.6} color="#fff1dc" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004}>
+        <orthographicCamera attach="shadow-camera" args={[-120, 120, 120, -120, 1, 400]} />
+      </directionalLight>
+      <directionalLight position={[-60, 40, -80]} intensity={0.5} color="#8fb4ff" />
+      <Environment resolution={64} frames={1}>
+        <Lightformer intensity={2.2} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[14, 14, 1]} color="#dbe7ff" />
+        <Lightformer intensity={0.8} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[12, 3, 1]} color="#ffe9c8" />
+        <Lightformer intensity={0.6} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[12, 3, 1]} color="#cfe0ff" />
+      </Environment>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
-        <planeGeometry args={[400, 400]} />
-        <meshStandardMaterial color="#09090c" roughness={1} metalness={0} />
+        <planeGeometry args={[600, 600]} />
+        <meshStandardMaterial color="#121214" roughness={1} metalness={0} />
       </mesh>
       <gridHelper args={[400, 80, '#1f1f24', '#141418']} position={[center.x, -0.07, center.z]} />
 
@@ -162,6 +178,11 @@ function Scene({ level }: Props) {
       <Optional>
         <Suspense fallback={null}>
           <Furniture level={level} levelIndex={levelIndex} />
+        </Suspense>
+      </Optional>
+      <Optional>
+        <Suspense fallback={null}>
+          <Site level={level} levelIndex={levelIndex} />
         </Suspense>
       </Optional>
 
@@ -638,6 +659,29 @@ function Furniture({ level, levelIndex }: { level: string; levelIndex: Record<st
     for (const { mesh, index: li } of meshes) mesh.visible = li <= focus
   }, [level, levelIndex, meshes])
   return <primitive object={furniture.scene} />
+}
+
+/** The street, neighbours, trees, props and people from the Blender scene (optional file). Hidden when
+ *  looking into the basement, like the cutaway renders; alpha-masked leaves keep their transparency. */
+function Site({ level, levelIndex }: { level: string; levelIndex: Record<string, number> }) {
+  const site = useGLTF(SITE_URL)
+  useEffect(() => {
+    site.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      for (const m of mats as THREE.MeshStandardMaterial[]) {
+        if (m.transparent || m.alphaTest > 0) m.side = THREE.DoubleSide
+      }
+    })
+  }, [site.scene])
+  useEffect(() => {
+    const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
+    site.scene.visible = focus >= 1
+  }, [level, levelIndex, site.scene])
+  return <primitive object={site.scene} />
 }
 
 /** Renders nothing if the child throws (e.g. the optional GLB is absent or fails to parse). */

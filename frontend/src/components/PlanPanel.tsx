@@ -132,7 +132,7 @@ export function PlanPanel({ world, clock }: Props) {
   if (plan.status === 'none' || (plan.steps.length === 0 && plan.rounds.length === 0)) {
     return (
       <div className="flex h-full flex-col">
-        <span className="eyebrow">Plan</span>
+        <span className="eyebrow" data-buds="panel:plan">Plan</span>
         <div className="glass-card mt-3 px-3 py-6 text-center text-[12px] text-t3">No incident. The agents negotiate a plan the moment the chain is forecast.</div>
       </div>
     )
@@ -308,6 +308,7 @@ function StepRow({
   const actionTime = action ? formatTimeOfDay(clock.time_of_day - (clock.step - action.step) * clock.dt) : null
   return (
     <li
+      data-buds={ghost ? undefined : `step:${step.id}`}
       ref={rowRef}
       className={`row flex gap-3 rounded-lg py-2.5 ${ghost ? 'leave' : ''} ${fresh ? 'haven-flash enter' : ''} ${status === 'done' ? 'opacity-75' : ''}`}
       style={{ transition: 'opacity 300ms ease' }}

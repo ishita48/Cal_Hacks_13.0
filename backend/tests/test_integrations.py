@@ -12,10 +12,14 @@ from haven.world.store import EventStore
 
 
 def test_everything_degrades_gracefully_without_keys(monkeypatch):
-    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CARTESIA_API_KEY", "TIGER_DATABASE_URL"):
+    from haven.integrations import elevenlabs
+
+    for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CARTESIA_API_KEY", "TIGER_DATABASE_URL", "ELEVENLABS_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     assert asyncio.run(parse_rule_llm("whatever")) is None
     assert asyncio.run(cartesia.speak("hello")) is None
+    assert not elevenlabs.configured() and asyncio.run(elevenlabs.speak("hello")) is None
+    assert asyncio.run(elevenlabs.agent_signed_url()) is None
     sink = TigerSink(url=None)
     assert not sink.configured
     asyncio.run(sink.record("basement_mech_1", "run", 0, 0.9, True, "manual"))

@@ -8,7 +8,8 @@ from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from ..integrations import actions, cartesia, fetch
+from ..integrations import actions, cartesia, elevenlabs, fetch
+from ..integrations.sponsors import SponsorHealth
 from ..integrations.tiger import TigerSink
 
 from ..world.engine import ReplayActiveError, WorldEngine
@@ -24,6 +25,7 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     tiger = TigerSink()
     society = fetch.Society(engine.ctx)          # the residents' agents on Fetch.ai (local or Agentverse)
     engine.plan_listeners.append(society.offer)
+    sponsors = SponsorHealth(engine, society, tiger)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -92,16 +94,93 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
 
     @app.post("/api/speak")
     async def speak(body: SpeakBody):
-        """Cartesia voice for a message in the plan (the plumber call, the manager alert)."""
-        audio = await cartesia.speak(body.text, body.lang)
+        """A voice for a line the plan already contains: ElevenLabs first, Cartesia next, else the browser's."""
+        provider = "elevenlabs"
+        audio = await elevenlabs.speak(body.text, body.lang)
         if audio is None:
-            raise HTTPException(503, "voice not configured (set CARTESIA_API_KEY); use browser speech")
-        return Response(content=audio, media_type="audio/mpeg")
+            provider = "cartesia"
+            audio = await cartesia.speak(body.text, body.lang)
+        if audio is None:
+            raise HTTPException(503, "voice not configured (set ELEVENLABS_API_KEY or CARTESIA_API_KEY); use browser speech")
+        return Response(content=audio, media_type="audio/mpeg",
+                        headers={"X-Voice-Provider": provider, "Access-Control-Expose-Headers": "X-Voice-Provider"})
+
+    @app.get("/api/voice/agent")
+    async def voice_agent():
+        """Config for a live ElevenLabs Conversational AI session grounded in the current world (key-gated)."""
+        from ..agents.buds import NAME, context_for_llm
+
+        if not elevenlabs.agent_configured():
+            return {"configured": False, "provider": None}
+        facts = context_for_llm(engine.ctx, engine.state)
+        return {
+            "configured": True, "provider": "elevenlabs", "agent_id": elevenlabs.agent_id(),
+            "signed_url": await elevenlabs.agent_signed_url(),
+            "dynamic_variables": {"headline": facts["headline"], "status": facts["status"],
+                                  "left_behind": ", ".join(facts["left_behind"]) or "nobody",
+                                  "residents_affected": str(int(facts["metrics"].get("residents_affected", 0)))},
+            "overrides": {"agent": {"firstMessage": f"Hi, I'm {NAME}. {facts['status']} What do you want to know?",
+                                    "prompt": {"prompt": f"You are {NAME}, the on-screen companion in HAVEN. Answer only from these facts: "
+                                                         + str(facts)[:6000]}}},
+        }
+
+    @app.get("/api/sponsors")
+    async def sponsor_health(fresh: bool = False):
+        """Live round-trip proof for every sponsor integration (memoised 30 s; ?fresh=true re-checks)."""
+        return await sponsors.report(fresh=fresh)
+
+    class AskBody(BaseModel):
+        text: str
+
+    @app.post("/api/buds/ask")
+    async def buds_ask(body: AskBody):
+        """Buds answers from the world state (deterministic), Claude only as the fallback paraphraser."""
+        from ..agents import buds
+
+        text = body.text.strip()[:500]
+        if not text:
+            raise HTTPException(400, "say something")
+        reply = buds.answer(engine.ctx, engine.state, text, engine.clock()["time_of_day"])
+        if reply is None:
+            reply = await buds.answer_llm(engine.ctx, engine.state, text) or buds.fallback(text)
+        return reply.model_dump()
+
+    class ActBody(BaseModel):
+        kind: str
+        payload: dict = Field(default_factory=dict)
+        actor: str = "manager (buds)"
+
+    @app.post("/api/buds/act")
+    async def buds_act(body: ActBody):
+        """The human approved something Buds offered: it becomes the same input event a button sends."""
+        p = body.payload
+        if body.kind == "toggle_agent":
+            if p.get("agent") not in engine.state.agents:
+                raise HTTPException(404, "unknown agent")
+            return await _submit(AgentToggle(agent=p["agent"], enabled=bool(p.get("enabled", True))))
+        if body.kind == "approve":
+            return await _submit(PlanDecision(plan_version=int(p.get("plan_version", engine.state.plan.version)),
+                                              decision="approve", actor=body.actor))
+        if body.kind == "rule":
+            return await _submit(ManagerRule(text=str(p.get("text", "")), code=str(p.get("code", "")), actor=body.actor))
+        if body.kind == "leak":
+            return await _submit(SensorReading(sensor_id="basement_mech_1", value=float(p.get("value", 0.9)), source="manual"))
+        if body.kind == "clock":
+            await engine.set_clock(p.get("playing"), p.get("speed"))
+            return engine.clock()
+        if body.kind == "reset":
+            state = await engine.reset()
+            return {"run_id": state.run_id}
+        if body.kind == "demo":
+            return await load_demo()
+        raise HTTPException(400, f"unknown action {body.kind}")
 
     @app.get("/api/integrations")
     async def integrations():
         return {
             "cartesia": cartesia.configured(),
+            "elevenlabs": elevenlabs.configured(),
+            "voice_agent": elevenlabs.agent_configured(),
             "tiger": tiger.configured,
             "llm": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
             "sensor_token": bool(sensor_token),

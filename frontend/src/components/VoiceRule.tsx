@@ -112,7 +112,7 @@ export function VoiceRule({ world }: Props) {
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between">
-        <span className="eyebrow">Say a rule</span>
+        <span className="eyebrow" data-buds="panel:voice">Say a rule</span>
         <span className="label">manager</span>
       </div>
 

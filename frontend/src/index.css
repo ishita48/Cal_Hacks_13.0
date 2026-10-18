@@ -374,3 +374,72 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---- Buds: the on-screen companion ------------------------------------------------------------- */
+.buds-orb {
+  position: fixed; right: 22px; bottom: 22px; z-index: 70;
+  width: 54px; height: 54px; border-radius: 999px;
+  display: grid; place-items: center; color: #fff;
+  background: radial-gradient(circle at 35% 30%, #5eb1ff, #0a84ff 55%, #0040b0);
+  box-shadow: 0 10px 30px rgba(10, 132, 255, 0.45), inset 0 1px 0 rgba(255,255,255,0.35);
+  transition: transform 200ms cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 300ms ease;
+}
+.buds-orb:hover { transform: scale(1.06); }
+.buds-orb.is-open { transform: scale(0.92); }
+.buds-orb-ring { position: absolute; inset: -6px; border-radius: 999px; border: 2px solid transparent; pointer-events: none; }
+.buds-orb.is-listening .buds-orb-ring { border-color: rgba(255, 69, 58, 0.9); animation: haven-pulse 1.1s ease-in-out infinite; }
+.buds-orb.is-speaking .buds-orb-ring { border-color: rgba(48, 209, 88, 0.9); animation: haven-pulse 0.7s ease-in-out infinite; }
+.buds-orb.is-thinking .buds-orb-ring { border-color: rgba(255, 214, 10, 0.9); animation: haven-pulse 0.5s ease-in-out infinite; }
+
+.buds-nudge {
+  position: fixed; right: 88px; bottom: 30px; z-index: 69; max-width: 280px;
+  padding: 8px 12px; font-size: 12px; color: #f5f5f7; text-align: left;
+  animation: haven-fp-fade 400ms ease-out both;
+}
+
+.buds-panel {
+  position: fixed; right: 22px; bottom: 88px; z-index: 70;
+  width: min(380px, calc(100vw - 44px)); max-height: min(560px, calc(100vh - 120px));
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: haven-fp-fade 220ms ease-out both;
+}
+.buds-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.buds-dot { width: 8px; height: 8px; border-radius: 999px; background: #6e6e73; }
+.buds-dot.is-listening { background: #ff453a; box-shadow: 0 0 8px rgba(255,69,58,0.7); }
+.buds-dot.is-speaking { background: #30d158; box-shadow: 0 0 8px rgba(48,209,88,0.7); }
+.buds-dot.is-thinking { background: #ffd60a; }
+.buds-ib { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #a1a1a6; font-size: 13px; }
+.buds-ib:hover { background: rgba(255,255,255,0.08); color: #f5f5f7; }
+.buds-ib.is-on { background: rgba(10,132,255,0.25); color: #f5f5f7; }
+.buds-ib:disabled { opacity: 0.35; }
+.buds-list { flex: 1; min-height: 120px; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.buds-msg { max-width: 92%; padding: 8px 10px; border-radius: 12px; font-size: 12px; line-height: 1.4; color: #f5f5f7; }
+.buds-msg.me { align-self: flex-end; background: rgba(10,132,255,0.28); border-bottom-right-radius: 4px; }
+.buds-msg.bud { align-self: flex-start; background: rgba(255,255,255,0.07); border-bottom-left-radius: 4px; }
+.buds-msg.hint { align-self: stretch; background: transparent; font-size: 11px; }
+.buds-action { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); }
+.buds-form { display: flex; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid rgba(255,255,255,0.08); }
+.buds-mic { width: 36px; height: 36px; flex: none; border-radius: 10px; background: rgba(255,255,255,0.07); color: #f5f5f7; }
+.buds-mic.is-on { background: rgba(255,69,58,0.35); animation: haven-pulse 1.1s ease-in-out infinite; }
+.buds-mic:disabled { opacity: 0.35; }
+
+/* the cursor and ring that fly to what Buds talks about */
+.buds-cursor {
+  position: fixed; z-index: 80; pointer-events: none; opacity: 0;
+  transform: translate(-2px, -2px);
+  transition: left 650ms cubic-bezier(0.2, 0.8, 0.2, 1), top 650ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 250ms ease;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,0.5));
+}
+.buds-cursor.is-on { opacity: 1; }
+.buds-cursor-tag {
+  position: absolute; left: 16px; top: 16px; white-space: nowrap;
+  padding: 2px 7px; border-radius: 999px; background: #0a84ff; color: #fff;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+}
+.buds-ring {
+  position: fixed; z-index: 79; pointer-events: none; border-radius: 14px;
+  border: 2px solid rgba(10,132,255,0.95); box-shadow: 0 0 0 6px rgba(10,132,255,0.18), 0 0 30px rgba(10,132,255,0.35);
+  animation: buds-ring-in 500ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transition: left 650ms cubic-bezier(0.2, 0.8, 0.2, 1), top 650ms cubic-bezier(0.2, 0.8, 0.2, 1), width 650ms, height 650ms;
+}
+@keyframes buds-ring-in { from { opacity: 0; transform: scale(1.08); } to { opacity: 1; transform: scale(1); } }

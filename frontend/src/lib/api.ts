@@ -1,4 +1,4 @@
-import type { AgentInfo, BuildingSpec, FetchStatus, Integrations, MemoryRule, Roster, RuleParse, SensorHistory } from '../state/types'
+import type { AgentInfo, BudsReply, BuildingSpec, FetchStatus, Integrations, MemoryRule, Roster, RuleParse, SensorHistory, SponsorReport } from '../state/types'
 
 const base = import.meta.env.VITE_HAVEN_API ?? ''
 
@@ -21,6 +21,14 @@ export interface RunSummary {
 
 export type Command = 'close' | 'open' | 'off' | 'on'
 
+export interface LoggedEvent {
+  seq: number
+  run_id: string
+  step: number
+  wall_time: number
+  event: { type: string } & Record<string, unknown>
+}
+
 export const api = {
   sensor: (sensor_id: string, value: number) =>
     request('POST', '/api/sensor', { sensor_id, value, source: 'manual' }),
@@ -42,6 +50,10 @@ export const api = {
   integrations: () => request<Integrations>('GET', '/api/integrations'),
   fetchStatus: () => request<FetchStatus>('GET', '/api/fetch'),
   memory: () => request<MemoryRule[]>('GET', '/api/memory'),
+  sponsors: (fresh = false) => request<SponsorReport>('GET', `/api/sponsors${fresh ? '?fresh=true' : ''}`),
+  budsAsk: (text: string) => request<BudsReply>('POST', '/api/buds/ask', { text }),
+  budsAct: (kind: string, payload: Record<string, unknown>) => request('POST', '/api/buds/act', { kind, payload }),
+  runEvents: (runId: string) => request<LoggedEvent[]>('GET', `/api/runs/${encodeURIComponent(runId)}/events`),
   applyMemory: (code: string, actor = 'manager') => request('POST', '/api/memory/apply', { code, actor }),
   toggleAgent: (agent: string, enabled: boolean) => request('POST', '/api/agent', { agent, enabled }),
   decidePlan: (plan_version: number, decision: 'approve' | 'reject', actor = 'manager') =>

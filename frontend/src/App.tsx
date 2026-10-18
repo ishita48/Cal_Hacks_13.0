@@ -1,5 +1,6 @@
 import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
 import { AgentConsole } from './components/AgentConsole'
+import { Buds } from './components/Buds'
 import { CascadePanel } from './components/CascadePanel'
 import { Controls } from './components/Controls'
 import { FloorPlan } from './components/FloorPlan'
@@ -9,7 +10,7 @@ import { PlanPanel } from './components/PlanPanel'
 import { VoiceRule } from './components/VoiceRule'
 import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
-import type { Integrations, Level } from './state/types'
+import type { BudsFocus, Integrations, Level, SponsorReport } from './state/types'
 import { connectWorld, useWorld } from './state/world'
 
 // The 3D twin is another view of the same store; it is lazy so the 2D app loads first.
@@ -35,6 +36,20 @@ export default function App() {
   const [level, setLevel] = useState('L4')
   const [view, setView] = useState<'2d' | '3d'>('2d')
   const [rightTab, setRightTab] = useState<'agents' | 'messages' | 'cascade'>('agents')
+
+  // Buds points at things: switch to the tab or floor that holds them first.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      for (const f of (e as CustomEvent<BudsFocus[]>).detail ?? []) {
+        if (f.kind === 'tab' && (f.id === 'agents' || f.id === 'messages' || f.id === 'cascade')) setRightTab(f.id)
+        if (f.kind === 'agent') setRightTab('agents')
+        if (f.kind === 'level') setLevel(f.id)
+        if (f.kind === 'resident' || f.kind === 'actor') setLevel((lv) => lv)
+      }
+    }
+    window.addEventListener('haven:focus', onFocus)
+    return () => window.removeEventListener('haven:focus', onFocus)
+  }, [])
 
   if (!world || !clock) {
     return (
@@ -128,7 +143,7 @@ export default function App() {
                   const soon = !now && darkSoon.has(lv.id)
                   const wet = wetLevels.has(lv.id)
                   return (
-                    <button key={lv.id} onClick={() => setLevel(lv.id)} className={`seg-item mono ${level === lv.id ? 'is-on' : ''}`} title={lv.name}>
+                    <button key={lv.id} data-buds={`level:${lv.id}`} onClick={() => setLevel(lv.id)} className={`seg-item mono ${level === lv.id ? 'is-on' : ''}`} title={lv.name}>
                       {lv.id}
                       {(now || soon || wet) && (
                         <span className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-haven-amber haven-pulse'}`} />
@@ -159,7 +174,7 @@ export default function App() {
             </div>
             <Legend />
           </div>
-          <div className="min-h-0 flex-1 p-3">
+          <div className="min-h-0 flex-1 p-3" data-buds="panel:map">
             {view === '3d' ? (
               <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
                 <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">loading the 3D twin…</div>}>
@@ -180,7 +195,7 @@ export default function App() {
             <div className="hairline-b flex items-center px-4 py-2.5">
               <div className="seg">
                 {(['agents', 'messages', 'cascade'] as const).map((t) => (
-                  <button key={t} onClick={() => setRightTab(t)} className={`seg-item ${rightTab === t ? 'is-on' : ''}`}>
+                  <button key={t} data-buds={`tab:${t}`} onClick={() => setRightTab(t)} className={`seg-item ${rightTab === t ? 'is-on' : ''}`}>
                     {t === 'agents' ? 'Agents' : t === 'messages' ? 'Messages' : 'Cascade'}
                     {t === 'agents' && vetoes > 0 && (
                       <span className="ml-1.5 inline-block rounded-full bg-haven-danger px-1.5 text-[10px] font-semibold text-white">{vetoes}</span>
@@ -204,6 +219,7 @@ export default function App() {
           </div>
         </section>
       </main>
+      <Buds />
     </div>
   )
 }
@@ -221,23 +237,73 @@ class ViewErrorBoundary extends Component<{ fallback: ReactNode; children: React
   }
 }
 
-/** Which sponsor integrations are live in this backend (key-gated; dim = simulated). */
+/** Which sponsor integrations are live in this backend (key-gated; dim = simulated). Click for the proof. */
 function IntegrationStrip({ flags }: { flags: Integrations }) {
+  const [open, setOpen] = useState(false)
+  const [report, setReport] = useState<SponsorReport | null>(null)
+  const [checking, setChecking] = useState(false)
+  const check = (fresh: boolean) => {
+    setChecking(true)
+    api
+      .sponsors(fresh)
+      .then(setReport)
+      .catch(() => {})
+      .finally(() => setChecking(false))
+  }
+  useEffect(() => {
+    if (open && !report) check(false)
+  }, [open, report])
   const items: [string, boolean, string][] = [
     ['fetch.ai', flags.fetch, flags.agentverse ? 'resident agents on Agentverse' : flags.fetch ? 'resident agents as local uAgents' : 'HAVEN_FETCH=0'],
-    ['claude', flags.llm, flags.llm ? 'rule parsing fallback + explanations' : 'set ANTHROPIC_API_KEY'],
-    ['cartesia', flags.cartesia, flags.cartesia ? 'spoken briefs' : 'set CARTESIA_API_KEY (browser speech used)'],
+    ['claude', flags.llm, flags.llm ? 'rule parsing fallback + explanations + Buds' : 'set ANTHROPIC_API_KEY'],
+    ['elevenlabs', flags.elevenlabs, flags.elevenlabs ? (flags.voice_agent ? 'voice + live voice agent' : 'HAVEN\'s voice') : 'set ELEVENLABS_API_KEY (next: Cartesia, then browser)'],
+    ['cartesia', flags.cartesia, flags.cartesia ? 'second voice' : 'set CARTESIA_API_KEY'],
     ['tiger', flags.tiger, flags.tiger ? 'sensor time-series' : 'set TIGER_DATABASE_URL (event log used)'],
     ['twilio', flags.twilio, flags.twilio ? 'real plumber call + demo text' : 'set TWILIO_* (call simulated)'],
     ['linear', flags.linear, flags.linear ? 'real facilities ticket' : 'set LINEAR_API_KEY (ticket simulated)'],
   ]
   return (
-    <span className="hidden items-center gap-1 xl:flex" title="Sponsor integrations: bright = live, dim = simulated">
-      {items.map(([name, on, tip]) => (
-        <span key={name} className={`mono rounded-full border px-1.5 py-px text-[9px] ${on ? 'border-haven-safe/50 text-haven-safe' : 'border-white/10 text-t3'}`} title={tip}>
-          {name}
-        </span>
-      ))}
+    <span className="relative hidden items-center gap-1 xl:flex">
+      <button className="flex items-center gap-1" onClick={() => setOpen((o) => !o)} title="Sponsor integrations: bright = live, dim = simulated. Click for live proof.">
+        {items.map(([name, on, tip]) => (
+          <span key={name} className={`mono rounded-full border px-1.5 py-px text-[9px] ${on ? 'border-haven-safe/50 text-haven-safe' : 'border-white/10 text-t3'}`} title={tip}>
+            {name}
+          </span>
+        ))}
+      </button>
+      {open && (
+        <div className="glass absolute top-8 right-0 z-50 w-[460px] p-3 text-left" style={{ borderRadius: 14 }}>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="eyebrow">Live stack · round-trip proof</span>
+            <span className="flex items-center gap-2">
+              {report && <span className="mono text-[10px] text-t3">{report.live}/{report.sponsors.length} live</span>}
+              <button className="btn-secondary btn-sm" disabled={checking} onClick={() => check(true)}>
+                {checking ? 'checking…' : 'Re-check'}
+              </button>
+            </span>
+          </div>
+          {!report ? (
+            <p className="text-[11px] text-t3">checking every sponsor…</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {report.sponsors.map((s) => (
+                <li key={s.id} className="flex items-start gap-2 text-[11px]">
+                  <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${s.state === 'live' ? 'bg-haven-safe' : s.state === 'error' ? 'bg-haven-danger' : 'bg-t3'}`} style={s.state === 'live' ? { boxShadow: `0 0 8px ${s.color}` } : undefined} />
+                  <span className="w-24 shrink-0 font-semibold text-t1">{s.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-t2">{s.role}</span>
+                    <span className={`mono block text-[10px] ${s.state === 'live' ? 'text-haven-safe' : s.state === 'error' ? 'text-haven-danger' : 'text-t3'}`}>
+                      {s.proof}
+                      {s.latency_ms != null ? ` · ${s.latency_ms} ms` : ''}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2 text-[10px] text-t3">A read-only request per service whose answer only the live service could give. Keys: backend/.env (see README).</p>
+        </div>
+      )}
     </span>
   )
 }

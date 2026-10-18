@@ -236,6 +236,8 @@ export interface SensorHistory {
 
 export interface Integrations {
   cartesia: boolean
+  elevenlabs: boolean
+  voice_agent: boolean
   tiger: boolean
   llm: boolean
   sensor_token: boolean
@@ -278,6 +280,46 @@ export interface FetchStatus {
   agents: FetchAgent[]
   received: number
   agreeing: number
+}
+
+// ---- Buds (backend/haven/agents/buds.py) ----------------------------------------------------
+
+export interface BudsFocus {
+  kind: 'agent' | 'step' | 'level' | 'tab' | 'panel' | 'resident' | 'actor' | string
+  id: string
+  label: string
+}
+
+export interface BudsAction {
+  kind: 'toggle_agent' | 'approve' | 'rule' | 'leak' | 'demo' | 'clock' | 'reset' | string
+  label: string
+  payload: Record<string, unknown>
+}
+
+export interface BudsReply {
+  speech: string
+  focus: BudsFocus[]
+  actions: BudsAction[]
+  source: 'rules' | 'llm' | 'template'
+  intent: string
+}
+
+// ---- sponsor proof (backend/haven/integrations/sponsors.py) ----------------------------------
+
+export interface SponsorHealth {
+  id: string
+  name: string
+  role: string
+  color: string
+  state: 'live' | 'off' | 'error'
+  latency_ms: number | null
+  proof: string
+}
+
+export interface SponsorReport {
+  checked_at: number
+  live: number
+  sponsors: SponsorHealth[]
 }
 
 export interface MemoryRule {

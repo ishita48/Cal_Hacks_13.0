@@ -34,7 +34,7 @@ export function Controls({ world }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between">
-        <span className="eyebrow">Sensor</span>
+        <span className="eyebrow" data-buds="panel:controls">Sensor</span>
         <span className="mono text-[10px] text-t3">{SENSOR}</span>
       </div>
 
