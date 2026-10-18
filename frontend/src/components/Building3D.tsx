@@ -21,6 +21,21 @@ const INTERIOR_URL = '/models/blackwell_interior.glb'
 // neighbours, trees, props, people) exported by blender/build_blackwell.py --glb-site. Missing = fine.
 const FURNITURE_URL = '/models/blackwell_furniture.glb'
 const SITE_URL = '/models/blackwell_site.glb'
+// The exact HDRI the Blender scene uses (blender/build_blackwell.py); light formers stand in when it is absent.
+const SKY_URL = '/env/sky_2k.hdr'
+
+/**
+ * The sun as Blender has it, so shadows and highlights fall where the renders put them. Spec frame:
+ * azimuth clockwise from north (+y), elevation above the horizon; the HDRI is rotated about up by
+ * `envRotation` (Blender rotates it about +z; three.js about +y, same sign).
+ */
+const SUN = { azimuthDeg: 230, elevationDeg: 48, envRotationRad: 0 }
+function sunPosition(distance = 160): [number, number, number] {
+  const az = (SUN.azimuthDeg * Math.PI) / 180
+  const el = (SUN.elevationDeg * Math.PI) / 180
+  // spec (x east, y north, z up) -> three (x, z, -y)
+  return [Math.sin(az) * Math.cos(el) * distance, Math.sin(el) * distance, -Math.cos(az) * Math.cos(el) * distance]
+}
 useGLTF.preload(EXTERIOR_URL)
 useGLTF.preload(INTERIOR_URL)
 
@@ -155,21 +170,20 @@ function Scene({ level }: Props) {
         minZoom={3}
         maxZoom={30}
       />
-      {/* Daylight: the Blender scene's sun and sky, approximated for the textured GLBs. The environment is
-          built from light formers (no network fetch), so glass, panels and cars get real reflections. */}
-      <hemisphereLight args={['#dfe8ff', '#3a3330', 1.1]} />
-      <directionalLight position={[40, 90, 30]} intensity={2.6} color="#fff1dc" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004}>
-        <orthographicCamera attach="shadow-camera" args={[-120, 120, 120, -120, 1, 400]} />
+      {/* Daylight as Blender has it: the same HDRI for sky light and reflections, a sun in the same place
+          for shadows (normal maps in the baked GLBs read off it). Light formers stand in without the file. */}
+      <hemisphereLight args={['#dfe8ff', '#3a3330', 0.55]} />
+      <directionalLight position={sunPosition()} intensity={3.2} color="#fff1dc" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02}>
+        <orthographicCamera attach="shadow-camera" args={[-130, 130, 130, -130, 1, 500]} />
       </directionalLight>
-      <directionalLight position={[-60, 40, -80]} intensity={0.5} color="#8fb4ff" />
-      <Environment resolution={64} frames={1}>
-        <Lightformer intensity={2.2} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[14, 14, 1]} color="#dbe7ff" />
-        <Lightformer intensity={0.8} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[12, 3, 1]} color="#ffe9c8" />
-        <Lightformer intensity={0.6} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[12, 3, 1]} color="#cfe0ff" />
-      </Environment>
+      <Optional fallback={<StudioLight />}>
+        <Suspense fallback={<StudioLight />}>
+          <Environment files={SKY_URL} background backgroundBlurriness={0.35} backgroundIntensity={0.9} environmentIntensity={1.1} environmentRotation={[0, SUN.envRotationRad, 0]} backgroundRotation={[0, SUN.envRotationRad, 0]} />
+        </Suspense>
+      </Optional>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
         <planeGeometry args={[600, 600]} />
-        <meshStandardMaterial color="#121214" roughness={1} metalness={0} />
+        <meshStandardMaterial color="#2b2a28" roughness={1} metalness={0} />
       </mesh>
       <gridHelper args={[400, 80, '#1f1f24', '#141418']} position={[center.x, -0.07, center.z]} />
 
@@ -661,6 +675,17 @@ function Furniture({ level, levelIndex }: { level: string; levelIndex: Record<st
   return <primitive object={furniture.scene} />
 }
 
+/** The light rig used when the HDRI is missing: a soft sky panel and two rim panels, no network fetch. */
+function StudioLight() {
+  return (
+    <Environment resolution={64} frames={1}>
+      <Lightformer intensity={2.2} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[14, 14, 1]} color="#dbe7ff" />
+      <Lightformer intensity={0.8} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[12, 3, 1]} color="#ffe9c8" />
+      <Lightformer intensity={0.6} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[12, 3, 1]} color="#cfe0ff" />
+    </Environment>
+  )
+}
+
 /** The street, neighbours, trees, props and people from the Blender scene (optional file). Hidden when
  *  looking into the basement, like the cutaway renders; alpha-masked leaves keep their transparency. */
 function Site({ level, levelIndex }: { level: string; levelIndex: Record<string, number> }) {
@@ -684,13 +709,13 @@ function Site({ level, levelIndex }: { level: string; levelIndex: Record<string,
   return <primitive object={site.scene} />
 }
 
-/** Renders nothing if the child throws (e.g. the optional GLB is absent or fails to parse). */
-class Optional extends Component<{ children: ReactNode }, { failed: boolean }> {
+/** Renders the fallback (nothing, by default) if the child throws, e.g. an optional file is absent. */
+class Optional extends Component<{ children: ReactNode; fallback?: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() {
     return { failed: true }
   }
   render() {
-    return this.state.failed ? null : this.props.children
+    return this.state.failed ? (this.props.fallback ?? null) : this.props.children
   }
 }
