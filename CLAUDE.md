@@ -40,6 +40,8 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
 - Export spec for Blender: `cd backend && PYTHONPATH=. uv run python tools/export_building.py` → `shared/`
 - Windows note: uvicorn `--reload` can hang on reload; restart the server if endpoints look stale.
   Also check for a stale server already holding :8000 (`Get-NetTCPConnection -LocalPort 8000`).
+- Blender exterior (from `shared/`): `blender-launcher.exe -b -P blender/build_blackwell.py -- --glb frontend/public/models/blackwell.glb --render blender/renders/hero.png`
+  (or exec the script in a live Blender with `HAVEN_ROOT` set; see `blender/README.md`). Window meshes are `win_<space_id>`.
 - Frontend: `cd frontend && npm run dev` (proxies `/api` and `/ws` to :8000) · typecheck `npx tsc -b`
 
 ## Conventions
