@@ -139,23 +139,23 @@ export function FloorPlan({ world, level }: Props) {
   if (!spec) return <div className="flex h-full items-center justify-center text-[12px] text-t3">loading building…</div>
 
   return (
-    <svg viewBox={`-2 -2 ${width + 4} ${depth + 4}`} className="h-full w-full" style={{ maxHeight: '100%' }}>
+    <svg viewBox={`-2 -2 ${width + 4} ${depth + 4}`} className="floorplan h-full w-full" style={{ maxHeight: '100%' }}>
       <defs>
         <pattern id="hatch" width="1.2" height="1.2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="0.5" height="1.2" fill="#ffd60a" opacity="0.35" />
+          <rect width="0.5" height="1.2" fill="#d97706" opacity="0.4" />
         </pattern>
         <filter id="routeGlow" x="-20%" y="-20%" width="140%" height="140%">
           <feGaussianBlur stdDeviation="0.6" />
         </filter>
         <radialGradient id="vignette" cx="50%" cy="45%" r="70%">
-          <stop offset="0%" stopColor="rgba(255,255,255,0.03)" />
-          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+          <stop offset="0%" stopColor="rgba(15,98,254,0.04)" />
+          <stop offset="100%" stopColor="rgba(15,98,254,0)" />
         </radialGradient>
       </defs>
       <rect x={-2} y={-2} width={width + 4} height={depth + 4} fill="url(#vignette)" rx={3} />
       <g transform={`translate(0 ${depth}) scale(1 -1)`}>
         {spec.footprint.map((r, i) => (
-          <rect key={i} x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.14)" strokeWidth={0.14} />
+          <rect key={i} x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} fill="rgba(15,23,42,0.015)" stroke="var(--fp-line)" strokeWidth={0.14} />
         ))}
 
         {here.map((s) => {
@@ -168,57 +168,57 @@ export function FloorPlan({ world, level }: Props) {
           const rh = s.rect.y1 - s.rect.y0
           return (
             <g key={s.id}>
-              <rect x={rx} y={ry} width={rw} height={rh} fill={KIND_FILL[s.kind] ?? 'rgba(255,255,255,0.05)'} stroke="rgba(255,255,255,0.12)" strokeWidth={0.08}>
+              <rect x={rx} y={ry} width={rw} height={rh} fill={KIND_FILL[s.kind] ?? 'rgba(15,23,42,0.04)'} stroke="var(--fp-line-soft)" strokeWidth={0.08}>
                 <title>
                   {s.name} · {s.kind}
                   {w ? ` · water ${(w.depth * 100).toFixed(0)} cm` : ''}
                 </title>
               </rect>
               {/* overlays are always present and ease in and out, instead of switching */}
-              {overlay && <rect className="fp-fill" x={rx} y={ry} width={rw} height={rh} fill="#ff453a" opacity={darkNow ? 0.16 : 0} pointerEvents="none" />}
+              {overlay && <rect className="fp-fill" x={rx} y={ry} width={rw} height={rh} fill="#dc2626" opacity={darkNow ? 0.14 : 0} pointerEvents="none" />}
               {overlay && (
                 <rect className={`fp-fill ${darkSoon ? 'haven-pulse' : ''}`} x={rx} y={ry} width={rw} height={rh} fill="url(#hatch)" opacity={darkSoon ? 1 : 0} pointerEvents="none" />
               )}
-              {w && <rect className="fp-fill fp-fade-in" x={rx} y={ry} width={rw} height={rh} fill="#64d2ff" opacity={waterOpacity} pointerEvents="none" />}
+              {w && <rect className="fp-fill fp-fade-in" x={rx} y={ry} width={rw} height={rh} fill="#0ea5e9" opacity={waterOpacity} pointerEvents="none" />}
             </g>
           )
         })}
 
         {ripples.map((r) => (
-          <circle key={r.key} className="fp-ripple" cx={r.cx} cy={r.cy} r={2.5} fill="none" stroke="#64d2ff" strokeWidth={0.35} />
+          <circle key={r.key} className="fp-ripple" cx={r.cx} cy={r.cy} r={2.5} fill="none" stroke="#0ea5e9" strokeWidth={0.35} />
         ))}
 
         {openings.map((o) =>
           o.axis === 'x' ? (
-            <line key={o.id} x1={o.x - o.width / 2} x2={o.x + o.width / 2} y1={o.y} y2={o.y} stroke={o.kind === 'exit' ? '#30d158' : 'rgba(255,255,255,0.35)'} strokeWidth={0.22} />
+            <line key={o.id} x1={o.x - o.width / 2} x2={o.x + o.width / 2} y1={o.y} y2={o.y} stroke={o.kind === 'exit' ? '#16a34a' : 'var(--fp-line)'} strokeWidth={0.22} />
           ) : (
-            <line key={o.id} x1={o.x} x2={o.x} y1={o.y - o.width / 2} y2={o.y + o.width / 2} stroke={o.kind === 'exit' ? '#30d158' : 'rgba(255,255,255,0.35)'} strokeWidth={0.22} />
+            <line key={o.id} x1={o.x} x2={o.x} y1={o.y - o.width / 2} y2={o.y + o.width / 2} stroke={o.kind === 'exit' ? '#16a34a' : 'var(--fp-line)'} strokeWidth={0.22} />
           ),
         )}
 
         {/* keyed on the geometry, so a changed route redraws itself on */}
         {routes.map((r) => (
           <g key={`${r.id}:${r.points}`}>
-            <polyline className="fp-draw" pathLength={1} points={r.points} fill="none" stroke="#30d158" strokeWidth={1.1} strokeLinejoin="round" strokeLinecap="round" opacity={0.6} filter="url(#routeGlow)" />
-            <polyline className="fp-draw-dash" points={r.points} fill="none" stroke="#30d158" strokeWidth={0.45} strokeLinejoin="round" strokeLinecap="round" opacity={0.95} strokeDasharray="1.2 0.6" />
+            <polyline className="fp-draw" pathLength={1} points={r.points} fill="none" stroke="#22c55e" strokeWidth={1.1} strokeLinejoin="round" strokeLinecap="round" opacity={0.45} filter="url(#routeGlow)" />
+            <polyline className="fp-draw-dash" points={r.points} fill="none" stroke="#16a34a" strokeWidth={0.45} strokeLinejoin="round" strokeLinecap="round" opacity={0.95} strokeDasharray="1.2 0.6" />
           </g>
         ))}
 
         {stranded.map(({ id, space }) => (
-          <circle key={`ring-${id}`} className="fp-ring" cx={(space.rect.x0 + space.rect.x1) / 2} cy={(space.rect.y0 + space.rect.y1) / 2} r={1.6} fill="none" stroke="#ff453a" strokeWidth={0.3} />
+          <circle key={`ring-${id}`} className="fp-ring" cx={(space.rect.x0 + space.rect.x1) / 2} cy={(space.rect.y0 + space.rect.y1) / 2} r={1.6} fill="none" stroke="#dc2626" strokeWidth={0.3} />
         ))}
         {leftBehind.map(({ id, space }) => (
-          <circle key={`left-${id}`} className="fp-ring" cx={(space.rect.x0 + space.rect.x1) / 2} cy={(space.rect.y0 + space.rect.y1) / 2} r={2.2} fill="none" stroke="#bf5af2" strokeWidth={0.35} />
+          <circle key={`left-${id}`} className="fp-ring" cx={(space.rect.x0 + space.rect.x1) / 2} cy={(space.rect.y0 + space.rect.y1) / 2} r={2.2} fill="none" stroke="#7c3aed" strokeWidth={0.35} />
         ))}
 
         {actors.map((a) => {
-          const color = a.status === 'moving' ? '#64d2ff' : a.status === 'done' ? '#30d158' : '#8e8e93'
+          const color = a.status === 'moving' ? '#0284c7' : a.status === 'done' ? '#16a34a' : '#94a3b8'
           return (
             <g key={`actor-${a.id}`}>
               {a.hx != null && a.hy != null && (
                 <line x1={a.hx} y1={a.hy} x2={a.x} y2={a.y} stroke={color} strokeWidth={0.18} strokeDasharray="0.5 0.4" opacity={0.7} />
               )}
-              <rect className={`mark-in ${a.status === 'moving' ? 'haven-pulse' : ''}`} x={a.x - 0.6} y={a.y - 0.6} width={1.2} height={1.2} transform={`rotate(45 ${a.x} ${a.y})`} fill={color} stroke="rgba(0,0,0,0.6)" strokeWidth={0.12}>
+              <rect className={`mark-in ${a.status === 'moving' ? 'haven-pulse' : ''}`} x={a.x - 0.6} y={a.y - 0.6} width={1.2} height={1.2} transform={`rotate(45 ${a.x} ${a.y})`} fill={color} stroke="var(--fp-mark-stroke)" strokeWidth={0.12}>
                 <title>
                   {a.label} · {a.status}
                 </title>
@@ -232,8 +232,8 @@ export function FloorPlan({ world, level }: Props) {
           const leaking = world.leaks[e.id]?.active
           return (
             <g key={e.id}>
-              {leaking && <circle cx={e.x} cy={e.y} r={2.2} fill="#64d2ff" opacity={0.3} className="haven-pulse" />}
-              <circle className="fp-fill" cx={e.x} cy={e.y} r={e.kind === 'sensor' ? 0.55 : 0.7} fill={STATUS_COLOR[st]} stroke="rgba(0,0,0,0.6)" strokeWidth={0.12}>
+              {leaking && <circle cx={e.x} cy={e.y} r={2.2} fill="#0ea5e9" opacity={0.3} className="haven-pulse" />}
+              <circle className="fp-fill" cx={e.x} cy={e.y} r={e.kind === 'sensor' ? 0.55 : 0.7} fill={STATUS_COLOR[st]} stroke="var(--fp-mark-stroke)" strokeWidth={0.12}>
                 <title>
                   {e.name} · {st}
                   {e.flood_height != null ? ` · fails at ${(e.flood_height * 100).toFixed(0)} cm` : ''}
@@ -244,7 +244,7 @@ export function FloorPlan({ world, level }: Props) {
         })}
 
         {movedMarks.map((m) => (
-          <circle key={`moved-${m.id}`} className="mark-in" cx={m.x} cy={m.y} r={m.named ? 0.8 : 0.45} fill="#30d158" stroke="rgba(255,255,255,0.15)" strokeWidth={0.12}>
+          <circle key={`moved-${m.id}`} className="mark-in" cx={m.x} cy={m.y} r={m.named ? 0.8 : 0.45} fill="#16a34a" stroke="var(--fp-mark-stroke)" strokeWidth={0.12}>
             <title>{m.name} · moved here</title>
           </circle>
         ))}
@@ -252,10 +252,10 @@ export function FloorPlan({ world, level }: Props) {
         {marks.map(({ r, predicted, space }) => {
           const cx = (space.rect.x0 + space.rect.x1) / 2
           const cy = (space.rect.y0 + space.rect.y1) / 2
-          const color = r.severity === 'critical' ? '#ff453a' : '#ffd60a'
+          const color = r.severity === 'critical' ? '#dc2626' : '#d97706'
           return (
             <g key={r.id}>
-              <circle className="mark-in fp-fill" cx={cx} cy={cy} r={NAMED.has(r.id) ? 1.1 : 0.7} fill={color} opacity={predicted ? 0.55 : 1} stroke="rgba(255,255,255,0.15)" strokeWidth={0.15}>
+              <circle className="mark-in fp-fill" cx={cx} cy={cy} r={NAMED.has(r.id) ? 1.1 : 0.7} fill={color} opacity={predicted ? 0.55 : 1} stroke="var(--fp-mark-stroke)" strokeWidth={0.15}>
                 <title>
                   {r.name} · {space.name} · {r.impacts.join(', ')}
                 </title>
@@ -266,7 +266,7 @@ export function FloorPlan({ world, level }: Props) {
       </g>
 
       {/* Labels are drawn un-flipped so the text reads normally. */}
-      <g fontFamily="Geist, sans-serif" fontSize={1.1} fill="#a1a1a6" pointerEvents="none">
+      <g fontFamily="Geist, sans-serif" fontSize={1.1} fill="var(--fp-text)" pointerEvents="none">
         {here
           .filter((s) => s.kind !== 'room' && s.kind !== 'bathroom' && s.rect.x1 - s.rect.x0 > 3 && s.rect.y1 - s.rect.y0 > 2.4)
           .map((s) => (
@@ -286,26 +286,26 @@ export function FloorPlan({ world, level }: Props) {
         {marks
           .filter((m) => NAMED.has(m.r.id))
           .map(({ r, space }) => (
-            <text key={r.id} className="fp-fade-in" x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 - 1.5} textAnchor="middle" fontSize={1.3} fill="#f5f5f7" fontWeight={600}>
+            <text key={r.id} className="fp-fade-in" x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 - 1.5} textAnchor="middle" fontSize={1.3} fill="var(--fp-text-strong)" fontWeight={600}>
               {r.name.split(' ')[0]}
             </text>
           ))}
         {movedMarks
           .filter((m) => m.named)
           .map((m) => (
-            <text key={`moved-label-${m.id}`} className="fp-fade-in" x={m.x} y={depth - m.y - 1.2} textAnchor="middle" fontSize={1.3} fill="#30d158" fontWeight={600}>
+            <text key={`moved-label-${m.id}`} className="fp-fade-in" x={m.x} y={depth - m.y - 1.2} textAnchor="middle" fontSize={1.3} fill="#16a34a" fontWeight={600}>
               {m.name.split(' ')[0]}
             </text>
           ))}
         {leftBehind.map(({ id, space }) => (
-          <text key={`left-label-${id}`} className="fp-fade-in" x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 + 3.2} textAnchor="middle" fontSize={1.1} fill="#bf5af2" fontWeight={600}>
+          <text key={`left-label-${id}`} className="fp-fade-in" x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 + 3.2} textAnchor="middle" fontSize={1.1} fill="#7c3aed" fontWeight={600}>
             left behind
           </text>
         ))}
         {actors
           .filter((a) => a.status !== 'idle')
           .map((a) => (
-            <text key={`actor-label-${a.id}`} className="fp-fade-in" x={a.x} y={depth - a.y - 1.1} textAnchor="middle" fontSize={0.95} fill={a.status === 'moving' ? '#64d2ff' : '#30d158'} fontWeight={600}>
+            <text key={`actor-label-${a.id}`} className="fp-fade-in" x={a.x} y={depth - a.y - 1.1} textAnchor="middle" fontSize={0.95} fill={a.status === 'moving' ? '#0284c7' : '#16a34a'} fontWeight={600}>
               {a.label.replace(/\s*\(.*\)/, '')}
             </text>
           ))}

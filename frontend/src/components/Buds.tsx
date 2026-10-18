@@ -1,23 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { Companion, type Mood } from '../lib/companion'
 import { isSpeaking, speak, stopSpeaking } from '../lib/speak'
 import { listen, soundsLikeEcho, voiceSupported, type Listener } from '../lib/voice'
 import { useWorld } from '../state/world'
 import type { BudsAction, BudsFocus, BudsReply } from '../state/types'
 
 /**
- * Buds: the on-screen companion. An orb in the corner you can type to or talk to, hands-free.
- * It answers from the one world state (the backend router, Claude only as a fallback), points at
- * the thing it is talking about, and offers actions that only run once you approve them: Buds
- * proposes, the human gates, the world changes through the same input events a button sends.
+ * Buds: the companion on the screen, in the spirit of StudyO's Clicky. When it is on, a soft cursor
+ * rides next to your mouse. Hold Ctrl+Alt (Cmd+Alt on a Mac) and talk; release to send. It answers
+ * from the one world state, says the answer out loud in a bubble by the cursor, flies to the agent
+ * card, plan step, floor or panel it is talking about, and offers actions that only run after you
+ * approve them: Buds proposes, the human gates, the world changes through the same input events a
+ * button sends.
  *
- * Pointing: every panel, agent card, plan step, floor button and tab carries data-buds="kind:id".
- * Buds raises `haven:focus` (App switches tab or floor), waits a frame, then flies its cursor
- * to the element and rings it. Speaking: ElevenLabs → Cartesia → browser; interruptible.
+ * Keys: Alt+B on/off · hold Ctrl+Alt to talk · Alt+C chat panel · Alt+Shift+V hands-free · Esc hush.
  */
 
 const NAME = 'Buds'
 const ECHO_TAIL_MS = 1500
+const HOLD_MS = 180
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+const HOLD_LABEL = IS_MAC ? '⌘+⌥' : 'Ctrl+Alt'
+const ON_KEY = 'haven.buds.on'
 
 interface Msg {
   id: number
@@ -36,23 +41,59 @@ export function focusKey(f: BudsFocus): string {
 }
 
 export function Buds() {
+  const [active, setActive] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(ON_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
   const [open, setOpen] = useState(false)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [listening, setListening] = useState(false)
+  const [holding, setHolding] = useState(false)
   const [handsFree, setHandsFree] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [muted, setMuted] = useState(false)
   const [partial, setPartial] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [nudge, setNudge] = useState<string | null>(null)
+  const companion = useRef<Companion | null>(null)
   const listener = useRef<Listener | null>(null)
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout> | null; listening: boolean } | null>(null)
   const spoken = useRef({ text: '', endedAt: 0 })
+  const sayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const list = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
   const supported = voiceSupported()
   const world = useWorld((s) => s.world)
   const replay = world?.mode === 'replay'
+  const openRef = useRef(open)
+  openRef.current = open
+  const activeRef = useRef(active)
+  activeRef.current = active
+
+  // The companion lives in the DOM for the life of the app; following is on while Buds is on.
+  useEffect(() => {
+    const c = new Companion()
+    companion.current = c
+    return () => c.destroy()
+  }, [])
+  useEffect(() => {
+    companion.current?.follow(active)
+    try {
+      localStorage.setItem(ON_KEY, active ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }, [active])
+
+  const status: Mood = speaking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle'
+  useEffect(() => {
+    companion.current?.setMood(status)
+  }, [status])
 
   // A gentle nudge the first time there is a plan to talk about.
   const nudged = useRef(false)
@@ -60,7 +101,7 @@ export function Buds() {
     if (!world || nudged.current || open) return
     if (world.plan.status !== 'none') {
       nudged.current = true
-      setNudge('There is a plan. Ask me why the lifts are held, or who is left behind.')
+      setNudge(`There is a plan. Hold ${HOLD_LABEL} and ask me why the lifts are held.`)
       const t = setTimeout(() => setNudge(null), 9000)
       return () => clearTimeout(t)
     }
@@ -70,19 +111,38 @@ export function Buds() {
     list.current?.scrollTo?.({ top: list.current.scrollHeight, behavior: 'smooth' })
   }, [msgs, partial])
 
+  /** Show a line in the bubble by the cursor (when the panel is closed). */
+  const bubble = useCallback((line: string | null, holdMs = 0) => {
+    if (sayTimer.current) clearTimeout(sayTimer.current)
+    sayTimer.current = null
+    const c = companion.current
+    if (!c) return
+    if (!line || openRef.current || !activeRef.current) {
+      c.say(null)
+      return
+    }
+    c.say(line)
+    if (holdMs) sayTimer.current = setTimeout(() => c.say(null), holdMs)
+  }, [])
+
   const say = useCallback(
     (line: string) => {
-      if (muted) return
+      if (muted) {
+        bubble(line, 6000)
+        return
+      }
+      bubble(line)
       spoken.current = { text: line, endedAt: 0 }
       setSpeaking(true)
       void speak(line, 'en', {
         onEnd: () => {
           spoken.current.endedAt = Date.now()
           setSpeaking(false)
+          bubble(line, 2500)
         },
       })
     },
-    [muted],
+    [bubble, muted],
   )
 
   const hush = useCallback(() => {
@@ -91,7 +151,8 @@ export function Buds() {
       spoken.current.endedAt = Date.now()
       setSpeaking(false)
     }
-  }, [])
+    bubble(null)
+  }, [bubble])
 
   const ask = useCallback(
     async (phrase: string) => {
@@ -114,6 +175,8 @@ export function Buds() {
     },
     [busy, hush, say],
   )
+  const askRef = useRef(ask)
+  askRef.current = ask
 
   // ---- voice in --------------------------------------------------------------------------------
   const stopListening = useCallback(() => {
@@ -124,16 +187,17 @@ export function Buds() {
   }, [])
 
   const startListening = useCallback(
-    (continuous: boolean) => {
+    (mode: 'tap' | 'hold' | 'converse') => {
       stopListening()
+      let heard = ''
       const l = listen({
-        continuous,
+        continuous: mode !== 'tap',
         onPartial: (t) => {
-          // Barge-in: the person is talking over Buds. Unless it is just Buds hearing itself.
           const echo = (isSpeaking() || Date.now() - spoken.current.endedAt < ECHO_TAIL_MS) && soundsLikeEcho(t, spoken.current.text)
           if (echo) return
           hush()
           setPartial(t)
+          if (mode === 'hold') bubble(`${t}…`)
         },
         onFinal: (t) => {
           const echo = Date.now() - spoken.current.endedAt < ECHO_TAIL_MS && soundsLikeEcho(t, spoken.current.text)
@@ -143,53 +207,134 @@ export function Buds() {
             hush()
             return
           }
-          void ask(t)
-          if (!continuous) stopListening()
+          if (mode === 'hold') {
+            heard = `${heard} ${t}`.trim()
+            return // sent on release
+          }
+          void askRef.current(t)
+          if (mode === 'tap') stopListening()
         },
         onError: (m) => {
           setError(m)
+          bubble(m, 4000)
           setListening(false)
           setHandsFree(false)
         },
         onEnd: () => {
           setListening(false)
-          if (continuous) setHandsFree(false)
+          if (mode === 'converse') setHandsFree(false)
         },
       })
       listener.current = l
+      if (l && mode === 'hold') {
+        const base = l.stop
+        l.stop = () => {
+          base()
+          const q = heard.trim()
+          heard = ''
+          if (q) void askRef.current(q)
+        }
+      }
       setListening(!!l)
       if (!l) setHandsFree(false)
     },
-    [ask, hush, stopListening],
+    [bubble, hush, stopListening],
   )
+  const startRef = useRef(startListening)
+  startRef.current = startListening
 
   useEffect(() => () => stopListening(), [stopListening])
 
-  const toggleHandsFree = () => {
+  const toggleHandsFree = useCallback(() => {
     if (handsFree) {
       setHandsFree(false)
       stopListening()
     } else {
       setHandsFree(true)
-      setOpen(true)
-      startListening(true)
+      setActive(true)
+      startListening('converse')
     }
-  }
+  }, [handsFree, startListening, stopListening])
 
-  // Alt+B opens Buds; Alt+Shift+V toggles hands-free; Escape stops it talking.
+  // ---- keys: Alt+B on/off · hold Ctrl+Alt to talk · Alt+C panel · Alt+Shift+V hands-free · Esc --
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'v') {
+    const isHold = (e: KeyboardEvent) => (IS_MAC ? e.metaKey : e.ctrlKey) && e.altKey
+    const endHold = (send: boolean) => {
+      const h = hold.current
+      if (!h) return
+      if (h.timer) clearTimeout(h.timer)
+      hold.current = null
+      setHolding(false)
+      if (h.listening) {
+        const l = listener.current
+        listener.current = null
+        setListening(false)
+        setPartial('')
+        if (send) l?.stop()
+        else l?.cancel()
+      }
+    }
+    const onDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'v') {
         e.preventDefault()
         toggleHandsFree()
-      } else if (e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
+        return
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setOpen((o) => !o)
-      } else if (e.key === 'Escape') hush()
+        setActive((a) => !a)
+        return
+      }
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        setOpen((o) => {
+          if (!o) setTimeout(() => input.current?.focus(), 50)
+          return !o
+        })
+        return
+      }
+      // Hold-to-talk: only the two modifiers, held briefly, so real chords and AltGr typing stay untouched.
+      if (isHold(e) && ['Control', 'Alt', 'Meta'].includes(e.key)) {
+        if (!hold.current && !e.repeat && supported) {
+          hold.current = {
+            listening: false,
+            timer: setTimeout(() => {
+              if (!hold.current) return
+              hold.current.listening = true
+              setActive(true)
+              setHolding(true)
+              startRef.current('hold')
+            }, HOLD_MS),
+          }
+        }
+        return
+      }
+      if (hold.current && !['Control', 'Alt', 'Meta'].includes(e.key)) endHold(false)
+      if (e.key === 'Escape') hush()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
+    const onUp = (e: KeyboardEvent) => {
+      if (hold.current && !isHold(e)) endHold(true)
+    }
+    const onBlur = () => endHold(true)
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [hush, supported, toggleHandsFree])
+
+  // Pointing requests (from answers, or any panel) fly the companion cursor there.
+  useEffect(() => {
+    const onPoint = (e: Event) => {
+      const el = (e as CustomEvent<{ el: HTMLElement }>).detail.el
+      companion.current?.pointAt(el)
+    }
+    window.addEventListener('buds:point', onPoint)
+    return () => window.removeEventListener('buds:point', onPoint)
+  }, [])
 
   // ---- actions: the human gate ------------------------------------------------------------------
   const act = async (msg: Msg, i: number, a: BudsAction) => {
@@ -206,22 +351,34 @@ export function Buds() {
   const dismiss = (msg: Msg, i: number) =>
     setMsgs((m) => m.map((x) => (x.id === msg.id ? { ...x, acted: { ...(x.acted ?? {}), [i]: 'dismissed' } } : x)))
 
-  const status = speaking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle'
+  const lastOffer = [...msgs].reverse().find((m) => m.reply?.actions.length && !m.acted)
+  const pendingOffer = !open && lastOffer?.reply?.actions[0]
 
   return (
     <div data-buds-ui="">
-      <Pointer />
-      {nudge && !open && (
+      {holding && <div className="buds-hold">Listening… release {HOLD_LABEL} to send{partial ? `: “${partial}”` : ''}</div>}
+      {nudge && !open && !pendingOffer && (
         <button className="buds-nudge glass-card" onClick={() => setOpen(true)}>
           {nudge}
         </button>
+      )}
+      {pendingOffer && lastOffer && (
+        <div className="buds-nudge glass-card flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate">{pendingOffer.label}</span>
+          <button className="btn-primary btn-sm" disabled={replay} onClick={() => void act(lastOffer, 0, pendingOffer)}>
+            Approve
+          </button>
+          <button className="btn-secondary btn-sm" onClick={() => dismiss(lastOffer, 0)}>
+            No
+          </button>
+        </div>
       )}
       {open && (
         <div className="buds-panel glass" role="dialog" aria-label={NAME}>
           <div className="buds-head">
             <span className={`buds-dot is-${status}`} />
             <span className="text-[12px] font-semibold text-t1">{NAME}</span>
-            <span className="label ml-1">{status === 'idle' ? 'reads the same world as every panel' : status}</span>
+            <span className="label ml-1">{status === 'idle' ? `hold ${HOLD_LABEL} to talk` : status}</span>
             <div className="ml-auto flex items-center gap-1">
               <button className={`buds-ib ${handsFree ? 'is-on' : ''}`} onClick={toggleHandsFree} disabled={!supported} title={supported ? 'Hands-free conversation (Alt+Shift+V): talk, interrupt any time' : 'No speech recognition in this browser'}>
                 🎧
@@ -229,7 +386,7 @@ export function Buds() {
               <button className={`buds-ib ${muted ? 'is-on' : ''}`} onClick={() => { if (!muted) hush(); setMuted((m) => !m) }} title={muted ? 'Unmute Buds' : 'Mute Buds'}>
                 {muted ? '🔇' : '🔊'}
               </button>
-              <button className="buds-ib" onClick={() => setOpen(false)} title="Hide (Alt+B)">
+              <button className="buds-ib" onClick={() => setOpen(false)} title="Hide chat (Alt+C)">
                 ×
               </button>
             </div>
@@ -238,17 +395,17 @@ export function Buds() {
           <div className="buds-list" ref={list}>
             {msgs.length === 0 && (
               <div className="buds-msg bud">
-                I'm {NAME}. Ask me anything about what's on screen and I'll point at it. I can also switch an agent, impose a rule or approve the plan, but only after you approve.
+                I'm {NAME}. I follow your cursor; hold {HOLD_LABEL} and ask me anything on screen and I'll point at it. I can switch an agent, impose a rule or approve the plan, but only after you approve.
               </div>
             )}
             {msgs.map((m) => (
               <div key={m.id} className={`buds-msg ${m.role}`}>
                 {m.text}
-                {m.reply && m.reply.source === 'llm' && <span className="mono ml-1.5 text-[9px] text-t3">claude</span>}
+                {m.reply && m.reply.source === 'llm' && <span className="mono ml-1.5 text-[9px] opacity-70">claude</span>}
                 {m.reply && m.reply.focus.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {m.reply.focus.map((f) => (
-                      <button key={focusKey(f)} className="pill pill-blue" onClick={() => point([f])} title={`Point at ${focusKey(f)}`}>
+                      <button key={focusKey(f)} className="pill pill-purple" onClick={() => point([f])} title={`Point at ${focusKey(f)}`}>
                         ↗ {f.label || f.id}
                       </button>
                     ))}
@@ -292,7 +449,7 @@ export function Buds() {
           {msgs.length < 2 && (
             <div className="flex flex-wrap gap-1 px-3 pb-2">
               {SUGGESTIONS.map((s) => (
-                <button key={s} className="pill transition-colors hover:border-white/25 hover:text-t1" onClick={() => void ask(s)}>
+                <button key={s} className="pill transition-colors hover:text-t1" onClick={() => void ask(s)}>
                   {s}
                 </button>
               ))}
@@ -312,16 +469,30 @@ export function Buds() {
               type="button"
               className={`buds-mic ${listening ? 'is-on' : ''}`}
               disabled={!supported}
-              onClick={() => (listening ? stopListening() : startListening(false))}
-              title={supported ? (listening ? 'Stop listening' : 'Talk to Buds (push-to-talk)') : 'No speech recognition in this browser'}
+              onClick={() => (listening ? stopListening() : startListening('tap'))}
+              title={supported ? (listening ? 'Stop listening' : `Talk to Buds (or hold ${HOLD_LABEL})`) : 'No speech recognition in this browser'}
             >
               {listening ? '■' : '🎤'}
             </button>
-            <input className="input flex-1" value={text} onChange={(e) => setText(e.target.value)} placeholder={handsFree ? 'Listening hands-free… just talk' : `Ask ${NAME} anything on screen…`} />
+            <input ref={input} className="input flex-1" value={text} onChange={(e) => setText(e.target.value)} placeholder={handsFree ? 'Listening hands-free… just talk' : `Ask ${NAME} anything on screen…`} />
           </form>
         </div>
       )}
-      <button className={`buds-orb is-${status} ${open ? 'is-open' : ''}`} onClick={() => setOpen((o) => !o)} title={`${NAME} · click to chat · Alt+Shift+V to talk hands-free`} aria-label={`Open ${NAME}`}>
+      <button className="buds-chat-toggle" onClick={() => setOpen((o) => !o)} title={open ? 'Hide chat (Alt+C)' : 'Chat with Buds (Alt+C)'} aria-label={open ? 'Hide chat' : 'Chat with Buds'}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 0 1 3 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 9 8.4z" />
+        </svg>
+      </button>
+      <button
+        className={`buds-orb is-${status} ${active ? '' : 'is-off'}`}
+        onClick={() => {
+          if (!active) setActive(true)
+          setOpen((o) => !o)
+        }}
+        title={`${NAME} · ${active ? 'on' : 'off'} (Alt+B) · hold ${HOLD_LABEL} to talk · Alt+C chat`}
+        aria-label={`Open ${NAME}`}
+        aria-pressed={active}
+      >
         <BudsGlyph />
         <span className="buds-orb-ring" />
       </button>
@@ -342,7 +513,7 @@ function BudsGlyph() {
 
 // ---- pointing --------------------------------------------------------------------------------------
 
-/** Ask the app to show the right tab / floor, then fly the cursor to the element and ring it. */
+/** Ask the app to show the right tab / floor, then fly the companion to the element and ring it. */
 export function point(focus: BudsFocus[]): void {
   window.dispatchEvent(new CustomEvent('haven:focus', { detail: focus }))
   let tries = 0
@@ -357,45 +528,4 @@ export function point(focus: BudsFocus[]): void {
     setTimeout(() => window.dispatchEvent(new CustomEvent('buds:point', { detail: { el } })), 260)
   }
   requestAnimationFrame(go)
-}
-
-/** The cursor and ring that fly to whatever Buds is talking about. */
-function Pointer() {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
-  const [ring, setRing] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
-  const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    let hide: ReturnType<typeof setTimeout> | undefined
-    const onPoint = (e: Event) => {
-      const el = (e as CustomEvent<{ el: HTMLElement }>).detail.el
-      const r = el.getBoundingClientRect()
-      if (r.width === 0 && r.height === 0) return
-      setVisible(true)
-      setPos({ x: r.left + r.width * 0.5, y: r.top + Math.min(r.height * 0.5, 22) })
-      setRing({ x: r.left - 6, y: r.top - 6, w: r.width + 12, h: r.height + 12 })
-      clearTimeout(hide)
-      hide = setTimeout(() => {
-        setRing(null)
-        setVisible(false)
-      }, 3200)
-    }
-    window.addEventListener('buds:point', onPoint)
-    return () => {
-      window.removeEventListener('buds:point', onPoint)
-      clearTimeout(hide)
-    }
-  }, [])
-  return (
-    <>
-      {ring && <div className="buds-ring" style={{ left: ring.x, top: ring.y, width: ring.w, height: ring.h }} />}
-      {pos && (
-        <div className={`buds-cursor ${visible ? 'is-on' : ''}`} style={{ left: pos.x, top: pos.y }} aria-hidden="true">
-          <svg viewBox="0 0 16 20" width="18" height="22">
-            <path d="M1 1 L15 11 L8.5 12 L5 19 Z" fill="#0a84ff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />
-          </svg>
-          <span className="buds-cursor-tag">{NAME}</span>
-        </div>
-      )}
-    </>
-  )
 }

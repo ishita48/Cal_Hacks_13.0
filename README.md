@@ -37,11 +37,15 @@ Judges ask. Here is the honest list.
 
 ## Buds, the story page and the live stack
 
-- **Buds** is the orb in the corner of the command centre (Alt+B). Type or talk to it (push-to-talk, or
-  hands-free with Alt+Shift+V: talk over it and it stops). It answers from the one world state, points its
-  cursor at the agent card, plan step, floor or panel it is talking about, and offers actions (switch an agent,
-  impose a rule, approve, simulate the leak) that only run after you tap **Approve**: the same input events the
-  buttons send. Deterministic answers first (`backend/haven/agents/buds.py`), Claude only as the fallback.
+- **Buds** is the companion on the screen, in the spirit of StudyO's Clicky: a soft cursor rides next to your
+  mouse while it is on (Alt+B). **Hold Ctrl+Alt (⌘+⌥ on a Mac) and talk; release to send.** It answers from the
+  one world state, says the answer in a bubble by the cursor, flies to the agent card, plan step, floor or panel
+  it is talking about, and offers actions (switch an agent, impose a rule, approve, simulate the leak) that only
+  run after you tap **Approve**: the same input events the buttons send. Alt+C opens the chat, Alt+Shift+V is
+  hands-free (talk over it and it stops), Esc hushes it. Deterministic answers first
+  (`backend/haven/agents/buds.py`), Claude only as the fallback.
+- **The look** is the Sentinel/Argus app language: a floating frosted sidebar and top bar, slate shell, white
+  cards, one blue, colour only where it means something. Light by default; the moon button switches to dark.
 - **/story** is the editorial page: the sensor-to-plan cascade, the agents, a "one shared state" room that shows
   the real event log of the current run, and the sponsor proofs. Light paper, one blue; the dashboard stays dark.
 - **Live stack**: click the sponsor strip in the header for a round-trip proof per integration (`GET /api/sponsors`):

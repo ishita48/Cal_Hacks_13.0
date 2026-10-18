@@ -54,12 +54,12 @@ export function SensorChart({ sensorId, limit = 120 }: Props) {
             <stop offset="1" stopColor="#64d2ff" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <line x1={PAD} x2={W - PAD} y1={y(THRESHOLD)} y2={y(THRESHOLD)} stroke="rgba(255,255,255,0.14)" strokeWidth="1" strokeDasharray="3 3" />
-        {n === 0 && <line x1={PAD} x2={W - PAD} y1={y(0)} y2={y(0)} stroke="rgba(255,255,255,0.18)" strokeWidth="1" />}
+        <line x1={PAD} x2={W - PAD} y1={y(THRESHOLD)} y2={y(THRESHOLD)} stroke="var(--border-strong)" strokeWidth="1" strokeDasharray="3 3" />
+        {n === 0 && <line x1={PAD} x2={W - PAD} y1={y(0)} y2={y(0)} stroke="var(--border-strong)" strokeWidth="1" />}
         {n > 1 && <polygon points={area} fill={`url(#spark-${sensorId})`} />}
         {n > 1 && <polyline points={line} fill="none" stroke="#64d2ff" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />}
         {readings.map((r, i) => (
-          <circle key={`${r.step}-${i}`} cx={x(i)} cy={y(r.value)} r={r.wet ? 2.2 : 1.4} fill={r.wet ? '#64d2ff' : 'rgba(255,255,255,0.45)'} />
+          <circle key={`${r.step}-${i}`} cx={x(i)} cy={y(r.value)} r={r.wet ? 2.2 : 1.4} fill={r.wet ? '#0284c7' : 'var(--ink-4)'} />
         ))}
       </svg>
       <div className="mt-1 flex items-center justify-between">

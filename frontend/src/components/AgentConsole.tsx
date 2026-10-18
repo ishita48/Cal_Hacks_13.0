@@ -218,8 +218,8 @@ function AgentCard({
   const veto = enabled && stance?.stance === 'veto'
   const edge = prominent
     ? enabled
-      ? 'inset 3px 0 0 #0a84ff, 0 10px 30px rgba(10,132,255,0.10)'
-      : 'inset 3px 0 0 #6e6e73, 0 0 0 rgba(0,0,0,0)'
+      ? 'inset 3px 0 0 #0f62fe, 0 10px 30px rgba(15,98,254,0.10)'
+      : 'inset 3px 0 0 #94a3b8, 0 0 0 rgba(0,0,0,0)'
     : undefined
 
   return (

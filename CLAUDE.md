@@ -83,8 +83,12 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   `AgentConsole`, `PlanPanel`, `VoiceRule`, `MessagesPanel`, and `Building3D` (R3F twin, lazy-loaded; loads the GLBs
   from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` / `level_index` per
   `blender/README.md`, and reads nothing but the world store). 2D plan is the default; the toggle is in the centre panel.
-  `Buds` (orb, panel, voice in/out, the pointer that flies to `[data-buds="kind:id"]` elements; App listens for
-  `haven:focus` to switch tab/floor), `src/story/Story.tsx` (+ `story.css`, scoped `.argus`: the editorial page at
+  `Buds` (the companion: `src/lib/companion.ts` is a DOM cursor that rides next to the mouse, bobs, wears a mood
+  ring, carries the speech bubble and flies to `[data-buds="kind:id"]` elements on `buds:point`; hold Ctrl+Alt to
+  talk, Alt+B on/off, Alt+C chat, Alt+Shift+V hands-free; App listens for `haven:focus` to switch tab/floor).
+  Theme: `index.css` is the Sentinel app language (tokens on `:root`, `.dark` overrides, `@theme inline` so the
+  `text-t1` / `bg-haven-*` utilities repaint); `App.tsx` is the shell (floating `app-sidebar` + `app-topnav`, stat
+  tiles, three columns). The floor plan reads `--fp-*` variables from `.floorplan`, `src/story/Story.tsx` (+ `story.css`, scoped `.argus`: the editorial page at
   `/story`, live event log + sponsor proofs), `src/lib/speak.ts` (ElevenLabs → Cartesia → browser, interruptible),
   `src/lib/voice.ts` (Web Speech push-to-talk / hands-free with echo guard). Routes in `main.tsx`: `/`, `/phone`, `/story`.
 - `firmware/haven_sensor/haven_sensor.ino` — ESP32 + resistive probe → `POST /api/sensor` with

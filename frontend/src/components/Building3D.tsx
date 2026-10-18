@@ -66,7 +66,7 @@ export default function Building3D({ level }: Props) {
         dpr={[1, 1.5]}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
         shadows
-        style={{ background: '#050507' }}
+        style={{ background: 'transparent' }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping
           gl.toneMappingExposure = 1.15
@@ -74,7 +74,7 @@ export default function Building3D({ level }: Props) {
           gl.shadowMap.type = THREE.PCFSoftShadowMap
         }}
       >
-        <color attach="background" args={['#050507']} />
+        <color attach="background" args={['#e9eef5']} />
         <Suspense fallback={<LoadingLabel />}>
           <Scene level={level} />
         </Suspense>
@@ -186,9 +186,9 @@ function Scene({ level }: Props) {
       </Optional>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
         <planeGeometry args={[600, 600]} />
-        <meshStandardMaterial color="#2b2a28" roughness={1} metalness={0} />
+        <meshStandardMaterial color="#8a8d92" roughness={1} metalness={0} />
       </mesh>
-      <gridHelper args={[400, 80, '#1f1f24', '#141418']} position={[center.x, -0.07, center.z]} />
+      <gridHelper args={[400, 80, '#9aa0a8', '#b3b8c0']} position={[center.x, -0.07, center.z]} />
 
       <primitive object={exterior.scene} />
       <primitive object={interior.scene} />
@@ -541,7 +541,7 @@ function People({
             <Html center position={[0, 1.4, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
               <div
                 className="rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap"
-                style={{ borderColor: m.color, color: '#fff', background: 'rgba(5,5,7,0.85)', opacity: m.faded ? 0.7 : 1 }}
+                style={{ borderColor: m.color, color: '#0f172a', background: 'rgba(255,255,255,0.92)', opacity: m.faded ? 0.7 : 1 }}
               >
                 {m.name.split(' ')[0]}
                 {m.tag && <span style={{ color: m.color, fontWeight: 500 }}> · {m.tag}</span>}
@@ -640,7 +640,7 @@ function ActorFigure({ label, task, from, to, status }: { label: string; task: s
         <meshStandardMaterial color="#f5f5f7" emissive={color} emissiveIntensity={0.3} />
       </mesh>
       <Html center position={[0, 1.7, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
-        <div className="rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap" style={{ borderColor: color, color: '#fff', background: 'rgba(5,5,7,0.85)' }}>
+        <div className="rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap" style={{ borderColor: color, color: '#0f172a', background: 'rgba(255,255,255,0.92)' }}>
           <span className="font-semibold">{label}</span>
           {task && status !== 'idle' && (
             <span style={{ color }}>
