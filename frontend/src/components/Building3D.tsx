@@ -1,5 +1,5 @@
 import { Environment, Html, Lightformer, Line, OrbitControls, OrthographicCamera, useGLTF } from '@react-three/drei'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { STATUS_COLOR } from '../lib/labels'
@@ -83,6 +83,19 @@ export default function Building3D({ level }: Props) {
   )
 }
 
+/** The building fills the stage whatever its size: zoom follows the canvas, like a Blender viewport. */
+function FitCamera() {
+  const size = useThree((s) => s.size)
+  const camera = useThree((s) => s.camera)
+  useEffect(() => {
+    const cam = camera as THREE.OrthographicCamera
+    if (!('isOrthographicCamera' in cam)) return
+    cam.zoom = Math.max(4, Math.min(size.width / 120, size.height / 80))
+    cam.updateProjectionMatrix()
+  }, [size, camera])
+  return null
+}
+
 function LoadingLabel() {
   return (
     <Html center>
@@ -164,6 +177,7 @@ function Scene({ level }: Props) {
   return (
     <>
       <OrthographicCamera makeDefault position={[center.x + 90, 95, center.z + 90]} zoom={7} near={-500} far={1000} />
+      <FitCamera />
       <OrbitControls
         target={center}
         enableDamping
@@ -171,7 +185,7 @@ function Scene({ level }: Props) {
         minPolarAngle={0.25}
         maxPolarAngle={1.35}
         minZoom={3}
-        maxZoom={30}
+        maxZoom={60}
       />
       {/* Daylight as Blender has it: the same HDRI for sky light and reflections, a sun in the same place
           for shadows (normal maps in the baked GLBs read off it). Light formers stand in without the file. */}

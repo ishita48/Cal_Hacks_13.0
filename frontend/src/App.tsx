@@ -8,6 +8,8 @@ import {
   LayoutGrid,
   MessagesSquare,
   Moon,
+  PanelLeft,
+  PanelRight,
   Pause,
   Play,
   Radio,
@@ -57,9 +59,22 @@ export default function App() {
   useEffect(() => {
     api.integrations().then(setIntegrations).catch(() => {})
   }, [])
-  const [level, setLevel] = useState('L4')
-  const [view, setView] = useState<View>('2d')
+  const [level, setLevel] = useState('all')
+  const [view, setView] = useState<View>('3d')
   const [rightTab, setRightTab] = useState<RightTab>('agents')
+  const [docks, setDocks] = useState({ left: true, right: true })
+
+  // Blender's habit: T hides the tool dock on the left, N the properties dock on the right.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (e.altKey || e.ctrlKey || e.metaKey || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))) return
+      if (e.key === 't' || e.key === 'T') setDocks((d) => ({ ...d, left: !d.left }))
+      if (e.key === 'n' || e.key === 'N') setDocks((d) => ({ ...d, right: !d.right }))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Buds points at things: switch to the tab or floor that holds them first.
   useEffect(() => {
@@ -101,30 +116,32 @@ export default function App() {
       <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={setRightTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} />
       <TopNav title="Command centre" clock={clock} connection={connection} world={world} integrations={integrations} />
 
-      <main className="absolute top-[5.25rem] right-4 bottom-4 left-[17rem] flex min-h-0 flex-col gap-3 overflow-hidden">
-        {/* headline numbers, Sentinel's stat row */}
-        <div className="stagger grid shrink-0 grid-cols-5 gap-3">
-          <Stat k="Affected" v={incident ? Number(m.residents_affected ?? 0) : 0} s={incident ? 'residents on floors that go dark' : 'no incident'} tone={incident ? 'text-haven-power' : undefined} />
-          <Stat k="Left behind" v={leftBehind} s={leftBehind ? 'a hard need nobody spoke for' : 'everyone with a need is covered'} tone={leftBehind ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} liquid={leftBehind > 0} />
-          <Stat k="Violations" v={incident ? Number(m.violations ?? 0) : 0} s={incident ? `${Number(m.checks ?? 0)} checks by the checker` : 'checker idle'} tone={Number(m.violations ?? 0) ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} />
-          <Stat k="Water" v={`${Math.round(deepest * 100)} cm`} s={deepest > 0 ? `${world.wet_spaces.length} spaces wet` : 'basement dry'} tone={deepest > 0 ? 'text-haven-water' : undefined} />
-          <Stat k={contact ? 'Water contact' : 'Plan'} v={contact && contactIn != null ? `${contactIn.toFixed(0)} min` : shown.status === 'none' ? 'quiet' : shown.status} s={contact ? contact.message : incident ? `v${shown.version} · ${shown.enabled_agents.length} agents on` : 'press Simulate leak'} tone={contact && contactIn != null && contactIn < 5 ? 'text-haven-danger' : contact ? 'text-haven-amber' : undefined} />
-        </div>
+      <main className="absolute top-[5.25rem] right-4 bottom-4 left-[17rem] overflow-hidden">
+        {/* The stage: the simulation fills everything; panels dock over it like Blender's viewport. */}
+        <section className="glass relative h-full w-full overflow-hidden" data-buds="panel:map">
+          <div className="absolute inset-0" style={{ padding: view === '2d' ? `56px ${docks.right ? 404 : 16}px 16px ${docks.left ? 332 : 16}px` : 0 }}>
+            {view === '3d' ? (
+              <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
+                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
+                  <Building3D level={level} />
+                </Suspense>
+              </ViewErrorBoundary>
+            ) : (
+              <FloorPlan world={world} level={level === 'all' ? 'L4' : level} />
+            )}
+          </div>
 
-        <div className="stagger grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_400px] gap-3 overflow-hidden">
-          <section className="glass flex min-h-0 flex-col gap-4 overflow-hidden p-4">
-            <Controls world={world} />
-            <div className="hairline pt-4">
-              <VoiceRule world={world} />
+          {/* HUD: the numbers that matter, as chips along the top of the stage */}
+          <div className="pointer-events-none absolute top-3 left-3 right-3 z-20 flex items-start gap-2">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+              <Hud k="affected" v={incident ? Number(m.residents_affected ?? 0) : 0} tone={incident ? 'text-haven-power' : undefined} />
+              <Hud k="left behind" v={leftBehind} tone={leftBehind ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} hot={leftBehind > 0} buds="panel:plan" />
+              <Hud k="violations" v={incident ? Number(m.violations ?? 0) : 0} tone={Number(m.violations ?? 0) ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} />
+              <Hud k="water" v={`${Math.round(deepest * 100)} cm`} tone={deepest > 0 ? 'text-haven-water' : undefined} />
+              <Hud k={contact ? 'contact in' : 'plan'} v={contact && contactIn != null ? `${contactIn.toFixed(0)} min` : shown.status === 'none' ? 'quiet' : shown.status} tone={contact && contactIn != null && contactIn < 5 ? 'text-haven-danger' : contact ? 'text-haven-amber' : undefined} />
             </div>
-            <div className="hairline min-h-0 flex-1 pt-4">
-              <ImpactLedger world={world} clock={clock} />
-            </div>
-          </section>
-
-          <section className="glass flex min-h-0 flex-col overflow-hidden">
-            <div className="hairline-b flex items-center gap-3 px-4 py-2.5">
-              <div className="seg">
+            <div className="pointer-events-auto ml-auto flex items-center gap-2">
+              <div className="seg glass-card p-1">
                 {[...levels]
                   .sort((a, b) => b.index - a.index)
                   .map((lv) => {
@@ -134,9 +151,7 @@ export default function App() {
                     return (
                       <button key={lv.id} data-buds={`level:${lv.id}`} onClick={() => setLevel(lv.id)} className={`seg-item mono ${level === lv.id ? 'is-on' : ''}`} title={lv.name}>
                         {lv.id}
-                        {(now || soon || wet) && (
-                          <span className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-haven-amber haven-pulse'}`} />
-                        )}
+                        {(now || soon || wet) && <span className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-haven-amber haven-pulse'}`} />}
                       </button>
                     )
                   })}
@@ -146,9 +161,8 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <span className="label">{level === 'all' ? 'Whole building' : levels.find((l) => l.id === level)?.name}</span>
-              <div className="seg seg-xs ml-1">
-                {(['2d', '3d'] as const).map((v) => (
+              <div className="seg seg-xs glass-card p-1">
+                {(['3d', '2d'] as const).map((v) => (
                   <button
                     key={v}
                     onClick={() => {
@@ -161,43 +175,57 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <Legend />
+              <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, left: !d.left }))} title={docks.left ? 'Hide the controls (T)' : 'Show the controls (T)'} aria-label="Toggle controls">
+                <PanelLeft className="h-3.5 w-3.5" />
+              </button>
+              <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, right: !d.right }))} title={docks.right ? 'Hide the plan (N)' : 'Show the plan (N)'} aria-label="Toggle plan">
+                <PanelRight className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="min-h-0 flex-1 p-3" data-buds="panel:map">
-              {view === '3d' ? (
-                <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
-                  <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">loading the 3D twin…</div>}>
-                    <Building3D level={level} />
-                  </Suspense>
-                </ViewErrorBoundary>
-              ) : (
-                <FloorPlan world={world} level={level} />
-              )}
-            </div>
-          </section>
+          </div>
 
-          <section className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden">
-            <div className={`glass min-h-0 overflow-hidden p-4 ${leftBehind ? 'tint-red' : ''}`}>
-              <PlanPanel world={world} clock={clock} />
-            </div>
-            <div className="glass flex min-h-0 flex-col overflow-hidden">
-              <div className="hairline-b flex items-center px-4 py-2.5">
-                <div className="seg">
-                  {(['agents', 'messages', 'cascade'] as const).map((t) => (
-                    <button key={t} data-buds={`tab:${t}`} onClick={() => setRightTab(t)} className={`seg-item ${rightTab === t ? 'is-on' : ''}`}>
-                      {t === 'agents' ? 'Agents' : t === 'messages' ? 'Messages' : 'Cascade'}
-                      {t === 'agents' && vetoes > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-danger px-1.5 text-[10px] font-semibold text-white">{vetoes}</span>}
-                      {t === 'messages' && criticalMessages > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-blue/15 px-1.5 text-[10px] font-semibold text-haven-blue">{criticalMessages}</span>}
-                    </button>
-                  ))}
+          {/* left dock: inputs to the world */}
+          {docks.left && (
+            <aside className="glass absolute top-14 bottom-3 left-3 z-10 flex w-[316px] flex-col gap-4 overflow-hidden p-4 enter">
+              <Controls world={world} />
+              <div className="hairline pt-4">
+                <VoiceRule world={world} />
+              </div>
+              <div className="hairline min-h-0 flex-1 pt-4">
+                <ImpactLedger world={world} clock={clock} />
+              </div>
+            </aside>
+          )}
+
+          {/* right dock: the plan, and who said what */}
+          {docks.right && (
+            <aside className="absolute top-14 right-3 bottom-3 z-10 grid w-[388px] grid-rows-[minmax(0,1.05fr)_minmax(0,1fr)] gap-3 enter">
+              <div className={`glass min-h-0 overflow-hidden p-4 ${leftBehind ? 'tint-red' : ''}`}>
+                <PlanPanel world={world} clock={clock} />
+              </div>
+              <div className="glass flex min-h-0 flex-col overflow-hidden">
+                <div className="hairline-b flex items-center px-4 py-2.5">
+                  <div className="seg">
+                    {(['agents', 'messages', 'cascade'] as const).map((t) => (
+                      <button key={t} data-buds={`tab:${t}`} onClick={() => setRightTab(t)} className={`seg-item ${rightTab === t ? 'is-on' : ''}`}>
+                        {t === 'agents' ? 'Agents' : t === 'messages' ? 'Messages' : 'Cascade'}
+                        {t === 'agents' && vetoes > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-danger px-1.5 text-[10px] font-semibold text-white">{vetoes}</span>}
+                        {t === 'messages' && criticalMessages > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-blue/15 px-1.5 text-[10px] font-semibold text-haven-blue">{criticalMessages}</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-hidden p-4">
+                  {rightTab === 'agents' ? <AgentConsole world={world} /> : rightTab === 'messages' ? <MessagesPanel world={world} clock={clock} /> : <CascadePanel world={world} clock={clock} />}
                 </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-hidden p-4">
-                {rightTab === 'agents' ? <AgentConsole world={world} /> : rightTab === 'messages' ? <MessagesPanel world={world} clock={clock} /> : <CascadePanel world={world} clock={clock} />}
-              </div>
-            </div>
-          </section>
-        </div>
+            </aside>
+          )}
+
+          <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+            <Legend />
+          </div>
+        </section>
       </main>
       <Buds />
     </div>
@@ -206,14 +234,11 @@ export default function App() {
 
 // ---- shell ---------------------------------------------------------------------------------------
 
-function Stat({ k, v, s, tone, liquid }: { k: string; v: number | string; s: string; tone?: string; liquid?: boolean }) {
+function Hud({ k, v, tone, hot, buds }: { k: string; v: number | string; tone?: string; hot?: boolean; buds?: string }) {
   return (
-    <div className={`${liquid ? 'liquid-glass' : 'glass'} stat`}>
-      <span className="stat-k">{k}</span>
-      <span className={`stat-v ${tone ?? ''}`}>{v}</span>
-      <span className="stat-s truncate" title={s}>
-        {s}
-      </span>
+    <div className={`${hot ? 'liquid-glass' : 'glass-card'} flex items-baseline gap-2 px-3 py-1.5`} data-buds={buds}>
+      <span className={`num text-[18px] leading-none ${tone ?? 'text-t1'}`}>{v}</span>
+      <span className="label">{k}</span>
     </div>
   )
 }
@@ -385,7 +410,7 @@ function Legend() {
     </span>
   )
   return (
-    <div className="ml-auto flex gap-3 text-[10px] text-t3">
+    <div className="glass-card pointer-events-auto flex gap-3 px-3 py-1.5 text-[10px] text-t3">
       {item('#0284c7', 'water')}
       {item('rgba(220,38,38,0.6)', 'dark now')}
       {item('rgba(217,119,6,0.7)', 'dark if nothing is done')}
