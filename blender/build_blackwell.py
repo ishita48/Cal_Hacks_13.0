@@ -758,6 +758,17 @@ class Builder:
             add_cyl(bm, 4.5, y + 1.5, self.roof_z + 1.4, self.roof_z + 1.75, 0.9, 0, 20)
         add_box(bm, 20, 26, 78.5, 82.5, self.roof_z + 0.08, self.roof_z + 1.6, 0)
         mesh_object("rooftop_units", bm, [m["metal"]], self.col_shell, roofp)
+        bm = bmesh.new()
+        for row in range(5):
+            y = 50 + row * 4.0
+            for col in range(3):
+                x = 16 + col * 5.2
+                add_box(bm, x, x + 4.8, y, y + 2.0, self.roof_z + 0.4, self.roof_z + 0.45, 0)
+                add_box(bm, x + 0.2, x + 4.6, y + 0.2, y + 1.8, self.roof_z + 0.45, self.roof_z + 0.47, 1)
+                for dx in (0.3, 4.3):
+                    add_box(bm, x + dx, x + dx + 0.1, y + 0.3, y + 0.4, self.roof_z + 0.08, self.roof_z + 0.4, 0)
+                    add_box(bm, x + dx, x + dx + 0.1, y + 1.6, y + 1.7, self.roof_z + 0.08, self.roof_z + 0.6, 0)
+        mesh_object("rooftop_pv", bm, [m["metal"], m["glass"]], self.col_shell, roofp)
 
     def build_podium_garden(self):
         """The L2 terrace: the part of the ground-floor roof the upper floors leave open."""
@@ -1147,8 +1158,12 @@ class Builder:
         elif kind == "service":
             if "mail" in name:
                 self._mailboxes(bm, r, z)
+            elif "trash" in name or "lift machine" in name:
+                self._trash_room(bm, r, z, z_top)
             else:
                 self._shelving(bm, r, z)
+        elif kind == "riser":
+            self._riser(bm, r, z, z_top)
         elif kind == "storage":
             if "bike" in name:
                 self._bike_racks(bm, r, z)
@@ -1615,8 +1630,25 @@ class Builder:
             self._lounge(bm, r, z, z_top, region, sofas=True)
 
     def _corridor(self, bm, r, z, z_top, lv):
-        # Continuous light strip down the middle; the yellow light "halo" graphics from the real corridors.
+        # Continuous light strip down the middle; the yellow light "halo" graphics from the real corridors;
+        # a fire extinguisher cabinet every ~25 m and a drinking fountain on long runs.
         horiz = r.w >= r.h
+        L = r.w if horiz else r.h
+        for k in range(int(L // 25) + 1):
+            a = (r.x0 if horiz else r.y0) + 6.0 + k * 25.0
+            if a > (r.x1 if horiz else r.y1) - 2:
+                break
+            if horiz:
+                add_box(bm, a, a + 0.3, r.y0 + 0.02, r.y0 + 0.12, z + 1.0, z + 1.75, FM["red"])
+                add_box(bm, a + 0.02, a + 0.28, r.y0 + 0.12, r.y0 + 0.125, z + 1.05, z + 1.7, FM["frosted"])
+            else:
+                add_box(bm, r.x0 + 0.02, r.x0 + 0.12, a, a + 0.3, z + 1.0, z + 1.75, FM["red"])
+                add_box(bm, r.x0 + 0.12, r.x0 + 0.125, a + 0.02, a + 0.28, z + 1.05, z + 1.7, FM["frosted"])
+        if L > 30:
+            if horiz:
+                add_box(bm, r.cx - 0.2, r.cx + 0.2, r.y0 + 0.02, r.y0 + 0.4, z + 0.5, z + 0.85, FM["steel"])
+            else:
+                add_box(bm, r.x0 + 0.02, r.x0 + 0.4, r.cy - 0.2, r.cy + 0.2, z + 0.5, z + 0.85, FM["steel"])
         if horiz:
             add_box(bm, r.x0 + 0.5, r.x1 - 0.5, r.cy - 0.08, r.cy + 0.08, z_top - 0.05, z_top - 0.02, FM["lightpanel"])
             n = int((r.w - 4) // 9)
@@ -1631,6 +1663,26 @@ class Builder:
                 y = r.y0 + 4.5 + k * 9
                 add_disc(bm, r.x0 + 0.07, y, z + 1.6, 0.7, 0.01, "x", FM["amber"])
                 add_disc(bm, r.x0 + 0.08, y, z + 1.6, 0.35, 0.012, "x", FM["white"])
+
+    def _trash_room(self, bm, r, z, z_top):
+        n = int(max(1, (r.w - 0.4) // 0.9))
+        for k in range(n):
+            x = r.x0 + 0.3 + k * 0.9
+            mi = (FM["dark"], FM["blue"], FM["lime"])[k % 3]
+            add_box(bm, x, x + 0.7, r.y0 + 0.3, r.y0 + 1.1, z + 0.15, z + 1.15, mi)
+            add_box(bm, x - 0.02, x + 0.72, r.y0 + 0.28, r.y0 + 1.12, z + 1.15, z + 1.2, mi)
+            for (dx, dy) in ((0.1, 0.4), (0.6, 0.4), (0.1, 1.0), (0.6, 1.0)):
+                add_cyl(bm, x + dx, r.y0 + dy, z, z + 0.15, 0.06, FM["dark"], 8)
+        add_box(bm, r.x0 + 0.2, r.x1 - 0.2, r.y1 - 0.6, r.y1 - 0.2, z, z + 0.9, FM["steel"])       # chute hopper
+        add_box(bm, r.cx - 0.4, r.cx + 0.4, r.y1 - 0.9, r.y1 - 0.1, z + 0.9, z_top - 0.3, FM["steel"])
+
+    def _riser(self, bm, r, z, z_top):
+        # Cable tray up the shaft, conduit drops, the floor panel itself comes from the equipment list.
+        add_box(bm, r.cx - 0.25, r.cx + 0.25, r.y0 + 0.15, r.y0 + 0.25, z, z_top, FM["steel"])
+        for k in range(4):
+            x = r.x0 + 0.4 + k * (r.w - 0.8) / 3
+            add_bar(bm, (x, r.y0 + 0.3, z), (x, r.y0 + 0.3, z_top), 0.02, FM["steel"])
+        add_bar(bm, (r.x1 - 0.3, r.cy, z), (r.x1 - 0.3, r.cy, z_top), 0.08, FM["pipe_blue"])
 
     def _plant_room(self, bm, r, z, z_top, pipes=True):
         # Cable tray / pipe runs along the ceiling, conduit drops, a bollard-yellow floor line.
