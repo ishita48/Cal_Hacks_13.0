@@ -455,7 +455,7 @@ def mat_glass(name, tint=(0.02, 0.045, 0.065)):
     bsdf.inputs["Emission Color"].default_value = (1.0, 0.82, 0.55, 1.0)
     bsdf.inputs["Emission Strength"].default_value = 0.0
     # See-through, so furnished rooms read from the street; the coat keeps the sky reflection.
-    bsdf.inputs["Alpha"].default_value = 0.4
+    bsdf.inputs["Alpha"].default_value = 0.22
     try:
         mat.surface_render_method = "BLENDED"
     except AttributeError:
@@ -1031,7 +1031,7 @@ class Builder:
         elif kind == "bathroom":
             self._stalls(bm, r, z)
         elif kind in ("lounge", "study", "office"):
-            self._lounge(bm, r, z, sofas=(kind == "lounge"), colour=FM["blue"] if kind != "office" else FM["dark"])
+            self._lounge(bm, r, z, sofas=(kind == "lounge"), colour=FM["blue"] if kind != "office" else FM["dark"], region=region)
         elif kind == "kitchen":
             self._kitchen(bm, r, z)
         elif kind == "laundry":
@@ -1046,7 +1046,7 @@ class Builder:
                 x = r.x0 + 1.5 + k * 3.0
                 add_box(bm, x, x + 1.0, r.y0 + 1.5, r.y1 - 1.5, z, z + 1.6, FM["laminate"])
         elif kind == "amenity":
-            self._amenity(bm, s, r, z)
+            self._amenity(bm, s, r, z, region)
         elif kind == "stair":
             self._stair(bm, r, z, z_top)
         elif kind == "lift":
@@ -1121,7 +1121,7 @@ class Builder:
         for (dx, dy) in ((0.7, 0), (-0.7, 0), (0, 0.7), (0, -0.7)):
             add_box(bm, x + dx - 0.2, x + dx + 0.2, y + dy - 0.2, y + dy + 0.2, z + 0.42, z + 0.46, FM["dark"])
 
-    def _lounge(self, bm, r, z, sofas=True, colour=FM["blue"]):
+    def _lounge(self, bm, r, z, sofas=True, colour=FM["blue"], region=None):
         nx, ny = max(1, int(r.w // 2.6)), max(1, int(r.h // 2.6))
         for i in range(nx):
             for j in range(ny):
@@ -1131,7 +1131,16 @@ class Builder:
                     self._sofa(bm, x - 1.0, y - 0.45, "x", z, colour if (i % 2 == 0) else FM["purple"])
                 else:
                     self._table(bm, x, y, z)
-        add_box(bm, r.x0 + 0.08, r.x0 + 0.1, r.y0 + 0.5, r.y1 - 0.5, z, z + 2.2, FM["lime"])
+        # Lime accent on a wall that faces another room, so it never shows through exterior glass.
+        sides = [("x", r.x0, -1), ("x", r.x1, +1), ("y", r.y0, -1), ("y", r.y1, +1)]
+        for axis, fixed, sign in sides:
+            px, py = (fixed + sign * 0.15, r.cy) if axis == "x" else (r.cx, fixed + sign * 0.15)
+            if region is None or region.inside(px, py):
+                if axis == "x":
+                    add_box(bm, fixed - sign * 0.10, fixed - sign * 0.08, r.y0 + 0.5, r.y1 - 0.5, z, z + 2.2, FM["lime"])
+                else:
+                    add_box(bm, r.x0 + 0.5, r.x1 - 0.5, fixed - sign * 0.10, fixed - sign * 0.08, z, z + 2.2, FM["lime"])
+                break
 
     def _kitchen(self, bm, r, z):
         if r.w >= r.h:
@@ -1154,7 +1163,7 @@ class Builder:
                 x = r.x0 + 0.3 + k * 0.75
                 add_box(bm, x, x + 0.7, r.y0 + 0.1, r.y0 + 0.8, z, z + 1.0, FM["laminate"])
 
-    def _amenity(self, bm, s, r, z):
+    def _amenity(self, bm, s, r, z, region=None):
         name = s["name"].lower()
         if "fitness" in name:
             for i in range(int(r.w // 3.0)):
@@ -1167,7 +1176,7 @@ class Builder:
                 y = r.y0 + 0.3 + k * 0.6
                 add_box(bm, r.x0 + 0.3, r.x0 + 2.0, y, y + 0.05, z, z + 0.9, FM["steel"])
         else:
-            self._lounge(bm, r, z, sofas=True, colour=FM["blue"])
+            self._lounge(bm, r, z, sofas=True, colour=FM["blue"], region=region)
 
     def _stair(self, bm, r, z, z_top):
         rise = z_top - z
@@ -1333,6 +1342,9 @@ class Builder:
         for f in bm.faces:
             if f not in before:
                 f.material_index = 1
+                f.smooth = True
+            elif any(v in wood for v in f.verts):
+                f.smooth = True
 
     def build_site(self):
         m = self.mats
@@ -1488,7 +1500,7 @@ class Builder:
                 sky.sun_rotation = math.radians(230)
             if hasattr(sky, "sun_disc"):
                 sky.sun_disc = False
-            bg.inputs[1].default_value = 0.02
+            bg.inputs[1].default_value = 0.03
             world.node_tree.links.new(sky.outputs[0], bg.inputs[0])
         scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
         try:
