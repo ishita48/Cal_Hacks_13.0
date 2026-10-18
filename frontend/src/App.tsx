@@ -23,6 +23,7 @@ import { CascadePanel } from './components/CascadePanel'
 import { Controls } from './components/Controls'
 import { FloorPlan } from './components/FloorPlan'
 import { ImpactLedger } from './components/ImpactLedger'
+import { Lifecycle } from './components/Lifecycle'
 import { MessagesPanel } from './components/MessagesPanel'
 import { PlanPanel } from './components/PlanPanel'
 import { VoiceRule } from './components/VoiceRule'
@@ -63,6 +64,10 @@ export default function App() {
   const [view, setView] = useState<View>('3d')
   const [rightTab, setRightTab] = useState<RightTab>('agents')
   const [docks, setDocks] = useState({ left: true, right: true })
+  const openTab = (t: RightTab) => {
+    setRightTab(t)
+    setDocks((d) => ({ ...d, right: true }))
+  }
 
   // Blender's habit: T hides the tool dock on the left, N the properties dock on the right.
   useEffect(() => {
@@ -80,8 +85,15 @@ export default function App() {
   useEffect(() => {
     const onFocus = (e: Event) => {
       for (const f of (e as CustomEvent<BudsFocus[]>).detail ?? []) {
-        if (f.kind === 'tab' && (f.id === 'agents' || f.id === 'messages' || f.id === 'cascade')) setRightTab(f.id)
-        if (f.kind === 'agent') setRightTab('agents')
+        if (f.kind === 'tab' && (f.id === 'agents' || f.id === 'messages' || f.id === 'cascade')) {
+          setRightTab(f.id)
+          setDocks((d) => ({ ...d, right: true }))
+        }
+        if (f.kind === 'agent' || f.kind === 'message') {
+          setRightTab(f.kind === 'agent' ? 'agents' : 'messages')
+          setDocks((d) => ({ ...d, right: true }))
+        }
+        if (f.kind === 'step' || f.kind === 'panel') setDocks((d) => ({ ...d, right: f.kind === 'step' || f.id === 'plan' ? true : d.right, left: f.kind === 'panel' && (f.id === 'controls' || f.id === 'voice' || f.id === 'ledger') ? true : d.left }))
         if (f.kind === 'level') setLevel(f.id)
       }
     }
@@ -113,13 +125,13 @@ export default function App() {
 
   return (
     <div className="app-shell h-full overflow-hidden">
-      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={setRightTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} />
+      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} />
       <TopNav title="Command centre" clock={clock} connection={connection} world={world} integrations={integrations} />
 
       <main className="absolute top-[5.25rem] right-4 bottom-4 left-[17rem] overflow-hidden">
         {/* The stage: the simulation fills everything; panels dock over it like Blender's viewport. */}
         <section className="glass relative h-full w-full overflow-hidden" data-buds="panel:map">
-          <div className="absolute inset-0" style={{ padding: view === '2d' ? `56px ${docks.right ? 404 : 16}px 16px ${docks.left ? 332 : 16}px` : 0 }}>
+          <div className="absolute inset-0" style={{ padding: view === '2d' ? `104px ${docks.right ? 404 : 16}px 16px ${docks.left ? 332 : 16}px` : 0 }}>
             {view === '3d' ? (
               <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
                 <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
@@ -131,8 +143,12 @@ export default function App() {
             )}
           </div>
 
-          {/* HUD: the numbers that matter, as chips along the top of the stage */}
-          <div className="pointer-events-none absolute top-3 left-3 right-3 z-20 flex items-start gap-2">
+          {/* HUD: where we are in the story, then the numbers that matter, along the top of the stage */}
+          <div className="pointer-events-none absolute top-3 left-3 right-3 z-20 flex flex-col gap-2">
+            <div className="pointer-events-auto">
+              <Lifecycle world={world} clock={clock} />
+            </div>
+          <div className="flex items-start gap-2">
             <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
               <Hud k="affected" v={incident ? Number(m.residents_affected ?? 0) : 0} tone={incident ? 'text-haven-power' : undefined} />
               <Hud k="left behind" v={leftBehind} tone={leftBehind ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} hot={leftBehind > 0} buds="panel:plan" />
@@ -183,10 +199,11 @@ export default function App() {
               </button>
             </div>
           </div>
+          </div>
 
           {/* left dock: inputs to the world */}
           {docks.left && (
-            <aside className="glass absolute top-14 bottom-3 left-3 z-10 flex w-[316px] flex-col gap-4 overflow-hidden p-4 enter">
+            <aside className="glass absolute top-[6.4rem] bottom-3 left-3 z-10 flex w-[316px] flex-col gap-4 overflow-hidden p-4 enter">
               <Controls world={world} />
               <div className="hairline pt-4">
                 <VoiceRule world={world} />
@@ -199,7 +216,7 @@ export default function App() {
 
           {/* right dock: the plan, and who said what */}
           {docks.right && (
-            <aside className="absolute top-14 right-3 bottom-3 z-10 grid w-[388px] grid-rows-[minmax(0,1.05fr)_minmax(0,1fr)] gap-3 enter">
+            <aside className="absolute top-[6.4rem] right-3 bottom-3 z-10 grid w-[388px] grid-rows-[minmax(0,1.05fr)_minmax(0,1fr)] gap-3 enter">
               <div className={`glass min-h-0 overflow-hidden p-4 ${leftBehind ? 'tint-red' : ''}`}>
                 <PlanPanel world={world} clock={clock} />
               </div>
@@ -292,8 +309,8 @@ function Sidebar({
           <div className="space-y-1">
             {item(view === '2d', LayoutGrid, 'Floor plan', 'Rooms, water, routes, people', () => setView('2d'))}
             {item(view === '3d', Box, '3D twin', 'The Blender building, live', () => setView('3d'))}
-            {item(rightTab === 'agents', Bot, 'Agents', 'Who speaks in the negotiation', () => setRightTab('agents'), vetoes, 'tab:agents')}
-            {item(rightTab === 'messages', MessagesSquare, 'Messages', 'One per person, their language', () => setRightTab('messages'), criticalMessages, 'tab:messages')}
+            {item(rightTab === 'agents', Bot, 'Agents', 'Who speaks, the transcript, the constraints', () => setRightTab('agents'), vetoes, 'tab:agents')}
+            {item(rightTab === 'messages', MessagesSquare, 'Messages', 'Who is told what, when', () => setRightTab('messages'), criticalMessages, 'tab:messages')}
             {item(rightTab === 'cascade', Waypoints, 'Cascade', 'What fails next, and when', () => setRightTab('cascade'), 0, 'tab:cascade')}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { Constraints, Transcript } from './Negotiation'
 import { useBuilding } from '../state/building'
 import type { FetchAgent, FetchStatus, NegotiationStatus, Stance, StanceKind, WorldState } from '../state/types'
 
@@ -32,6 +33,7 @@ export function AgentConsole({ world }: Props) {
   const roster = useBuilding((b) => b.residents)
   const [showAll, setShowAll] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mode, setMode] = useState<'cards' | 'transcript' | 'constraints'>('cards')
 
   const stances = new Map<string, Stance>()
   for (const s of world.plan.stances) stances.set(s.agent, s)
@@ -127,8 +129,14 @@ export function AgentConsole({ world }: Props) {
 
   return (
     <div className="flex h-full flex-col gap-2.5 overflow-hidden">
-      <div className="flex items-baseline justify-between">
-        <span className="eyebrow">Agents · who speaks in the negotiation</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="seg seg-xs">
+          {(['cards', 'transcript', 'constraints'] as const).map((v) => (
+            <button key={v} onClick={() => setMode(v)} className={`seg-item ${mode === v ? 'is-on' : ''}`} title={v === 'cards' ? 'Every agent, with its stance; switch one off to silence it' : v === 'transcript' ? 'The negotiation as it happened, round by round' : 'The hard constraints and whether the plan holds them'}>
+              {v === 'cards' ? 'Agents' : v === 'transcript' ? 'Transcript' : 'Constraints'}
+            </button>
+          ))}
+        </div>
         <span className="mono text-[10px] text-t3">
           {negotiation && (
             <span className={`mr-2 ${negotiation.mode === 'claude' ? 'text-haven-purple' : 'text-t3'}`} title={negotiation.mode === 'claude' ? 'Agents reason with Claude; every stance is a logged input event' : 'No model key: the rule functions speak (set ANTHROPIC_API_KEY)'}>
@@ -145,7 +153,11 @@ export function AgentConsole({ world }: Props) {
         </span>
       </div>
       {error && <p className="text-[11px] text-haven-danger">{error}</p>}
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      {mode !== 'cards' && (
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">{mode === 'transcript' ? <Transcript world={world} /> : <Constraints world={world} />}</div>
+      )}
+      <div className={`min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 ${mode !== 'cards' ? 'hidden' : ''}`}>
+        <p className="text-[11px] text-t3">Each card is an agent in the negotiation. Its stance on the current plan is below it; switch a personal agent off and nobody speaks for that resident's needs.</p>
         {SPECIALISTS.filter((id) => id in world.agents).map((id) => card(id))}
         <div className="eyebrow pt-2">Personal agents</div>
         {storyIds.map((id) => card(id, id === 'resident:maya'))}

@@ -44,6 +44,14 @@ Judges ask. Here is the honest list.
   run after you tap **Approve**: the same input events the buttons send. Alt+C opens the chat, Alt+Shift+V is
   hands-free (talk over it and it stops), Esc hushes it. Deterministic answers first
   (`backend/haven/agents/buds.py`), Claude only as the fallback.
+- **Reading the screen.** The lifecycle rail across the top of the stage says where the system is (Detect,
+  Trace, Negotiate, Govern, Approve, Act, Done), each stage lit by a fact in the world state. The Agents dock has
+  three readings of the same plan: the agent cards (switch one off to silence it), the **Transcript** (round 1's
+  proposal, every stance as a bubble with its source: rules, Claude, or Claude inside the agent's Fetch.ai
+  identity, the revised proposal, round 2, the checker), and **Constraints** (every hard rule an agent demanded,
+  whether the plan holds it, and who is silent). Messages is an outbox: each message hangs off a plan step and
+  shows draft, queued (with the countdown to its step), sending, sent at a time, or failed, with a delivery bar.
+  T and N hide the docks; the stage is the simulation.
 - **The look** is the Sentinel/Argus app language: a floating frosted sidebar and top bar, slate shell, white
   cards, one blue, colour only where it means something. Light by default; the moon button switches to dark.
 - **/story** is the editorial page: the sensor-to-plan cascade, the agents, a "one shared state" room that shows

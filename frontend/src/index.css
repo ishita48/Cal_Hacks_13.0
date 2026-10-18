@@ -492,3 +492,22 @@ body {
   background: linear-gradient(135deg, #0891b2, #2563eb); box-shadow: 0 10px 30px rgba(37, 99, 235, 0.35);
   animation: haven-fp-fade 150ms ease-out both;
 }
+
+/* ---- the lifecycle rail: where the system is in the story ---------------------------------------- */
+.hairline-l { border-left: 1px solid var(--border-soft); }
+.rail-step { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--ink-4); white-space: nowrap; transition: color 300ms, background-color 300ms; }
+.rail-step i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); opacity: 0.5; transition: background-color 300ms, opacity 300ms, box-shadow 300ms; }
+.rail-step.is-on { color: var(--ink-1); }
+.rail-step.is-on i { background: var(--c-safe); opacity: 1; }
+.rail-step.is-now { background: rgba(15, 98, 254, 0.1); color: #1d4ed8; }
+.dark .rail-step.is-now { color: #93c5fd; }
+.rail-step.is-now i { background: var(--argus-blue); box-shadow: 0 0 0 3px rgba(15, 98, 254, 0.18); animation: haven-pulse 1.6s ease-in-out infinite; }
+.rail-link { display: inline-block; width: 14px; height: 1.5px; background: var(--border-strong); transition: background-color 300ms; }
+.rail-link.is-on { background: var(--c-safe); }
+
+/* ---- transcript bubbles --------------------------------------------------------------------------- */
+.bubble { padding: 8px 10px; border-radius: 4px 12px 12px 12px; background: var(--card-bg); border: 1px solid var(--border-soft); }
+.bubble.is-veto { border-color: rgba(220, 38, 38, 0.35); background: rgba(239, 68, 68, 0.06); }
+.bubble.is-support { border-color: rgba(22, 163, 74, 0.3); background: rgba(34, 197, 94, 0.05); }
+.bubble.is-silent { border-style: dashed; background: transparent; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
