@@ -25,3 +25,4 @@ Thumbs.db
 blender/*.blend
 blender/*.blend1
 blender/renders/*_check.png
+blender/renders/*.log

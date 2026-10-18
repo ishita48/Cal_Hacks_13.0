@@ -659,7 +659,7 @@ class Builder:
             z0, z1 = lv["elevation"], lv["elevation"] + lv["height"]
             bm = bmesh.new()
             add_prism(bm, region, z0, z0 + SLAB, mi=0)
-            _bevel(mesh_object(f"slab_{lv['id']}", bm, [m["concrete"]], self.col_shell, self._props(lv)))
+            mesh_object(f"slab_{lv['id']}", bm, [m["concrete"]], self.col_shell, self._props(lv))
             # Exterior wall ring: timber-clad at street level, white panels above, concrete below grade.
             ring = region.minus(region.eroded(EXT_WALL))
             bm = bmesh.new()
@@ -1523,7 +1523,7 @@ class Builder:
                     nt.interface.remove(item)
                 nt.interface.new_socket("Image", in_out="OUTPUT", socket_type="NodeSocketColor")
                 comp = nt.nodes.new("NodeGroupOutput")
-                scene.compositing_node_group = nt
+                scene.compositing_node_group = None      # attach only after the tree is complete
             else:                                              # Blender 4.x
                 scene.use_nodes = True
                 nt = scene.node_tree
@@ -1532,19 +1532,30 @@ class Builder:
                 comp = nt.nodes.new("CompositorNodeComposite")
             rl = nt.nodes.new("CompositorNodeRLayers")
             glare = nt.nodes.new("CompositorNodeGlare")
-            glare.glare_type = "FOG_GLOW"
-            for attr, val in (("threshold", 1.2), ("mix", -0.75), ("size", 7)):
-                if hasattr(glare, attr):
-                    setattr(glare, attr, val)
+            if hasattr(glare, "glare_type"):                       # 4.x properties
+                glare.glare_type = "FOG_GLOW"
+                glare.threshold, glare.mix, glare.size = 1.2, -0.75, 7
+            else:                                                  # 5.x: everything is a socket
+                for key, val in (("Type", "Fog Glow"), ("Threshold", 1.2), ("Strength", 0.12), ("Size", 0.4)):
+                    if key in glare.inputs:
+                        try:
+                            glare.inputs[key].default_value = val
+                        except (TypeError, ValueError):
+                            pass
             lens = nt.nodes.new("CompositorNodeLensdist")
-            for key, val in (("Distortion", 0.0), ("Dispersion", 0.012)):
+            for key, val in (("Distortion", 0.0), ("Dispersion", 0.012), ("Fit", True)):
                 if key in lens.inputs:
-                    lens.inputs[key].default_value = val
+                    try:
+                        lens.inputs[key].default_value = val
+                    except (TypeError, ValueError):
+                        pass
             if hasattr(lens, "use_fit"):
                 lens.use_fit = True
             nt.links.new(rl.outputs["Image"], glare.inputs["Image"])
             nt.links.new(glare.outputs["Image"], lens.inputs["Image"])
             nt.links.new(lens.outputs["Image"], comp.inputs["Image"])
+            if hasattr(scene, "compositing_node_group"):
+                scene.compositing_node_group = nt
         except Exception as exc:  # compositor API differs between versions; never fail the build on it
             print("compositor skipped:", exc)
 
@@ -1626,12 +1637,21 @@ def export_glb(path, collections=("Shell", "Windows")):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.object.select_all(action="DESELECT")
+    bevels = []
     for name in collections:
         for ob in bpy.data.collections[name].all_objects:
             ob.select_set(True)
-    bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True,
-                              export_apply=True, export_yup=True, export_extras=True,
-                              export_materials="EXPORT")
+            for mod in ob.modifiers:
+                if mod.type == "BEVEL" and mod.show_viewport:
+                    mod.show_viewport = False        # render-only polish; keeps the GLB small
+                    bevels.append(mod)
+    try:
+        bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True,
+                                  export_apply=True, export_yup=True, export_extras=True,
+                                  export_materials="EXPORT")
+    finally:
+        for mod in bevels:
+            mod.show_viewport = True
     print(f"wrote {path}")
 
 
