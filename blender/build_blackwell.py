@@ -1476,6 +1476,7 @@ def main(argv=None):
         bpy.ops.wm.save_as_mainfile(filepath=str(p))
     if opts["render"]:
         render(resolve(opts["render"]))
+        render(resolve(opts["render"]).with_name("street.png"), camera="StreetCam")
     for level_id in opts["cutaway"]:
         state = cutaway(level_id, spec["levels"])
         below = next(lv["index"] for lv in spec["levels"] if lv["id"] == level_id) < 1
