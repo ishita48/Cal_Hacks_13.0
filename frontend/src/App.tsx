@@ -9,15 +9,20 @@ import { PlanPanel } from './components/PlanPanel'
 import { VoiceRule } from './components/VoiceRule'
 import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
+import type { Level } from './state/types'
 import { connectWorld, useWorld } from './state/world'
 
 // The 3D twin is another view of the same store; it is lazy so the 2D app loads first.
 const Building3D = lazy(() => import('./components/Building3D'))
 
+// Selectors must return stable references: a fresh [] per call makes Zustand's getSnapshot loop.
+const NO_LEVELS: Level[] = []
+
 export default function App() {
   useEffect(() => connectWorld(), [])
   const loadBuilding = useBuilding((b) => b.load)
-  const levels = useBuilding((b) => b.spec?.levels ?? [])
+  const spec = useBuilding((b) => b.spec)
+  const levels = spec?.levels ?? NO_LEVELS
   useEffect(() => {
     loadBuilding().catch(() => {})
   }, [loadBuilding])
