@@ -29,7 +29,10 @@ const SKY_URL = '/env/sky_2k.hdr'
  * azimuth clockwise from north (+y), elevation above the horizon; the HDRI is rotated about up by
  * `envRotation` (Blender rotates it about +z; three.js about +y, same sign).
  */
-const SUN = { azimuthDeg: 230, elevationDeg: 48, envRotationRad: 0 }
+// From the Blender build log: sun bearing 220 deg clockwise from north, 48 deg up (unit vector
+// (-0.430, -0.513, 0.743) in the spec frame); the world Mapping node rotates the HDRI lookup by
+// +1.6722 rad about up. three.js rotates the sampled direction too, so the sign carries over.
+const SUN = { azimuthDeg: 220, elevationDeg: 48, envRotationRad: 1.6722 }
 function sunPosition(distance = 160): [number, number, number] {
   const az = (SUN.azimuthDeg * Math.PI) / 180
   const el = (SUN.elevationDeg * Math.PI) / 180
@@ -173,12 +176,12 @@ function Scene({ level }: Props) {
       {/* Daylight as Blender has it: the same HDRI for sky light and reflections, a sun in the same place
           for shadows (normal maps in the baked GLBs read off it). Light formers stand in without the file. */}
       <hemisphereLight args={['#dfe8ff', '#3a3330', 0.55]} />
-      <directionalLight position={sunPosition()} intensity={3.2} color="#fff1dc" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02}>
+      <directionalLight position={sunPosition()} intensity={3.4} color="#fff5e6" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02}>
         <orthographicCamera attach="shadow-camera" args={[-130, 130, 130, -130, 1, 500]} />
       </directionalLight>
       <Optional fallback={<StudioLight />}>
         <Suspense fallback={<StudioLight />}>
-          <Environment files={SKY_URL} background backgroundBlurriness={0.35} backgroundIntensity={0.9} environmentIntensity={1.1} environmentRotation={[0, SUN.envRotationRad, 0]} backgroundRotation={[0, SUN.envRotationRad, 0]} />
+          <Environment files={SKY_URL} background backgroundBlurriness={0.35} backgroundIntensity={0.9} environmentIntensity={1.0} environmentRotation={[0, SUN.envRotationRad, 0]} backgroundRotation={[0, SUN.envRotationRad, 0]} />
         </Suspense>
       </Optional>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
