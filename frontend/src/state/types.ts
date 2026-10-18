@@ -95,6 +95,85 @@ export interface Forecast {
   settled: boolean
 }
 
+// ---- agents + plan (backend/haven/agents/models.py) -------------------------------------
+
+export type StanceKind = 'propose' | 'support' | 'critique' | 'veto'
+export type PlanStatus = 'none' | 'draft' | 'approved' | 'executing' | 'done'
+export type StepKind =
+  | 'isolate'
+  | 'valve'
+  | 'hold'
+  | 'escort'
+  | 'relocate'
+  | 'move_item'
+  | 'shelter'
+  | 'notify'
+  | 'call'
+  | 'ticket'
+
+export interface Constraint {
+  type: 'hard' | 'soft'
+  rule: string
+  code: string
+  source: string
+}
+
+export interface Stance {
+  agent: string
+  label: string
+  stance: StanceKind
+  reason: string
+  constraint: Constraint | null
+  step_ids: string[]
+  resident: string | null
+}
+
+export interface PlanStep {
+  id: string
+  order: number
+  kind: StepKind
+  actor: string
+  title: string
+  reason: string
+  at_s: number
+  deadline_s: number | null
+  people: string[]
+  target: string | null
+  command: Record<string, unknown> | null
+  satisfies: string[]
+  count: number
+}
+
+export interface Round {
+  n: number
+  title: string
+  summary: string
+  steps: PlanStep[]
+  stances: Stance[]
+  feasible: boolean
+}
+
+export interface Plan {
+  version: number
+  computed_step: number
+  status: PlanStatus
+  rounds: Round[]
+  steps: PlanStep[]
+  stances: Stance[]
+  left_behind: string[]
+  metrics: Record<string, number>
+  enabled_agents: string[]
+  rules: Constraint[]
+  headline: string
+  signature: number
+}
+
+export interface AgentInfo {
+  id: string
+  label: string
+  enabled: boolean
+}
+
 export interface WorldState {
   run_id: string
   scenario: string
@@ -110,10 +189,14 @@ export interface WorldState {
   isolated: string[]
   closed_valves: string[]
   pending: PendingCommand[]
+  agents: Record<string, boolean>
+  rules: Constraint[]
+  approved_plan_version: number | null
   equipment: Record<string, EquipmentState>
   power: PowerState
   impact: Impact
   forecast: Forecast
+  plan: Plan
 }
 
 export interface Clock {

@@ -34,7 +34,35 @@ class EquipmentCommand(BaseModel):
     actor: str = "operator"
 
 
-InputEvent = Annotated[Union[SensorReading, EquipmentCommand], Field(discriminator="type")]
+class AgentToggle(BaseModel):
+    """Switch an agent on or off in the negotiation (the Maya moment is this event for 'resident:maya')."""
+
+    type: Literal["agent_toggle"] = "agent_toggle"
+    agent: str                    # "resident:maya", "safety", "housing", "capacity"
+    enabled: bool
+
+
+class ManagerRule(BaseModel):
+    """A rule the human in charge imposes in plain language; parsed into a constraint code."""
+
+    type: Literal["manager_rule"] = "manager_rule"
+    text: str
+    code: str                     # e.g. "no_off_campus", "no_moves_after:00:00"
+    actor: str = "manager"
+
+
+class PlanDecision(BaseModel):
+    """The human gate: approve (or reject) the current plan version."""
+
+    type: Literal["plan_decision"] = "plan_decision"
+    plan_version: int
+    decision: Literal["approve", "reject"]
+    actor: str = "manager"
+
+
+InputEvent = Annotated[
+    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision], Field(discriminator="type")
+]
 
 
 class LoggedEvent(BaseModel):

@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from ..world.engine import ReplayActiveError, WorldEngine
-from ..world.events import EquipmentCommand, SensorReading
+from ..world.events import AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading
+from ..world.state import agent_label
 from ..world.store import EventStore
 
 
@@ -69,6 +70,32 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         except ReplayActiveError as e:
             raise HTTPException(409, str(e)) from e
         return {"seq": logged.seq, "step": logged.step}
+
+    async def _submit(event):
+        try:
+            logged = await engine.submit(event)
+        except ReplayActiveError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"seq": logged.seq, "step": logged.step}
+
+    @app.get("/api/agents")
+    async def get_agents():
+        return [{"id": a, "label": agent_label(engine.ctx, a), "enabled": on}
+                for a, on in engine.state.agents.items()]
+
+    @app.post("/api/agent")
+    async def post_agent(toggle: AgentToggle):
+        if toggle.agent not in engine.state.agents:
+            raise HTTPException(404, f"unknown agent {toggle.agent}")
+        return await _submit(toggle)
+
+    @app.post("/api/rule")
+    async def post_rule(rule: ManagerRule):
+        return await _submit(rule)
+
+    @app.post("/api/plan/decision")
+    async def post_decision(decision: PlanDecision):
+        return await _submit(decision)
 
     class ClockBody(BaseModel):
         playing: bool | None = None

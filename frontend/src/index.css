@@ -22,3 +22,18 @@ body { @apply bg-ink-950 text-slate-200 antialiased font-sans; }
   50% { opacity: 0.35; }
 }
 .haven-pulse { animation: haven-pulse 1.6s ease-in-out infinite; }
+
+@keyframes haven-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+.haven-shake { animation: haven-shake 0.5s ease-in-out 2; }
+
+@keyframes haven-flash {
+  0% { background-color: rgba(255, 176, 32, 0.35); }
+  100% { background-color: transparent; }
+}
+.haven-flash { animation: haven-flash 1.8s ease-out 1; }

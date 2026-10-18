@@ -14,10 +14,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ..agents.models import Constraint, Plan
+from ..agents.planner import compute_plan
 from ..building.graph import POWER_RELS, powered_levels
 from .cascade import Forecast, Impact, assess, describe, forecast
 from .context import WorldContext
-from .events import EquipmentCommand, InputEvent, SensorReading
+from .events import AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision, SensorReading
 from .physics import Happening, Hydraulics, step
 
 # Fixed simulation step, in simulated seconds.
@@ -96,11 +98,17 @@ class WorldState(BaseModel):
     closed_valves: list[str] = Field(default_factory=list)
     pending: list[PendingCommand] = Field(default_factory=list)
 
+    # -- the negotiation's inputs --
+    agents: dict[str, bool] = Field(default_factory=dict)            # agent id -> enabled
+    rules: list[Constraint] = Field(default_factory=list)            # manager-imposed constraints
+    approved_plan_version: int | None = None
+
     # -- derived views (recomputed by the reducer, never logged) --
     equipment: dict[str, EquipmentState] = Field(default_factory=dict)
     power: PowerState = Field(default_factory=PowerState)
     impact: Impact = Field(default_factory=Impact)
     forecast: Forecast = Field(default_factory=Forecast)
+    plan: Plan = Field(default_factory=Plan)
 
     @property
     def sim_time(self) -> float:
@@ -115,8 +123,18 @@ class WorldState(BaseModel):
 def initial_state(run_id: str, scenario: str, ctx: WorldContext, mode: str = "live") -> WorldState:
     state = WorldState(run_id=run_id, scenario=scenario, mode=mode)
     state.equipment = {eid: EquipmentState() for eid in sorted(ctx.equipment)}
+    state.agents = {a: True for a in default_agents(ctx)}
     _rederive(state, ctx, [], narrate=False)
     return state
+
+
+def default_agents(ctx: WorldContext) -> list[str]:
+    """Specialists plus one personal agent per resident with a specific need or a story."""
+    out = ["safety", "housing", "capacity"]
+    for r in ctx.roster.residents:
+        if r.needs or r.story:
+            out.append(f"resident:{r.id}")
+    return out
 
 
 # ---- reducer ------------------------------------------------------------------------------
@@ -128,6 +146,13 @@ def apply_input(state: WorldState, event: InputEvent, ctx: WorldContext) -> None
         changed = _apply_sensor(state, event, ctx)
     elif isinstance(event, EquipmentCommand):
         _apply_command(state, event, ctx)
+    elif isinstance(event, AgentToggle):
+        _apply_toggle(state, event, ctx)
+    elif isinstance(event, ManagerRule):
+        state.rules.append(Constraint(type="hard", rule=event.text, code=event.code, source=event.actor))
+        state.record("rule", f'{event.actor}: "{event.text}"', "warning", code=event.code)
+    elif isinstance(event, PlanDecision):
+        _apply_decision(state, event)
     if changed:          # a repeated wet/dry reading changes nothing physical: skip the forecast
         _rederive(state, ctx, [])
     state.version += 1
@@ -225,6 +250,36 @@ def _apply_command(state: WorldState, ev: EquipmentCommand, ctx: WorldContext) -
                      actor=ev.actor)
 
 
+def _apply_toggle(state: WorldState, ev: AgentToggle, ctx: WorldContext) -> None:
+    if ev.agent not in state.agents:
+        state.record("command_rejected", f"Unknown agent {ev.agent}", "warning")
+        return
+    state.agents[ev.agent] = ev.enabled
+    label = agent_label(ctx, ev.agent)
+    state.record("agent_toggle", f"{label} switched {'on' if ev.enabled else 'OFF'}",
+                 "info" if ev.enabled else "warning", agent=ev.agent, enabled=ev.enabled)
+
+
+def _apply_decision(state: WorldState, ev: PlanDecision) -> None:
+    if ev.plan_version != state.plan.version:
+        state.record("command_rejected", f"Decision on stale plan v{ev.plan_version} (current v{state.plan.version})",
+                     "warning")
+        return
+    if ev.decision == "approve":
+        state.approved_plan_version = ev.plan_version
+        state.record("plan_approved", f"{ev.actor} approved plan v{ev.plan_version}", "info", version=ev.plan_version)
+    else:
+        state.approved_plan_version = None
+        state.record("plan_rejected", f"{ev.actor} rejected plan v{ev.plan_version}", "warning", version=ev.plan_version)
+
+
+def agent_label(ctx: WorldContext, agent: str) -> str:
+    if agent.startswith("resident:"):
+        r = ctx.roster.by_id().get(agent.split(":", 1)[1])
+        return f"{r.name.split()[0]}'s agent" if r else agent
+    return {"safety": "Safety agent", "housing": "Housing agent", "capacity": "Capacity agent"}.get(agent, agent)
+
+
 def _complete_command(state: WorldState, p: PendingCommand, ctx: WorldContext) -> None:
     eq = ctx.equipment[p.equipment_id]
     if p.command == "close":
@@ -281,6 +336,7 @@ def _rederive(state: WorldState, ctx: WorldContext, happenings: list[Happening],
         for ev in describe(ctx, happenings, live_before, h.live, impact_before, state.impact):
             state.record(ev.kind, ev.message, ev.severity, id=ev.id, cause=ev.cause, **ev.data)
     state.forecast = forecast(h, ctx, state.impact, state.step)
+    state.plan = compute_plan(ctx, state)
 
 
 def _status(eid: str, h: Hydraulics, ctx: WorldContext, closing: set[str]) -> EquipmentStatus:

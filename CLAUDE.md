@@ -25,6 +25,12 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   - `haven/world/store.py` append-only event log (SQLite locally).
   - `haven/api/app.py` HTTP + `/ws` (every client receives identical state frames).
     Inputs: `POST /api/sensor` (reading) and `POST /api/command` (valve close/open, breaker off/on).
+  - `haven/agents/models.py` + `planner.py` the negotiation (Phase 3): a `Plan` is a derived view, a pure function of
+    (impact, forecast, `state.agents`, `state.rules`). Round 1 is the naive proposal, every enabled agent evaluates
+    it (propose/support/critique/veto), round 2 folds in the enabled objections. An agent that is off does not
+    speak, and anyone with a critical need nobody spoke for lands in `plan.left_behind`: that is the Maya moment.
+    Inputs: `POST /api/agent` (toggle), `/api/rule` (manager constraint code), `/api/plan/decision` (approve).
+    No LLM decides anything here; an LLM may only paraphrase stances later.
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
 - `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;
