@@ -29,7 +29,7 @@ Run inside a live Blender (e.g. through the Blender MCP):
 
 Naming for consumers (the React Three Fiber view reads glTF ``extras`` as ``userData``):
 ``win_<space_id>`` windows (space_id, level, kind), ``eq_<equipment_id>`` plant (equipment_id, kind,
-flood_height), ``floor_<level>`` / ``walls_<level>`` / ``furniture_<level>`` interiors, every object
+flood_height), ``floor_<space_id>`` tiles (space_id, kind), ``walls_<level>`` / ``furniture_<level>`` interiors, every object
 carries ``level``. Coordinates are the spec's: metres, x east, y north, z up, origin at the SW corner.
 """
 
@@ -863,11 +863,14 @@ class Builder:
             z_fin = lv["elevation"] + SLAB
             z_top = lv["elevation"] + lv["height"]
             spaces = [s for s in self.spaces_by_level.get(lv["id"], []) if not s["outdoor"]]
-            bm = bmesh.new()
+            # One floor tile per space, so the 3D view can tint a room from world state.
             for s in spaces:
                 r = R.of(s["rect"])
-                add_box(bm, r.x0, r.x1, r.y0, r.y1, z_fin, z_fin + 0.02, fmi[FLOOR_BY_KIND.get(s["kind"], "concrete")])
-            mesh_object(f"floor_{lv['id']}", bm, [m[k] for k in floor_mats], self.col_interior, self._props(lv))
+                finish = FLOOR_BY_KIND.get(s["kind"], "concrete")
+                bm = bmesh.new()
+                add_box(bm, r.x0, r.x1, r.y0, r.y1, z_fin, z_fin + 0.02, 0)
+                mesh_object(f"floor_{s['id']}", bm, [m[finish]], self.col_interior,
+                            self._props(lv, space_id=s["id"], kind=s["kind"]))
             bm = bmesh.new()
             for axis, fixed, lo, hi in self.partitions(lv, spaces, region):
                 if axis == "x":

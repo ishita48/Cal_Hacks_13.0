@@ -66,7 +66,8 @@ three.js. Object names and custom properties survive as `mesh.name` and `mesh.us
 | ----------------- | ------------------------------------------------------- |
 | `win_<space_id>`  | `space_id`, `level`, `level_index`, `kind`              |
 | `eq_<equip_id>`   | `equipment_id`, `kind`, `space_id`, `level`, `flood_height` (−1 when none) |
-| `floor_<L>`, `walls_<L>`, `furniture_<L>`, `slab_<L>`, `walls_ext_<L>` | `level`, `level_index` |
+| `floor_<space_id>`  | `space_id`, `level`, `level_index`, `kind` (one tile per space, for tinting rooms) |
+| `walls_<L>`, `furniture_<L>`, `slab_<L>`, `walls_ext_<L>` | `level`, `level_index` |
 
 So an R3F view can hide levels above the one in focus (`level_index`), tint a room's glass from world state
 (the glass material has an emission colour with strength 0, ready to be driven), and flash the switchgear
