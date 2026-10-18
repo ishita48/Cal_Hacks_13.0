@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, formatClockHM, formatCountdown, formatTimeOfDay } from '../lib/api'
+import { speak, stopSpeaking } from '../lib/speak'
 import { useBuilding } from '../state/building'
 import type { ActionState, Clock, PlanStep, Stance, StepKind, WorldState } from '../state/types'
 
@@ -105,6 +106,7 @@ export function PlanPanel({ world, clock }: Props) {
             )}
           </div>
           {plan.headline && <p className="mt-1 text-[15px] font-semibold leading-snug text-t1">{plan.headline}</p>}
+          <BriefButton />
         </div>
         {!approvedThis && (
           <button disabled={replay} onClick={() => decide('approve')} className="btn-primary shrink-0">
@@ -145,6 +147,8 @@ export function PlanPanel({ world, clock }: Props) {
           <div className="mt-0.5 text-[11px] text-t2">A hard need nobody in the negotiation spoke for. This plan strands them.</div>
         </div>
       )}
+
+      {plan.checks.length > 0 && <Checks checks={plan.checks} />}
 
       {Object.keys(plan.metrics).length > 0 && (
         <div className="grid grid-cols-4 gap-2">
@@ -271,5 +275,68 @@ function StatusGlyph({ status, glyph, title }: { status?: ActionState['status'];
     <span className={`${base} border border-white/15 text-t2`} title={title}>
       {glyph}
     </span>
+  )
+}
+
+
+function Checks({ checks }: { checks: import('../state/types').Check[] }) {
+  const [open, setOpen] = useState(false)
+  const bad = checks.filter((c) => !c.ok)
+  const shown = open ? checks : bad
+  return (
+    <div className={`glass-card px-3.5 py-2.5 ${bad.length ? 'tint-red' : ''}`}>
+      <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpen((v) => !v)}>
+        <span className={`h-2 w-2 rounded-full ${bad.length ? 'bg-haven-danger haven-ring' : 'bg-haven-safe'}`} />
+        <span className={`text-[13px] font-semibold ${bad.length ? 'text-haven-danger' : 'text-t1'}`}>
+          {bad.length ? `${bad.length} violation${bad.length === 1 ? '' : 's'}` : `${checks.length} checks pass`}
+        </span>
+        <span className="label ml-1">checker agent · verified against the facts, not against who spoke</span>
+        <span className="mono ml-auto text-[10px] text-t3">{open ? 'hide' : 'show all'}</span>
+      </button>
+      {shown.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {shown.map((c) => (
+            <li key={c.code} className="flex items-start gap-2 text-[11px]">
+              <span className={`mono mt-px w-3 shrink-0 text-center ${c.ok ? 'text-haven-safe' : 'text-haven-danger'}`}>{c.ok ? '✓' : '✕'}</span>
+              <span className={c.ok ? 'text-t2' : 'text-t1'}>
+                {c.label}
+                <span className="text-t3"> · {c.detail}</span>
+              </span>
+              <span className="pill ml-auto shrink-0">{c.severity}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function BriefButton() {
+  const [state, setState] = useState<'idle' | 'loading' | 'speaking'>('idle')
+  const [source, setSource] = useState<string | null>(null)
+  const run = async () => {
+    if (state === 'speaking') {
+      stopSpeaking()
+      setState('idle')
+      return
+    }
+    setState('loading')
+    try {
+      const b = await api.brief()
+      setSource(b.source)
+      setState('speaking')
+      const via = await speak(b.text)
+      setSource(`${b.source} · ${via}`)
+    } finally {
+      setTimeout(() => setState('idle'), 1500)
+    }
+  }
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <button className="btn-secondary btn-sm" onClick={run} disabled={state === 'loading'}>
+        {state === 'speaking' ? '■ Stop' : state === 'loading' ? '…' : '▶ Brief me'}
+      </button>
+      {source && <span className="mono text-[10px] text-t3">{source}</span>}
+    </div>
   )
 }

@@ -161,6 +161,24 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     async def post_decision(decision: PlanDecision):
         return await _submit(decision)
 
+    @app.get("/api/plan/brief")
+    async def plan_brief():
+        """Two spoken sentences for the manager: Claude-polished when a key is set, templated otherwise."""
+        from ..agents.llm import narrate
+
+        st = engine.state
+        plan = st.approved_plan or st.plan
+        if plan.status == "none":
+            return {"text": "No incident. Blackwell Hall is quiet.", "source": "template"}
+        m = plan.metrics
+        summary = (f"{plan.headline} {int(m.get('residents_affected', 0))} residents affected, "
+                   f"{int(m.get('relocated', 0))} relocated on campus, {int(m.get('escorted', 0))} escorted, "
+                   f"{int(m.get('left_behind', 0))} left behind, {int(m.get('violations', 0))} safety violations. "
+                   f"Water reaches the switchgear in {m.get('water_contact_min', 0):.0f} minutes; "
+                   f"the plumber can close the valve by minute {m.get('valve_closed_min', 0):.0f}.")
+        polished = await narrate(summary)
+        return {"text": polished or summary, "source": "llm" if polished else "template", "version": plan.version}
+
     class ClockBody(BaseModel):
         playing: bool | None = None
         speed: float | None = Field(default=None, gt=0)

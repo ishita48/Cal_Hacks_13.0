@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from ..people.roster import Resident
 from ..world.physics import Hydraulics, step
-from .models import Constraint, Message, Plan, PlanStep, Round, Stance
+from .models import Check, Constraint, Message, Plan, PlanStep, Round, Stance
 from .rules import describe as describe_rule
 
 if TYPE_CHECKING:
@@ -80,6 +80,9 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
     r2_steps = _revised_proposal(ctx, sit, r1_stances)
     r2_stances = _evaluate(ctx, sit, r2_steps)
     left_behind = _uncovered(ctx, sit, r2_steps)
+    checks = _check(ctx, sit, r2_steps, left_behind)
+    if "checker" in sit.enabled:
+        r2_stances.append(_checker_stance(ctx, checks))
     feasible2 = not any(s.stance == "veto" for s in r2_stances)
 
     rounds = [
@@ -90,6 +93,8 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
               summary=_round_summary(ctx, 2, r2_stances)),
     ]
     metrics = _metrics(sit, r2_steps, left_behind)
+    metrics["violations"] = sum(1 for c in checks if not c.ok)
+    metrics["checks"] = len(checks)
     headline = _headline(ctx, sit, r2_steps, left_behind)
     messages = _messages(ctx, sit, r2_steps)
 
@@ -99,7 +104,8 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
     status = "approved" if state.approved_plan_version == version else "draft"
     return Plan(version=version, computed_step=state.step, status=status, rounds=rounds, steps=r2_steps,
                 stances=r2_stances, left_behind=left_behind, metrics=metrics, enabled_agents=enabled,
-                rules=list(state.rules), headline=headline, signature=signature, messages=messages)
+                rules=list(state.rules), headline=headline, signature=signature, messages=messages,
+                checks=checks)
 
 
 # ---- situation -----------------------------------------------------------------------------
@@ -393,8 +399,7 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
         # Allocation by capacity, floor by floor, keeping floors together where possible.
         # People a specific step already places (lift escorts end in the lobby, shelter stays put).
         assigned: set[str] = {p for st in steps if st.kind in ("relocate", "shelter") for p in st.people}
-        assigned |= {p for st in steps if st.kind == "escort" and st.id.startswith("escort_") and "lift" in st.title
-                     for p in st.people}
+        assigned |= {p for st in steps if st.kind == "escort" and st.target == "L1-lobby" for p in st.people}
         queue = [r for r in movers if r.id not in assigned]
         groups: list[tuple[str, list[Resident]]] = []
         shelter_reason = None
@@ -643,6 +648,98 @@ def _resident(ctx: WorldContext, sit: Situation, r: Resident, steps: list[PlanSt
 # ---- coverage, metrics, summaries ----------------------------------------------------------
 
 
+# ---- the adversarial checker -----------------------------------------------------------------
+
+
+def _check(ctx: WorldContext, sit: Situation, steps: list[PlanStep], left_behind: list[str]) -> list[Check]:
+    """Verify the final plan against every hard constraint from the facts, not from who spoke.
+
+    Agents can be switched off; the checker cannot. A violation here is what the ledger reports.
+    """
+    by_id = ctx.roster.by_id()
+    out: list[Check] = []
+    cut = _cut_time(steps)
+    first = lambda rid: by_id[rid].name.split()[0]  # noqa: E731
+
+    # Safety: switchgear dead before water contact, with the margin; no lift use after isolation.
+    if sit.lifts_up and sit.eta_cut_s is not None:
+        ok = cut is not None and cut <= sit.eta_cut_s + 1e-6
+        out.append(Check(code="deenergise_before_contact", label="Switchgear isolated before water contact",
+                         ok=ok, severity="safety",
+                         detail=(f"cut at +{cut / 60:.0f} min, water at +{sit.eta_lifts_s / 60:.0f} min, "
+                                 f"{SAFETY_MARGIN_S / 60:.0f} min margin" if cut is not None else "no isolation step")))
+        late = [st for st in steps if st.kind == "escort" and st.target == "L1-lobby" and st.deadline_s is not None
+                and cut is not None and st.deadline_s > cut + 1e-6]
+        out.append(Check(code="no_lift_after_cut", label="No lift use after isolation", ok=not late, severity="safety",
+                         detail=", ".join(st.title for st in late) if late else "every lift escort finishes before the cut"))
+    out.append(Check(code="nobody_in_basement", label="No resident sent to the basement", severity="safety",
+                     ok=not any(st.target and st.target.startswith("B1") for st in steps if st.kind in ("relocate", "escort", "shelter")),
+                     detail="all destinations above grade"))
+
+    # Access and medical needs: every person with a hard need has a step with their name on it.
+    for r in ctx.roster.residents:
+        imp = sit.flagged.get(r.id, [])
+        if "stranded" in imp:
+            out.append(Check(code=f"step_free:{r.id}", label=f"{r.name} keeps a way out (wheelchair)", severity="access",
+                             ok=r.id not in left_behind,
+                             detail="lift escort or staff at the door" if r.id not in left_behind else "no step covers them"))
+        if "medication_at_risk" in imp:
+            out.append(Check(code=f"meds:{r.id}", label=f"{first(r.id)}'s medication stays refrigerated", severity="access",
+                             ok=bool(_steps_for(steps, r.id, ("move_item",))),
+                             detail="moved to a powered fridge" if _steps_for(steps, r.id, ("move_item",)) else "left in a dead fridge"))
+        if "device_power_lost" in imp:
+            okd = any(st.id == "power_first" for st in _steps_for(steps, r.id, ("relocate",)))
+            out.append(Check(code=f"device_power:{r.id}", label=f"{first(r.id)} sleeps next to a powered outlet", severity="access",
+                             ok=okd, detail="placed first, with an outlet" if okd else "no powered placement"))
+
+    # Capacity.
+    caps = {d[0]: d[2] for d in sit.dests}
+    over = [st for st in steps if st.kind == "relocate" and st.target in caps and st.count > caps[st.target]]
+    out.append(Check(code="capacity", label="No space over capacity", ok=not over, severity="capacity",
+                     detail=", ".join(f"{st.target} {st.count}/{caps[st.target]}" for st in over) if over else
+                     f"{sum(st.count for st in steps if st.kind == 'relocate')} placed within capacity"))
+
+    # The manager's rules.
+    for code in sorted(sit.rules):
+        if code == "no_off_campus":
+            bad = [st for st in steps if st.kind == "relocate" and st.target == "hotel_rooms"]
+            out.append(Check(code=code, label="Nobody moved off campus", ok=not bad, severity="rule",
+                             detail=f"{sum(st.count for st in bad)} off campus" if bad else "all placements on campus"))
+        elif code == "no_wake":
+            asleep = {r.id for r in ctx.roster.residents if r.presence == "asleep"}
+            bad = [st for st in steps if st.kind == "relocate" and st.id.startswith("relocate_") and set(st.people) & asleep]
+            out.append(Check(code=code, label="Nobody asleep is woken", ok=not bad, severity="rule",
+                             detail="sleeping residents shelter in place" if not bad else f"{len(bad)} relocation steps wake people"))
+        elif code == "shelter_in_place":
+            bad = [st for st in steps if st.kind == "relocate" and st.id.startswith("relocate_")]
+            out.append(Check(code=code, label="Everyone shelters in place", ok=not bad, severity="rule",
+                             detail="only hard needs move" if not bad else f"{len(bad)} general relocations"))
+        elif code.startswith("no_moves_after:"):
+            deadline = sit.move_deadline_s
+            bad = [st for st in steps if st.kind == "relocate" and st.id.startswith("relocate_") and st.deadline_s is not None
+                   and deadline is not None and st.deadline_s > deadline + 1e-6]
+            out.append(Check(code=code, label=f"No relocation after {code.split(':', 1)[1]}", ok=not bad, severity="rule",
+                             detail="moves finish in time or people shelter" if not bad else f"{len(bad)} moves run past the deadline"))
+        elif code == "lifts_first":
+            esc = [st for st in steps if st.kind == "escort" and st.target == "L1-lobby"]
+            others = [st for st in steps if st.kind == "relocate" and st.id.startswith("relocate_")]
+            ok = not esc or not others or min(st.at_s for st in esc) <= min(st.at_s for st in others) + 1e-6
+            out.append(Check(code=code, label="Wheelchair users come down first", ok=ok, severity="rule",
+                             detail="lift escorts start before any relocation" if ok else "a relocation starts before the escorts"))
+    return out
+
+
+def _checker_stance(ctx: WorldContext, checks: list[Check]) -> Stance:
+    bad = [c for c in checks if not c.ok]
+    rule = Constraint(type="hard", rule="Every hard constraint verified against the facts, not against who spoke",
+                      code="checker", source="checker")
+    if bad:
+        return Stance(agent="checker", label="Checker agent", stance="veto", constraint=rule,
+                      reason=f"{len(bad)} violation{'s' if len(bad) != 1 else ''}: " + "; ".join(c.label for c in bad[:3]))
+    return Stance(agent="checker", label="Checker agent", stance="support", constraint=rule,
+                  reason=f"{len(checks)} checks pass: safety margin, access, medication, capacity, rules.")
+
+
 def _story_first(rs: list[Resident]) -> list[Resident]:
     order = {rid: i for i, rid in enumerate(STORY_ORDER)}
     return sorted(rs, key=lambda r: (order.get(r.id, 99), r.id))
@@ -775,7 +872,7 @@ def _messages(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
         ))
 
     for st in steps:
-        if st.kind == "escort" and st.id.startswith("escort_") and len(st.people) == 1 and "lift" in st.title:
+        if st.kind == "escort" and st.target == "L1-lobby" and len(st.people) == 1:
             r = by_id[st.people[0]]
             personal.add(r.id)
             mins = max(1, round(st.at_s / 60))

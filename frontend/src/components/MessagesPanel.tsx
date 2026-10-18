@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { formatTimeOfDay } from '../lib/api'
+import { speak } from '../lib/speak'
 import type { Clock, Message, WorldState } from '../state/types'
 
 interface Props {
@@ -113,6 +114,11 @@ export function MessagesPanel({ world, clock }: Props) {
                         </span>
                       </div>
                       <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-t2">{m.text}</p>
+                      {m.channel === 'call' && (
+                        <button className="btn-secondary btn-sm mt-2" onClick={() => void speak(m.text, m.lang)} title="Place the call (Cartesia voice, or the browser's)">
+                          ▶ {m.role === 'external' ? 'Place the call' : 'Play the call'}
+                        </button>
+                      )}
                     </li>
                   )
                 })}

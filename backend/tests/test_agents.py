@@ -146,3 +146,19 @@ def test_api_toggle_and_decision():
         r = client.post("/api/plan/decision", json={"plan_version": plan["version"], "decision": "approve"})
         assert r.status_code == 200
         assert client.get("/api/state").json()["state"]["plan"]["status"] == "approved"
+
+
+def test_checker_verifies_the_facts_not_the_speakers():
+    s = incident()
+    p = s.plan
+    assert p.metrics["violations"] == 0 and p.metrics["checks"] >= 8
+    assert stance_of(p, "checker").stance == "support"
+    codes = {c.code for c in p.checks}
+    assert {"deenergise_before_contact", "no_lift_after_cut", "capacity", "step_free:maya", "meds:dana"} <= codes
+    apply_input(s, AgentToggle(agent="resident:maya", enabled=False), CTX)
+    p = s.plan
+    bad = [c for c in p.checks if not c.ok]
+    assert [c.code for c in bad] == ["step_free:maya"] and p.metrics["violations"] == 1
+    assert stance_of(p, "checker").stance == "veto" and not p.rounds[1].feasible
+    apply_input(s, ManagerRule(text="nobody off campus", code="no_off_campus"), CTX)
+    assert any(c.code == "no_off_campus" and c.ok for c in s.plan.checks)

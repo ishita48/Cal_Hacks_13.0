@@ -144,6 +144,14 @@ export interface PlanStep {
   count: number
 }
 
+export interface Check {
+  code: string
+  label: string
+  ok: boolean
+  detail: string
+  severity: 'safety' | 'access' | 'rule' | 'capacity'
+}
+
 export interface Round {
   n: number
   title: string
@@ -179,6 +187,7 @@ export interface Plan {
   rules: Constraint[]
   headline: string
   messages: Message[]
+  checks: Check[]
   signature: number
 }
 

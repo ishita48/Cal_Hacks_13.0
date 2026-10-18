@@ -140,7 +140,7 @@ def initial_state(run_id: str, scenario: str, ctx: WorldContext, mode: str = "li
 
 def default_agents(ctx: WorldContext) -> list[str]:
     """Specialists plus one personal agent per resident with a specific need or a story."""
-    out = ["safety", "housing", "capacity"]
+    out = ["safety", "housing", "capacity", "checker"]
     for r in ctx.roster.residents:
         if r.needs or r.story:
             out.append(f"resident:{r.id}")
@@ -334,7 +334,8 @@ def agent_label(ctx: WorldContext, agent: str) -> str:
     if agent.startswith("resident:"):
         r = ctx.roster.by_id().get(agent.split(":", 1)[1])
         return f"{r.name.split()[0]}'s agent" if r else agent
-    return {"safety": "Safety agent", "housing": "Housing agent", "capacity": "Capacity agent"}.get(agent, agent)
+    return {"safety": "Safety agent", "housing": "Housing agent", "capacity": "Capacity agent",
+            "checker": "Checker agent"}.get(agent, agent)
 
 
 def _complete_command(state: WorldState, p: PendingCommand, ctx: WorldContext) -> None:

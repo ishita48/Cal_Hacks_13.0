@@ -61,6 +61,16 @@ class Message(BaseModel):
     count: int = 1                  # people this message goes to (grouped messages)
 
 
+class Check(BaseModel):
+    """One hard-constraint verification the checker runs on the final plan, agents or no agents."""
+
+    code: str
+    label: str
+    ok: bool
+    detail: str = ""
+    severity: Literal["safety", "access", "rule", "capacity"] = "safety"
+
+
 class Round(BaseModel):
     n: int
     title: str
@@ -83,4 +93,5 @@ class Plan(BaseModel):
     rules: list[Constraint] = Field(default_factory=list)     # manager-imposed (voice) constraints
     headline: str = ""
     messages: list[Message] = Field(default_factory=list)
+    checks: list[Check] = Field(default_factory=list)       # the adversarial checker's verdicts
     signature: int = 0              # content hash; version bumps only when this changes
