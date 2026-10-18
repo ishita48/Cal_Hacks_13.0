@@ -57,6 +57,10 @@ else:
 SPEC_PATH = ROOT / "shared" / "blackwell_hall.json"
 TEX_DIR = ROOT / "blender" / "textures"                 # written by blender/fetch_textures.py (git-ignored)
 TEXTURES_ON = True                                       # --no-textures turns the scanned layer off
+BAKE_ON = False                                          # --bake: procedural materials -> textures for the GLBs
+REBAKE = False                                           # --rebake: ignore the cached tiles
+BAKE_DIR = TEX_DIR / "baked"
+BAKED = {}                                               # source material -> baked twin (export swaps them)
 
 
 def _manifest():
@@ -952,6 +956,133 @@ def _base_materials():
         "car_red": mat_plain("car red", (0.45, 0.04, 0.04), roughness=0.25, metallic=0.2),
         "car_blue": mat_plain("car blue", (0.05, 0.10, 0.30), roughness=0.25, metallic=0.4),
     }
+
+
+# ---- baking: procedural materials -> mirrored tiles the GLBs can carry -----------------------
+
+BAKE_SKIP = {"glass", "led", "lightpanel", "amber", "mirror"}
+BAKE_TILE = {   # metres covered by one tile; multiples of the material's grid so mirrored repeat keeps it continuous
+    "panel_white": (4.8, 4.65), "ochre": (4.8, 5.0), "timber": (4.2, 4.2), "soffit": (3.6, 3.6), "deck": (3.6, 3.6),
+    "brick": (4.4, 4.4), "paving": (4.8, 4.8), "sidewalk": (4.5, 4.5), "tile": (4.5, 4.5), "stone": (4.5, 4.5),
+    "roof_tile": (4.2, 4.2), "plank": (3.2, 3.2), "slat": (3.0, 3.0), "desk_wood": (3.0, 3.0), "neighbour": (6.0, 6.0),
+}
+BAKE_RES = {"panel_white": 2048, "ochre": 2048, "timber": 2048, "asphalt": 2048, "sidewalk": 2048, "concrete": 2048}
+
+
+def _bake_tile_size(key):
+    if key.startswith("far_"):
+        return (7.2, 6.4)                       # two bays by two storeys of the window grid
+    return BAKE_TILE.get(key, (4.0, 4.0))
+
+
+def _baked_material(key, src, paths, tile):
+    """A plain PBR twin of `src` fed by the baked tiles on the box UVs (metres), mirrored every tile."""
+    name = f"{src.name} baked"
+    mat = bpy.data.materials.get(name)
+    if mat:
+        return mat
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+    sb = next((n for n in src.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    mp = nt.nodes.new("ShaderNodeMapping")
+    mp.inputs["Scale"].default_value = (1.0 / tile[0], 1.0 / tile[1], 1.0)
+    nt.links.new(tc.outputs["UV"], mp.inputs["Vector"])
+    for kind, socket in (("diff", "Base Color"), ("rough", "Roughness"), ("nor", "Normal")):
+        path = paths.get(kind)
+        if not path or not Path(path).exists():
+            continue
+        node = nt.nodes.new("ShaderNodeTexImage")
+        node.image = bpy.data.images.load(str(path), check_existing=True)
+        node.image.colorspace_settings.name = "sRGB" if kind == "diff" else "Non-Color"
+        node.extension = "MIRROR"
+        nt.links.new(mp.outputs["Vector"], node.inputs["Vector"])
+        if kind == "nor":
+            nm = nt.nodes.new("ShaderNodeNormalMap")
+            nm.uv_map = "UVMap"
+            nt.links.new(node.outputs["Color"], nm.inputs["Color"])
+            nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+        else:
+            nt.links.new(node.outputs["Color"], bsdf.inputs[socket])
+    if sb is not None:
+        bsdf.inputs["Metallic"].default_value = sb.inputs["Metallic"].default_value
+        for extra in ("Coat Weight", "Coat Roughness", "Sheen Weight", "Alpha"):
+            if extra in sb.inputs and extra in bsdf.inputs:
+                bsdf.inputs[extra].default_value = sb.inputs[extra].default_value
+    mat.diffuse_color = src.diffuse_color
+    for attr in ("surface_render_method", "blend_method"):
+        if hasattr(src, attr):
+            try:
+                setattr(mat, attr, getattr(src, attr))
+            except (AttributeError, TypeError):
+                pass
+    return mat
+
+
+def bake_materials(mats):
+    """Bake every procedural material once onto a wall-sized tile (colour, roughness, tangent normal) with
+    Cycles at one sample, cache the PNGs in textures/baked/, and register a baked twin for export. Runs on
+    an otherwise empty scene, so each bake syncs in a second."""
+    scene = bpy.context.scene
+    BAKE_DIR.mkdir(parents=True, exist_ok=True)
+    todo = [(k, m) for k, m in mats.items() if k not in BAKE_SKIP and m.use_nodes]
+    prev_engine = scene.render.engine
+    col = bpy.data.collections.get("Bake") or bpy.data.collections.new("Bake")
+    if col.name not in scene.collection.children:
+        scene.collection.children.link(col)
+    baked_now = 0
+    try:
+        scene.render.engine = "CYCLES"
+        scene.cycles.samples = 1
+        scene.cycles.device = "CPU"
+        scene.render.bake.margin = 8
+        for key, mat in todo:
+            tile = _bake_tile_size(key)
+            res = BAKE_RES.get(key, 1024)
+            paths = {kind: BAKE_DIR / f"{key}_{kind}.png" for kind in ("diff", "rough", "nor")}
+            if REBAKE or not all(p.exists() for p in paths.values()):
+                bm = bmesh.new()
+                tw, th = tile
+                vs = [bm.verts.new(c) for c in ((0, 0, 0), (tw, 0, 0), (tw, 0, th), (0, 0, th))]
+                bm.faces.new(vs)                                # normal -y: box UV = (x, z), like a south wall
+                ob = mesh_object(f"bake_{key}", bm, [mat], col)
+                # Materials read the metre UVs ("UVMap", kept as the render UV); the bake target is a second,
+                # normalised layer so the whole tile lands in the image.
+                me = ob.data
+                bake_uv = me.uv_layers.new(name="BakeUV")
+                for li, loop in enumerate(me.loops):
+                    co = me.vertices[loop.vertex_index].co
+                    bake_uv.data[li].uv = (co.x / tw, co.z / th)
+                me.uv_layers["UVMap"].active_render = True
+                me.uv_layers.active = bake_uv
+                bpy.ops.object.select_all(action="DESELECT")
+                ob.select_set(True)
+                bpy.context.view_layer.objects.active = ob
+                nt = mat.node_tree
+                for kind, btype, extra in (("diff", "DIFFUSE", {"pass_filter": {"COLOR"}}),
+                                           ("rough", "ROUGHNESS", {}), ("nor", "NORMAL", {})):
+                    r = res if kind == "diff" else max(512, res // 2)
+                    img = bpy.data.images.new(f"bake_{key}_{kind}", r, r, alpha=False, is_data=(kind != "diff"))
+                    node = nt.nodes.new("ShaderNodeTexImage")
+                    node.image = img
+                    nt.nodes.active = node
+                    try:
+                        bpy.ops.object.bake(type=btype, margin=8, use_clear=True, **extra)
+                        img.filepath_raw = str(paths[kind])
+                        img.file_format = "PNG"
+                        img.save()
+                    except Exception as exc:
+                        print(f"bake {key} {kind} failed: {exc}")
+                    nt.nodes.remove(node)
+                    bpy.data.images.remove(img)
+                bpy.data.objects.remove(ob, do_unlink=True)
+                baked_now += 1
+            BAKED[mat] = _baked_material(key, mat, paths, tile)
+    finally:
+        scene.render.engine = prev_engine
+    print(f"baked {baked_now} materials, {len(BAKED)} baked twins ready in {BAKE_DIR}")
 
 
 # ---- photoscanned props (Poly Haven models, fetched by fetch_textures.py) --------------------
@@ -3028,6 +3159,8 @@ class Builder:
             to_sun = sun.rotation_euler.to_matrix() @ Vector((0.0, 0.0, 1.0))
             phi_lamp = math.atan2(to_sun.y, to_sun.x)
             mp.inputs["Rotation"].default_value = (0.0, 0.0, phi_hdri - phi_lamp)
+            print(f"hdri rotation about z: {phi_hdri - phi_lamp:.4f} rad (sun azimuth {phi_lamp:.4f} rad from +x, "
+                  f"elevation {math.asin(max(-1.0, min(1.0, to_sun.normalized().z))):.4f} rad)")
         clamp = nt.nodes.new("ShaderNodeVectorMath")
         clamp.operation = "MINIMUM"
         clamp.inputs[1].default_value = (12.0, 12.0, 12.0)
@@ -3119,6 +3252,8 @@ class Builder:
                 print(f"{fname} failed:", exc)
 
     def build(self):
+        if BAKE_ON:
+            bake_materials(self.mats)
         self.build_shell()
         self.build_facade()
         if self.with_interior:
@@ -3194,7 +3329,7 @@ def use_cycles(samples=128):
         print("cycles GPU not configured, using CPU:", exc)
 
 
-def export_glb(path, collections=("Shell", "Windows"), include=None, objects=None, image_max=1024):
+def export_glb(path, collections=("Shell", "Windows"), include=None, objects=None, image_max=2048):
     """Export the named collections (or an explicit object list); `include(name) -> bool` narrows it."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -3215,9 +3350,19 @@ def export_glb(path, collections=("Shell", "Windows"), include=None, objects=Non
                 bevels.append(mod)
     # Scanned albedo + roughness ride along as 1k JPEGs; normal maps stay in Blender (JPEG normals look
     # worse than none in three.js) so the files stay small.
+    swapped = []
+    if BAKED:
+        for ob in objects:
+            me = ob.data if ob.type == "MESH" else None
+            if me is None:
+                continue
+            for i, m in enumerate(me.materials):
+                if m in BAKED:
+                    me.materials[i] = BAKED[m]
+                    swapped.append((me, i, m))
     muted = []
     for mat in bpy.data.materials:
-        if not mat.use_nodes:
+        if not mat.use_nodes or mat.name.endswith(" baked"):
             continue
         for link in list(mat.node_tree.links):
             if link.from_node.type == "NORMAL_MAP":
@@ -3242,6 +3387,8 @@ def export_glb(path, collections=("Shell", "Windows"), include=None, objects=Non
             nt.links.new(a, b)
         for img in shrunk:
             img.reload()
+        for me, i, m in swapped:
+            me.materials[i] = m
     print(f"wrote {path}")
 
 
@@ -3382,6 +3529,11 @@ def main(argv=None):
             i += 1
         elif a == "--no-interior":
             opts["interior"] = False
+            i += 1
+        elif a in ("--bake", "--rebake"):
+            global BAKE_ON, REBAKE
+            BAKE_ON = True
+            REBAKE = REBAKE or a == "--rebake"
             i += 1
         elif a == "--no-textures":
             global TEXTURES_ON

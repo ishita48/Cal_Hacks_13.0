@@ -98,7 +98,9 @@ Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interi
 `--render <path>` hero camera (plus `street.png` beside it from `StreetCam`) · `--cutaway <LEVEL>` (repeatable) renders `renders/cutaway_<LEVEL>.png` with every
 level above hidden; below grade it uses the close `PlantCam` and a flat backdrop · `--blend <path>` save ·
 `--engine cycles [--samples N]` path-traced stills (GPU if configured, denoised; a few minutes per frame on CPU) ·
-`--no-site` / `--no-interior` skip those parts · `--no-textures` ignores the downloaded scans. Relative paths resolve against the repo root.
+`--no-site` / `--no-interior` skip those parts · `--no-textures` ignores the downloaded scans · `--bake` (or `--rebake`) bakes every
+procedural material into colour / roughness / normal tiles (`textures/baked/`, cached) and exports the GLBs with those instead of base
+colours, so panel joints, rain streaks, timber grain and the far-city window grids reach the dashboard. Relative paths resolve against the repo root.
 
 **Inside a live Blender** (Python console, or through the Blender MCP):
 
@@ -135,6 +137,11 @@ three.js. Object names and custom properties survive as `mesh.name` and `mesh.us
 | `eq_<equip_id>`   | `equipment_id`, `kind`, `space_id`, `level`, `flood_height` (−1 when none) |
 | `floor_<space_id>`  | `space_id`, `level`, `level_index`, `kind` (one tile per space, for tinting rooms) |
 | `walls_<L>`, `furniture_<L>`, `slab_<L>`, `walls_ext_<L>` | `level`, `level_index` |
+
+With `--bake`, each material in the GLBs is a plain PBR material fed by baked tiles on the same box UVs
+(`KHR_texture_transform` scale = 1 / tile size, wrap `MIRRORED_REPEAT`, so a 4.8 m tile mirrors seamlessly). The sky the
+scene is lit by is copied to `frontend/public/env/sky_2k.hdr` for the dashboard's environment; the build log prints the
+rotation that puts its sun behind the Sun lamp.
 
 So an R3F view can hide levels above the one in focus (`level_index`), tint a room's glass from world state
 (the glass material has an emission colour with strength 0, ready to be driven), and flash the switchgear
