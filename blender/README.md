@@ -94,7 +94,7 @@ git-ignored, standard library only; without it the build is purely procedural).
 blender-launcher.exe -b -P blender/build_blackwell.py -- --glb frontend/public/models/blackwell.glb --glb-interior frontend/public/models/blackwell_interior.glb --glb-furniture frontend/public/models/blackwell_furniture.glb --render blender/renders/hero.png --cutaway L4 --cutaway L1 --cutaway B1 --blend blender/blackwell.blend
 ```
 
-Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interior <path>` floors, walls, glazing, courtyard + plant · `--glb-furniture <path>` the `furniture_<L>` meshes ·
+Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interior <path>` floors, walls, glazing, courtyard + plant · `--glb-furniture <path>` the `furniture_<L>` meshes · `--glb-site <path>` the surroundings and props ·
 `--render <path>` hero camera (plus `street.png` beside it from `StreetCam`) · `--cutaway <LEVEL>` (repeatable) renders `renders/cutaway_<LEVEL>.png` with every
 level above hidden; below grade it uses the close `PlantCam` and a flat backdrop · `--blend <path>` save ·
 `--engine cycles [--samples N]` path-traced stills (GPU if configured, denoised; a few minutes per frame on CPU) ·
@@ -120,7 +120,11 @@ corner), `CutawayCam` (looking down into a floor), `PlantCam` (into the basement
 - `frontend/public/models/blackwell_interior.glb` — floor tiles, partitions, glazed partitions, courtyard, and
   every equipment item as `eq_<equipment_id>` (~2 MB).
 - `frontend/public/models/blackwell_furniture.glb` — the `furniture_<L>` meshes only (beds, desks, pods,
-  kitchens, door leaves, lights; ~23 MB). Optional: the view works without it.
+  kitchens, door leaves, lights; ~34 MB). Optional: the view works without it.
+- `frontend/public/models/blackwell_site.glb` (`--glb-site`) — the surroundings: streets, sidewalks, neighbour
+  blocks, far city, cars, signals, and every photoscanned prop and mannequin realised as plain objects that
+  share one mesh per model (tree scans thinned again for the file). Every object carries `level_index = 1` and
+  is named `site_*`, so a focus on a basement level hides it. The dashboard loads it when present; optional.
 
 The glTF exporter converts Blender's z-up to glTF's y-up, so a spec point `(x, y, z)` lands at `(x, z, -y)` in
 three.js. Object names and custom properties survive as `mesh.name` and `mesh.userData`:

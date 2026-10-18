@@ -44,7 +44,7 @@ from pathlib import Path
 
 import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 # ---- locate the repo ------------------------------------------------------------------------
 
@@ -3194,21 +3194,25 @@ def use_cycles(samples=128):
         print("cycles GPU not configured, using CPU:", exc)
 
 
-def export_glb(path, collections=("Shell", "Windows"), include=None):
-    """Export the named collections; `include(name) -> bool` narrows to a subset of objects."""
+def export_glb(path, collections=("Shell", "Windows"), include=None, objects=None, image_max=1024):
+    """Export the named collections (or an explicit object list); `include(name) -> bool` narrows it."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.object.select_all(action="DESELECT")
     bevels = []
-    for name in collections:
-        for ob in bpy.data.collections[name].all_objects:
-            if include is not None and not include(ob.name):
-                continue
+    if objects is None:
+        objects = [ob for name in collections for ob in bpy.data.collections[name].all_objects]
+    for ob in objects:
+        if include is not None and not include(ob.name):
+            continue
+        try:
             ob.select_set(True)
-            for mod in ob.modifiers:
-                if mod.type == "BEVEL" and mod.show_viewport:
-                    mod.show_viewport = False        # render-only polish; keeps the GLB small
-                    bevels.append(mod)
+        except RuntimeError:        # not in the view layer (excluded collection)
+            continue
+        for mod in ob.modifiers:
+            if mod.type == "BEVEL" and mod.show_viewport:
+                mod.show_viewport = False        # render-only polish; keeps the GLB small
+                bevels.append(mod)
     # Scanned albedo + roughness ride along as 1k JPEGs; normal maps stay in Blender (JPEG normals look
     # worse than none in three.js) so the files stay small.
     muted = []
@@ -3221,8 +3225,8 @@ def export_glb(path, collections=("Shell", "Windows"), include=None):
                 mat.node_tree.links.remove(link)
     shrunk = []
     for img in bpy.data.images:
-        if img.source == "FILE" and max(img.size) > 1024 and not img.filepath.lower().endswith(".hdr"):
-            img.scale(1024, 1024)
+        if img.source == "FILE" and max(img.size) > image_max and not img.filepath.lower().endswith(".hdr"):
+            img.scale(image_max, image_max)
             shrunk.append(img)
     try:
         kwargs = dict(filepath=str(path), export_format="GLB", use_selection=True, export_apply=True,
@@ -3239,6 +3243,84 @@ def export_glb(path, collections=("Shell", "Windows"), include=None):
         for img in shrunk:
             img.reload()
     print(f"wrote {path}")
+
+
+def export_site_glb(path, target_tris=40000):
+    """The surroundings for the dashboard twin: Site collection (streets, sidewalks, neighbours, far city,
+    cars, signals) plus every Props instance (trees, shrubs, hydrant, covered cars, people) realised as plain
+    objects that share one mesh per model, with the heavy tree scans thinned once more. Everything is tagged
+    level_index = 1 and named site_* so a floor focus below grade can hide it."""
+    scene = bpy.context.scene
+    site = bpy.data.collections.get("Site")
+    props = bpy.data.collections.get("Props")
+    if site is None:
+        print("no Site collection; site GLB skipped")
+        return
+    lib_lc = bpy.context.view_layer.layer_collection.children.get("Library")
+    was_excluded = lib_lc.exclude if lib_lc else None
+    if lib_lc:
+        lib_lc.exclude = False                       # sources must be in the view layer to evaluate
+        bpy.context.view_layer.update()
+    lod_cache, temp_obs, temp_meshes, retyped = {}, [], [], []
+
+    def lod_mesh(src):
+        me = src.data
+        n = len(me.polygons)
+        if n < 12000:
+            return me
+        if me not in lod_cache:
+            mod = src.modifiers.new("export_lod", "DECIMATE")
+            mod.ratio = 0.4 if n < 40000 else max(0.12, target_tris / n)
+            mod.use_collapse_triangulate = True
+            dg = bpy.context.evaluated_depsgraph_get()
+            thin = bpy.data.meshes.new_from_object(src.evaluated_get(dg), preserve_all_data_layers=True, depsgraph=dg)
+            thin.name = me.name + "_glb"
+            src.modifiers.remove(mod)
+            lod_cache[me] = thin
+            temp_meshes.append(thin)
+        return lod_cache[me]
+
+    objects = []
+    for ob in site.all_objects:
+        if "level_index" not in ob:
+            ob["level_index"], ob["level"] = 1, "L1"
+        objects.append(ob)
+    if props is not None:
+        for e in list(props.all_objects):
+            col = e.instance_collection if e.instance_type == "COLLECTION" else None
+            if col is None:
+                if e.type == "MESH":
+                    if "level_index" not in e:
+                        e["level_index"], e["level"] = 1, "L1"
+                    objects.append(e)
+                continue
+            off = Matrix.Translation(-Vector(col.instance_offset))
+            for src in col.all_objects:
+                if src.type != "MESH":
+                    continue
+                dup = bpy.data.objects.new(f"site_{e.name}_{src.name}"[:63], lod_mesh(src))
+                dup.matrix_world = e.matrix_world @ off @ src.matrix_world
+                props.objects.link(dup)
+                dup["level_index"] = e.get("level_index", 1)
+                dup["level"] = e.get("level", "L1")
+                temp_obs.append(dup)
+                objects.append(dup)
+            e.instance_type = "NONE"                 # the exporter must not expand it a second time
+            retyped.append((e, col))
+    bpy.context.view_layer.update()
+    try:
+        export_glb(path, objects=objects, image_max=512)      # seen from the street, never up close
+    finally:
+        for e, col in retyped:
+            e.instance_type = "COLLECTION"
+            e.instance_collection = col
+        for ob in temp_obs:
+            bpy.data.objects.remove(ob, do_unlink=True)
+        for me in temp_meshes:
+            bpy.data.meshes.remove(me)
+        if lib_lc and was_excluded is not None:
+            lib_lc.exclude = was_excluded
+    print(f"site GLB: {len(objects)} objects, {len(lod_cache)} thinned scans")
 
 
 def render(path, camera="HeroCam"):
@@ -3281,7 +3363,7 @@ def restore(state):
 
 def main(argv=None):
     argv = list(argv) if argv is not None else (sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
-    opts = {"glb": None, "glb-interior": None, "glb-furniture": None, "render": None, "site": True, "interior": True,
+    opts = {"glb": None, "glb-interior": None, "glb-furniture": None, "glb-site": None, "render": None, "site": True, "interior": True,
             "blend": None, "cutaway": [], "engine": "eevee", "samples": 128}
     i = 0
     while i < len(argv):
@@ -3289,7 +3371,7 @@ def main(argv=None):
         if a == "--cutaway":
             opts["cutaway"].append(argv[i + 1])
             i += 2
-        elif a in ("--glb", "--glb-interior", "--glb-furniture", "--render", "--blend", "--engine"):
+        elif a in ("--glb", "--glb-interior", "--glb-furniture", "--glb-site", "--render", "--blend", "--engine"):
             opts[a[2:]] = argv[i + 1]
             i += 2
         elif a == "--samples":
@@ -3326,6 +3408,8 @@ def main(argv=None):
                    include=lambda n: not n.startswith("furniture_"))
     if opts["glb-furniture"]:
         export_glb(resolve(opts["glb-furniture"]), collections=("Interior",), include=lambda n: n.startswith("furniture_"))
+    if opts["glb-site"]:
+        export_site_glb(resolve(opts["glb-site"]))
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type != "VIEW_3D":
