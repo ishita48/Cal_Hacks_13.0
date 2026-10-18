@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
 import { AgentConsole } from './components/AgentConsole'
 import { CascadePanel } from './components/CascadePanel'
 import { Controls } from './components/Controls'
@@ -11,6 +11,9 @@ import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
 import { connectWorld, useWorld } from './state/world'
 
+// The 3D twin is another view of the same store; it is lazy so the 2D app loads first.
+const Building3D = lazy(() => import('./components/Building3D'))
+
 export default function App() {
   useEffect(() => connectWorld(), [])
   const loadBuilding = useBuilding((b) => b.load)
@@ -21,6 +24,7 @@ export default function App() {
 
   const { connection, clock, world } = useWorld()
   const [level, setLevel] = useState('L4')
+  const [view, setView] = useState<'2d' | '3d'>('2d')
   const [rightTab, setRightTab] = useState<'agents' | 'messages' | 'cascade'>('agents')
 
   if (!world || !clock) {
@@ -100,11 +104,42 @@ export default function App() {
                   </button>
                 )
               })}
-            <span className="ml-3 text-xs text-slate-500">{levels.find((l) => l.id === level)?.name}</span>
+            {view === '3d' && (
+              <button
+                onClick={() => setLevel('all')}
+                className={`rounded px-2.5 py-1 text-xs ${level === 'all' ? 'bg-slate-200 text-ink-900' : 'bg-ink-800 text-slate-400 hover:bg-ink-700'}`}
+                title="Whole building"
+              >
+                all
+              </button>
+            )}
+            <span className="ml-3 text-xs text-slate-500">{level === 'all' ? 'Whole building' : levels.find((l) => l.id === level)?.name}</span>
+            <div className="ml-3 flex rounded border border-ink-600 text-[11px]">
+              {(['2d', '3d'] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    setView(v)
+                    if (v === '2d' && level === 'all') setLevel('L4')
+                  }}
+                  className={`px-2 py-0.5 uppercase ${view === v ? 'bg-slate-200 text-ink-900' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  {v === '2d' ? '2D plan' : '3D twin'}
+                </button>
+              ))}
+            </div>
             <Legend />
           </div>
           <div className="min-h-0 flex-1 p-3">
-            <FloorPlan world={world} level={level} />
+            {view === '3d' ? (
+              <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
+                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-slate-500">loading the 3D twin…</div>}>
+                  <Building3D level={level} />
+                </Suspense>
+              </ViewErrorBoundary>
+            ) : (
+              <FloorPlan world={world} level={level} />
+            )}
           </div>
         </section>
 
@@ -148,6 +183,19 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+class ViewErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  componentDidCatch(err: unknown) {
+    console.warn('3D view failed; falling back to the 2D plan', err)
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children
+  }
 }
 
 function Legend() {

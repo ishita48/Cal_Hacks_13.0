@@ -47,7 +47,10 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
 - `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;
   `src/state/building.ts` caches the static spec + roster (not world state). Components: `FloorPlan`
-  (SVG from the spec, coloured only by world state), `ImpactLedger`, `CascadePanel` (forecast + timeline), `Controls`.
+  (SVG from the spec, coloured only by world state), `ImpactLedger`, `CascadePanel` (forecast + timeline), `Controls`,
+  `AgentConsole`, `PlanPanel`, `VoiceRule`, `MessagesPanel`, and `Building3D` (R3F twin, lazy-loaded; loads the GLBs
+  from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` / `level_index` per
+  `blender/README.md`, and reads nothing but the world store). 2D plan is the default; the toggle is in the centre panel.
 - `firmware/haven_sensor/haven_sensor.ino` — ESP32 + resistive probe → `POST /api/sensor` with
   `X-Haven-Token`; posts on every wet/dry crossing and a 15 s heartbeat. Calibrate DRY_RAW / WET_RAW from Serial.
 - `blender/` — scripted exterior built from the same building spec (Phase 3).
