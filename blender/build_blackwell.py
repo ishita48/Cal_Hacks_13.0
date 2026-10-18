@@ -62,9 +62,10 @@ PARAPET_T = 0.3
 WIN_SILL, WIN_HEAD = 0.45, 2.75
 WIN_W, WIN_GAP = 1.05, 0.35
 FIELD_MARGIN = 0.18        # white frame left around an ochre field
-GLASS_OUT, GLASS_IN = 0.02, EXT_WALL + 0.04   # glass pierces the ring so rooms see out
-FRAME_OUT, FRAME_T = 0.07, 0.08
+GLASS_OUT, GLASS_IN = -0.13, 0.15             # pane 13 cm back from the face (a real reveal)
+FRAME_OUT, FRAME_T = -0.10, 0.08               # frame sits just in front of the pane
 FIELD_OUT = 0.035
+REVEAL_DEPTH = EXT_WALL + 0.3                  # how far the cutter reaches through the ring
 SITE_PAD = 36.0
 
 CURTAIN_KINDS = {"lounge", "study", "kitchen", "amenity", "lobby", "retail", "office"}
@@ -245,6 +246,17 @@ def add_prism(bm, cells, z0, z1, mi=0):
     bmesh.ops.dissolve_limit(bm, angle_limit=math.radians(1.0), verts=bm.verts[:], edges=bm.edges[:])
 
 
+def _bevel(ob, width=0.015):
+    """A 1.5 cm bevel so edges catch a highlight instead of reading as razor-sharp CG."""
+    mod = ob.modifiers.new("bevel", "BEVEL")
+    mod.width = width
+    mod.segments = 2
+    mod.limit_method = "ANGLE"
+    mod.angle_limit = math.radians(60)
+    if hasattr(mod, "harden_normals"):
+        mod.harden_normals = True
+
+
 def mesh_object(name, bm, materials, collection, props=None):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
     me = bpy.data.meshes.new(name)
@@ -381,9 +393,23 @@ def mat_panels(name, rgb, panel_w=1.2, row_h=1.55, mortar=0.012, roughness=0.5):
     inv.operation = "SUBTRACT"
     inv.inputs[0].default_value = 1.0
     nt.links.new(brick.outputs["Fac"], inv.inputs[1])
-    _bump(nt, inv.outputs[0], 0.5, 0.015, bsdf)
+    _bump(nt, inv.outputs[0], 0.35, 0.012, bsdf)
     rr = _ramp(nt, n.outputs["Fac"], [(0.0, (roughness * 0.9,) * 3), (1.0, (roughness * 1.1,) * 3)])
     nt.links.new(rr.outputs["Color"], bsdf.inputs["Roughness"])
+    # Faint vertical weathering streaks (rain run-off): noise stretched along z.
+    stretch = nt.nodes.new("ShaderNodeVectorMath")
+    stretch.operation = "MULTIPLY"
+    stretch.inputs[1].default_value = (6.0, 0.25, 1.0)
+    nt.links.new(vec, stretch.inputs[0])
+    streaks = _noise(nt, stretch.outputs[0], 1.0, detail=2.0, roughness=0.4)
+    sr = _ramp(nt, streaks.outputs["Fac"], [(0.35, (0.94, 0.94, 0.94)), (0.6, (1.0, 1.0, 1.0))])
+    dirt = nt.nodes.new("ShaderNodeMix")
+    dirt.data_type = "RGBA"
+    dirt.blend_type = "MULTIPLY"
+    dirt.inputs["Factor"].default_value = 1.0
+    nt.links.new(mix.outputs[2], dirt.inputs[6])
+    nt.links.new(sr.outputs["Color"], dirt.inputs[7])
+    nt.links.new(dirt.outputs[2], bsdf.inputs["Base Color"])
     return _finish(mat, bsdf, rgb, roughness)
 
 
@@ -416,18 +442,27 @@ def mat_wood(name, dark, light, board_w=0.14, roughness=0.55, vertical=True):
     return _finish(mat, bsdf, mid, roughness)
 
 
-def mat_glass(name, tint=(0.03, 0.05, 0.07)):
+def mat_glass(name, tint=(0.02, 0.045, 0.065)):
     mat, bsdf = _new_mat(name)
     if bsdf is None:
         return mat
     bsdf.inputs["Base Color"].default_value = (*tint, 1.0)
-    bsdf.inputs["Roughness"].default_value = 0.04
+    bsdf.inputs["Roughness"].default_value = 0.08
     bsdf.inputs["Metallic"].default_value = 0.0
-    for key, val in (("Coat Weight", 1.0), ("Coat Roughness", 0.02), ("Specular IOR Level", 0.9)):
+    for key, val in (("Coat Weight", 1.0), ("Coat Roughness", 0.04), ("Specular IOR Level", 0.7), ("IOR", 1.45)):
         if key in bsdf.inputs:
             bsdf.inputs[key].default_value = val
     bsdf.inputs["Emission Color"].default_value = (1.0, 0.82, 0.55, 1.0)
     bsdf.inputs["Emission Strength"].default_value = 0.0
+    # See-through, so furnished rooms read from the street; the coat keeps the sky reflection.
+    bsdf.inputs["Alpha"].default_value = 0.4
+    try:
+        mat.surface_render_method = "BLENDED"
+    except AttributeError:
+        mat.blend_method = "BLEND"
+    for attr in ("use_transparency_overlap",):
+        if hasattr(mat, attr):
+            setattr(mat, attr, True)
     mat.diffuse_color = (*tint, 1.0)
     return mat
 
@@ -515,11 +550,11 @@ def mat_carpet(name, rgb):
 def make_materials():
     return {
         # exterior
-        "white": mat_panels("panel white", (0.86, 0.86, 0.83)),
-        "ochre": mat_panels("panel ochre", (0.93, 0.60, 0.08), panel_w=1.2, row_h=1.25, roughness=0.45),
+        "white": mat_panels("panel white", (0.69, 0.69, 0.60), roughness=0.78),
+        "ochre": mat_panels("panel ochre", (0.665, 0.376, 0.028), panel_w=1.2, row_h=1.25, roughness=0.75),
         "glass": mat_glass("glass"),
         "frosted": mat_plain("glass frosted", (0.62, 0.72, 0.76), roughness=0.3),
-        "frame": mat_plain("frame", (0.09, 0.09, 0.10), roughness=0.35, metallic=0.4),
+        "frame": mat_plain("frame", (0.045, 0.045, 0.05), roughness=0.32, metallic=0.9, grain=0.05),   # anodized aluminium
         "timber": mat_wood("timber cladding", (0.30, 0.13, 0.05), (0.66, 0.36, 0.13)),
         "soffit": mat_wood("timber soffit", (0.36, 0.20, 0.08), (0.70, 0.46, 0.22), board_w=0.09, vertical=False),
         "concrete": mat_ground("concrete", (0.58, 0.57, 0.54), scale=2.0, roughness=0.85),
@@ -590,7 +625,10 @@ class Builder:
         self.col_interior = self._collection("Interior", parent=self.col_building)
         self.col_plant = self._collection("Plant", parent=self.col_building)
         self.col_site = self._collection("Site")
+        self.col_cutters = self._collection("Cutters")   # boolean cutters; hidden, never exported
         self.massing = {}
+        self.cutters = {}          # level id -> [(axis, fixed, sign, a0, a1, z0, z1)]
+        self._cut_level = None
 
     @staticmethod
     def _collection(name, parent=None):
@@ -621,7 +659,7 @@ class Builder:
             z0, z1 = lv["elevation"], lv["elevation"] + lv["height"]
             bm = bmesh.new()
             add_prism(bm, region, z0, z0 + SLAB, mi=0)
-            mesh_object(f"slab_{lv['id']}", bm, [m["concrete"]], self.col_shell, self._props(lv))
+            _bevel(mesh_object(f"slab_{lv['id']}", bm, [m["concrete"]], self.col_shell, self._props(lv)))
             # Exterior wall ring: timber-clad at street level, white panels above, concrete below grade.
             ring = region.minus(region.eroded(EXT_WALL))
             bm = bmesh.new()
@@ -663,7 +701,7 @@ class Builder:
         parapet = top.minus(top.eroded(PARAPET_T))
         bm = bmesh.new()
         add_prism(bm, parapet, self.roof_z, self.roof_z + PARAPET_H, mi=0)
-        mesh_object("parapet", bm, [m["white"]], self.col_shell, roofp)
+        _bevel(mesh_object("parapet", bm, [m["white"]], self.col_shell, roofp))
         lifts = [s for s in self.spaces_by_level[self.top_level["id"]] if s["kind"] == "lift"]
         if lifts:
             x0 = min(R.of(s["rect"]).x0 for s in lifts) - 0.8
@@ -738,6 +776,7 @@ class Builder:
         for lv in self.above:
             region = self.massing[lv["id"]]
             z_floor = lv["elevation"]
+            self._cut_level = lv["id"]
             spaces = sorted(self.spaces_by_level.get(lv["id"], []), key=lambda s: s["id"])
             for idx, space in enumerate(spaces):
                 if space["outdoor"] or space["kind"] in BLANK_KINDS:
@@ -754,6 +793,34 @@ class Builder:
                 mesh_object(f"win_{space['id']}", bm, [m["glass"], m["frame"], m["ochre"], m["frosted"], m["timber"]],
                             self.col_windows, self._props(lv, space_id=space["id"], kind=space["kind"]))
         self.build_doors()
+        self.build_reveals()
+
+    def _cut(self, axis, fixed, sign, a0, a1, z0, z1):
+        self.cutters.setdefault(self._cut_level, []).append((axis, fixed, sign, a0, a1, z0, z1))
+
+    def build_reveals(self):
+        """Cut every window and door opening out of its level's wall ring (exact boolean)."""
+        for lv_id, cuts in self.cutters.items():
+            wall = bpy.data.objects.get(f"walls_ext_{lv_id}")
+            if wall is None or not cuts:
+                continue
+            bm = bmesh.new()
+            for (axis, fixed, sign, a0, a1, z0, z1) in cuts:
+                self._wall_box(bm, axis, fixed, sign, a0, a1, z0, z1, 0.5, REVEAL_DEPTH, 0)
+            ob = mesh_object(f"cutter_{lv_id}", bm, [], self.col_cutters, {"level": lv_id, "level_index": -100})
+            ob.display_type = "WIRE"
+            ob.hide_render = True
+            ob.hide_viewport = True
+            mod = wall.modifiers.new("reveals", "BOOLEAN")
+            mod.operation = "DIFFERENCE"
+            mod.object = ob
+            try:
+                mod.solver = "EXACT"
+                mod.use_hole_tolerant = True
+                mod.use_self = True        # the cutter boxes overlap each other (bays + doors)
+            except (AttributeError, TypeError):
+                pass
+            _bevel(wall)
 
     def _wall_box(self, bm, axis, fixed, sign, a0, a1, z0, z1, out, inward, mi):
         n0, n1 = sorted((fixed + sign * out, fixed - sign * inward))
@@ -771,49 +838,62 @@ class Builder:
         if kind in CURTAIN_KINDS:
             self.curtain(bm, axis, fixed, lo + 0.25, hi - 0.25, sign, z + SLAB + 0.05, z + h - 0.2)
             return
-        if ochre:
-            # One large accent field per bay, framed by the white skin; windows punch through it.
-            self._wall_box(bm, axis, fixed, sign, lo + FIELD_MARGIN, hi - FIELD_MARGIN, z + 0.32, z + h - 0.18,
-                           FIELD_OUT, 0.0, 2)
+        # Decide the windows first, then (on ochre bays) lay the accent field around them in strips,
+        # so the field never covers a pane and the reveal reads through it.
+        wins = []
+        glass_mi = 0
         if kind == "bathroom":
             c = (lo + hi) / 2
-            self._window(bm, axis, fixed, sign, c - 0.45, c + 0.45, z + 1.5, z + 2.55, mi_glass=3, out=FIELD_OUT)
-            return
-        if kind == "stair":
+            wins = [(c - 0.45, c + 0.45, z + 1.5, z + 2.55)]
+            glass_mi = 3
+        elif kind == "stair":
             c = (lo + hi) / 2
-            self._window(bm, axis, fixed, sign, c - 0.35, c + 0.35, z + 0.45, z + h - 0.3, mi_glass=3, out=FIELD_OUT)
-            return
-        n_win = 2 if length >= 2 * WIN_W + WIN_GAP + 1.2 else 1
-        group_w = n_win * WIN_W + (n_win - 1) * WIN_GAP
-        # Windows sit off-centre toward the bay end that alternates with the accent, like the photos.
-        slack = (length - group_w) / 2
-        shift = max(0.0, min(slack - 0.35, 0.6)) * (1 if (idx + lv["index"]) % 2 else -1)
-        start = (lo + hi) / 2 - group_w / 2 + shift
-        for k in range(n_win):
-            a0 = start + k * (WIN_W + WIN_GAP)
-            self._window(bm, axis, fixed, sign, a0, a0 + WIN_W, z0, z1, out=FIELD_OUT)
+            wins = [(c - 0.35, c + 0.35, z + 0.45, z + h - 0.3)]
+            glass_mi = 3
+        else:
+            n_win = 2 if length >= 2 * WIN_W + WIN_GAP + 1.2 else 1
+            group_w = n_win * WIN_W + (n_win - 1) * WIN_GAP
+            slack = (length - group_w) / 2
+            shift = max(0.0, min(slack - 0.35, 0.6)) * (1 if (idx + lv["index"]) % 2 else -1)
+            start = (lo + hi) / 2 - group_w / 2 + shift
+            wins = [(start + k * (WIN_W + WIN_GAP), start + k * (WIN_W + WIN_GAP) + WIN_W, z0, z1) for k in range(n_win)]
+        if ochre:
+            f0, f1, zf0, zf1 = lo + FIELD_MARGIN, hi - FIELD_MARGIN, z + 0.32, z + h - 0.18
+            wz0, wz1 = min(w[2] for w in wins) - FRAME_T, max(w[3] for w in wins) + FRAME_T
+            self._wall_box(bm, axis, fixed, sign, f0, f1, zf0, wz0, FIELD_OUT, 0.0, 2)
+            self._wall_box(bm, axis, fixed, sign, f0, f1, wz1, zf1, FIELD_OUT, 0.0, 2)
+            edge = f0
+            for (a0, a1, _, _) in sorted(wins):
+                self._wall_box(bm, axis, fixed, sign, edge, a0 - FRAME_T, wz0, wz1, FIELD_OUT, 0.0, 2)
+                edge = a1 + FRAME_T
+            self._wall_box(bm, axis, fixed, sign, edge, f1, wz0, wz1, FIELD_OUT, 0.0, 2)
+        for (a0, a1, w0, w1) in wins:
+            self._window(bm, axis, fixed, sign, a0, a1, w0, w1, mi_glass=glass_mi)
 
     def _window(self, bm, axis, fixed, sign, a0, a1, z0, z1, mi_glass=0, out=0.0):
         self._wall_box(bm, axis, fixed, sign, a0, a1, z0, z1, GLASS_OUT + out, GLASS_IN, mi_glass)
         self._frame(bm, axis, fixed, sign, a0, a1, z0, z1, out=out)
+        self._cut(axis, fixed, sign, a0 - FRAME_T, a1 + FRAME_T, z0 - FRAME_T, z1 + FRAME_T)
 
     def _frame(self, bm, axis, fixed, sign, a0, a1, z0, z1, out=0.0):
         t = FRAME_T
         o = FRAME_OUT + out
-        self._wall_box(bm, axis, fixed, sign, a0 - t, a0, z0 - t, z1 + t, o, 0.02, 1)
-        self._wall_box(bm, axis, fixed, sign, a1, a1 + t, z0 - t, z1 + t, o, 0.02, 1)
-        self._wall_box(bm, axis, fixed, sign, a0, a1, z0 - t, z0, o, 0.02, 1)
-        self._wall_box(bm, axis, fixed, sign, a0, a1, z1, z1 + t, o, 0.02, 1)
+        inner = -o + 0.07          # frame depth 7 cm, flush behind the recess
+        self._wall_box(bm, axis, fixed, sign, a0 - t, a0, z0 - t, z1 + t, o, inner, 1)
+        self._wall_box(bm, axis, fixed, sign, a1, a1 + t, z0 - t, z1 + t, o, inner, 1)
+        self._wall_box(bm, axis, fixed, sign, a0, a1, z0 - t, z0, o, inner, 1)
+        self._wall_box(bm, axis, fixed, sign, a0, a1, z1, z1 + t, o, inner, 1)
 
     def curtain(self, bm, axis, fixed, lo, hi, sign, z0, z1, bay=1.5, mi_glass=0):
         if hi - lo < 0.6:
             return
         self._wall_box(bm, axis, fixed, sign, lo, hi, z0, z1, GLASS_OUT, GLASS_IN, mi_glass)
         self._frame(bm, axis, fixed, sign, lo, hi, z0, z1)
+        self._cut(axis, fixed, sign, lo - FRAME_T, hi + FRAME_T, z0 - FRAME_T, z1 + FRAME_T)
         n = max(1, int(round((hi - lo) / bay)))
         for k in range(1, n):
             a = lo + (hi - lo) * k / n
-            self._wall_box(bm, axis, fixed, sign, a - 0.04, a + 0.04, z0, z1, FRAME_OUT, 0.02, 1)
+            self._wall_box(bm, axis, fixed, sign, a - 0.04, a + 0.04, z0, z1, FRAME_OUT, -FRAME_OUT + 0.08, 1)
 
     def storefront(self, bm, space, axis, fixed, lo, hi, sign, z, height):
         """Street level: glazing between timber fins, as on Durant and Dana."""
@@ -840,6 +920,11 @@ class Builder:
             lv = self.levels[o["level"]]
             z = lv["elevation"] + SLAB
             w = max(o["width"], 1.2)
+            self._cut_level = lv["id"]
+            fixed = o["y"] if o["axis"] == "x" else o["x"]
+            centre = o["x"] if o["axis"] == "x" else o["y"]
+            sign = -1 if fixed <= 1e-6 else +1
+            self._cut(o["axis"], fixed, sign, centre - w / 2 - 0.12, centre + w / 2 + 0.12, z, z + 2.75)
             if o["axis"] == "x":
                 add_box(bm, o["x"] - w / 2, o["x"] + w / 2, o["y"] - 0.3, o["y"] + 0.3, z, z + 2.6, 0)
                 add_box(bm, o["x"] - w / 2 - 0.12, o["x"] + w / 2 + 0.12, o["y"] - 0.32, o["y"] + 0.32, z + 2.6, z + 2.75, 1)
@@ -1207,20 +1292,44 @@ class Builder:
     # -- site ---------------------------------------------------------------------------
 
     def _tree(self, bm, x, y, z, height, radius):
-        trunk = bmesh.ops.create_cone(bm, cap_ends=True, segments=8, radius1=radius * 0.1, radius2=radius * 0.07,
-                                      depth=height * 0.45)
-        tv = set(trunk["verts"])
-        for v in tv:
-            v.co += Vector((x, y, z + height * 0.225))
+        """A street tree: tapered trunk, a few leaning branches, a canopy of jittered leaf clumps."""
+        import random
+        rnd = random.Random(int(x * 73 + y * 131))
+        wood = set()
+        trunk_h = height * 0.42
+        trunk = bmesh.ops.create_cone(bm, cap_ends=True, segments=10, radius1=radius * 0.11, radius2=radius * 0.07,
+                                      depth=trunk_h)
+        for v in trunk["verts"]:
+            v.co += Vector((x, y, z + trunk_h / 2))
+        wood |= set(trunk["verts"])
+        for k in range(5):
+            ang = rnd.uniform(0, 2 * math.pi)
+            tilt = rnd.uniform(0.55, 0.95)
+            length = radius * rnd.uniform(0.7, 1.1)
+            br = bmesh.ops.create_cone(bm, cap_ends=True, segments=6, radius1=radius * 0.05, radius2=radius * 0.02,
+                                       depth=length)
+            d = Vector((math.cos(ang) * math.sin(tilt), math.sin(ang) * math.sin(tilt), math.cos(tilt)))
+            rot = d.to_track_quat("Z", "Y").to_matrix()
+            base = Vector((x, y, z + trunk_h * rnd.uniform(0.75, 1.0)))
+            for v in br["verts"]:
+                v.co = base + rot @ v.co + d * (length / 2)
+            wood |= set(br["verts"])
         for f in bm.faces:
-            if any(v in tv for v in f.verts):
+            if any(v in wood for v in f.verts):
                 f.material_index = 0
         before = set(bm.faces)
-        for (dx, dy, dz, rs) in ((0, 0, 0, 1.0), (0.45, 0.2, 0.35, 0.7), (-0.4, -0.3, 0.25, 0.65), (0.1, -0.45, 0.5, 0.6)):
-            ball = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=radius * rs)
-            c = Vector((x + dx * radius, y + dy * radius, z + height * 0.45 + radius * (0.7 + dz)))
+        cz = z + trunk_h + radius * 0.55
+        for k in range(14):
+            u, vv = rnd.uniform(0, 2 * math.pi), rnd.uniform(-1, 1)
+            rr = radius * rnd.uniform(0.25, 0.8)
+            c = Vector((x + math.cos(u) * math.sqrt(1 - vv * vv) * rr, y + math.sin(u) * math.sqrt(1 - vv * vv) * rr,
+                        cz + vv * rr * 0.8))
+            ball = bmesh.ops.create_icosphere(bm, subdivisions=2, radius=radius * rnd.uniform(0.38, 0.55))
+            squash = rnd.uniform(0.6, 0.85)
             for v in ball["verts"]:
-                v.co = c + Vector((v.co.x, v.co.y, v.co.z * 0.8))
+                n = Vector((v.co.x, v.co.y, v.co.z * squash))
+                n *= 1.0 + 0.12 * math.sin(n.x * 9 + n.y * 7) * math.cos(n.z * 11)
+                v.co = c + n
         for f in bm.faces:
             if f not in before:
                 f.material_index = 1
@@ -1270,6 +1379,59 @@ class Builder:
             add_cyl(bm, x, y, z, z + 7.0, 0.1, 0, 8)
             add_box(bm, x - 0.3, x + 0.3, y - 0.12, y + 0.12, z + 6.8, z + 7.0, 0)
         mesh_object("site_lampposts", bm, [m["metal"]], self.col_site)
+        self.build_street_furniture(b)
+
+    def build_street_furniture(self, b):
+        m = self.mats
+        z = 0.0
+        # Building name on both street faces of the corner, like the real signage.
+        for (loc, rot) in (((b.x0 + 9.0, b.y0 - 0.06, 4.05), (math.radians(90), 0, 0)),
+                           ((b.x0 - 0.06, b.y0 + 15.5, 4.05), (math.radians(90), 0, math.radians(-90)))):
+            curve = bpy.data.curves.new("sign", "FONT")
+            curve.body = "DAVID BLACKWELL HALL"
+            curve.size = 0.55
+            curve.extrude = 0.025
+            curve.align_x = "LEFT"
+            ob = bpy.data.objects.new("site_sign", curve)
+            ob.location = loc
+            ob.rotation_euler = rot
+            ob.data.materials.append(m["frame"])
+            self.col_site.objects.link(ob)
+        # Traffic signals on the near corners of the intersection, bike racks, benches, bins.
+        bm = bmesh.new()
+        for (x, y) in ((b.x0 - 6.0, b.y0 - 6.0), (b.x0 - 6.0, b.y0 - 30.0), (b.x0 - 30.0, b.y0 - 6.0)):
+            add_cyl(bm, x, y, z, z + 5.5, 0.09, 0, 8)
+            add_box(bm, x - 0.3, x + 0.3, y - 0.3, y + 0.3, z + 2.6, z + 3.5, 1)
+            add_box(bm, x, x + 4.0, y - 0.08, y + 0.08, z + 5.3, z + 5.45, 0)
+            add_box(bm, x + 3.6, x + 3.95, y - 0.2, y + 0.2, z + 4.3, z + 5.3, 1)
+        for k in range(4):
+            x = b.x0 - 2.4
+            y = b.y0 + 26 + k * 1.0
+            add_cyl(bm, x - 0.35, y, z, z + 0.75, 0.025, 0, 6)
+            add_cyl(bm, x + 0.35, y, z, z + 0.75, 0.025, 0, 6)
+            add_box(bm, x - 0.37, x + 0.37, y - 0.025, y + 0.025, z + 0.72, z + 0.78, 0)
+        for (x, y, ax) in ((b.x0 - 2.6, 46.0, "y"), (18.0, b.y0 - 2.6, "x"), (b.x0 - 2.6, 62.0, "y")):
+            if ax == "y":
+                add_box(bm, x - 0.25, x + 0.25, y - 0.9, y + 0.9, z + 0.42, z + 0.47, 2)
+                add_box(bm, x - 0.25, x - 0.18, y - 0.9, y + 0.9, z + 0.47, z + 0.85, 2)
+                for yy in (y - 0.8, y + 0.8):
+                    add_box(bm, x - 0.22, x + 0.22, yy - 0.04, yy + 0.04, z, z + 0.42, 1)
+            else:
+                add_box(bm, x - 0.9, x + 0.9, y - 0.25, y + 0.25, z + 0.42, z + 0.47, 2)
+                add_box(bm, x - 0.9, x + 0.9, y - 0.25, y - 0.18, z + 0.47, z + 0.85, 2)
+                for xx in (x - 0.8, x + 0.8):
+                    add_box(bm, xx - 0.04, xx + 0.04, y - 0.22, y + 0.22, z, z + 0.42, 1)
+        for (x, y) in ((b.x0 - 2.0, b.y0 + 2.5), (b.x0 + 30.0, b.y0 - 2.0), (b.x0 - 2.0, b.y1 - 3.0)):
+            add_cyl(bm, x, y, z, z + 0.95, 0.3, 1, 12)
+            add_cyl(bm, x, y, z + 0.95, z + 1.0, 0.33, 1, 12)
+        mesh_object("site_furniture", bm, [m["metal"], m["dark"], m["deck"]], self.col_site)
+        # Curb stones: a slightly darker lip along the sidewalk edge.
+        bm = bmesh.new()
+        add_box(bm, b.x0 - 4.0, b.x1 + 4.0, b.y0 - 4.0, b.y0 - 3.85, z - 0.2, z + 0.005, 0)
+        add_box(bm, b.x0 - 4.0, b.x0 - 3.85, b.y0 - 4.0, b.y1 + 4.0, z - 0.2, z + 0.005, 0)
+        add_box(bm, b.x0 - 4.0, b.x1 + 4.0, b.y1 + 3.85, b.y1 + 4.0, z - 0.2, z + 0.005, 0)
+        add_box(bm, b.x1 + 3.85, b.x1 + 4.0, b.y0 - 4.0, b.y1 + 4.0, z - 0.2, z + 0.005, 0)
+        mesh_object("site_curbs", bm, [m["concrete"]], self.col_site)
 
     # -- scene --------------------------------------------------------------------------
 
@@ -1281,6 +1443,7 @@ class Builder:
         def camera(name, loc, target, lens):
             cam_data = bpy.data.cameras.new(name)
             cam_data.lens = lens
+            cam_data.clip_end = 20000.0
             cam = bpy.data.objects.new(name, cam_data)
             scene.collection.objects.link(cam)
             cam.location = Vector(loc)
@@ -1288,7 +1451,7 @@ class Builder:
             return cam
 
         hero = camera("HeroCam", (b.x0 - 48, b.y0 - 54, 30), ((b.x0 + b.x1) / 2 - 4, (b.y0 + b.y1) / 2 - 10, self.roof_z * 0.45), 32)
-        camera("StreetCam", (b.x0 - 14, b.y0 - 22, 1.7), (b.x0 + 10, b.y0 + 12, 9), 24)
+        camera("StreetCam", (b.x0 - 15, b.y0 - 19, 2.4), (b.x0 + 9, b.y0 + 12, 9.5), 20)
         camera("CutawayCam", (b.x0 - 58, b.y0 - 36, 78), ((b.x0 + b.x1) / 2 - 2, (b.y0 + b.y1) / 2 - 2, 6), 35)
         camera("PlantCam", (b.x0 - 4, b.y0 - 10, 11), (b.x0 + 20, b.y0 + 20, -3.5), 28)
         # A flat world for below-grade cutaways (the sky is black under the horizon).
@@ -1313,13 +1476,20 @@ class Builder:
         if bg:
             sky = world.node_tree.nodes.new("ShaderNodeTexSky")
             models = [i.identifier for i in sky.bl_rna.properties["sky_type"].enum_items]
-            sky.sky_type = next((mm for mm in ("MULTIPLE_SCATTERING", "NISHITA") if mm in models), models[0])
-            if hasattr(sky, "sun_intensity"):
-                sky.sun_intensity = 0.0
-                sky.sun_elevation = math.radians(48)
-                sky.sun_rotation = math.radians(230)
+            if "HOSEK_WILKIE" in models:
+                sky.sky_type = "HOSEK_WILKIE"
+                sky.turbidity = 3.0
+                sky.ground_albedo = 0.35
+                sky.sun_direction = (-0.55, -0.5, 0.67)
+                bg.inputs[1].default_value = 0.06
+            else:
+                sky.sky_type = models[0]
+                if hasattr(sky, "sun_intensity"):
+                    sky.sun_intensity = 0.0
+                    sky.sun_elevation = math.radians(48)
+                    sky.sun_rotation = math.radians(230)
+                bg.inputs[1].default_value = 0.015
             world.node_tree.links.new(sky.outputs[0], bg.inputs[0])
-            bg.inputs[1].default_value = 0.015
         scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
         try:
             scene.view_settings.view_transform = "AgX"
@@ -1337,6 +1507,34 @@ class Builder:
                 scene.render.engine = "BLENDER_EEVEE"
             except TypeError:
                 pass
+        self.build_compositor()
+
+    def build_compositor(self):
+        """Camera-like finishing: a touch of bloom and chromatic aberration."""
+        scene = bpy.context.scene
+        try:
+            scene.use_nodes = True
+            nt = scene.node_tree
+            for n in list(nt.nodes):
+                nt.nodes.remove(n)
+            rl = nt.nodes.new("CompositorNodeRLayers")
+            glare = nt.nodes.new("CompositorNodeGlare")
+            glare.glare_type = "FOG_GLOW"
+            for attr, val in (("threshold", 1.2), ("mix", -0.75), ("size", 7)):
+                if hasattr(glare, attr):
+                    setattr(glare, attr, val)
+            lens = nt.nodes.new("CompositorNodeLensdist")
+            for key, val in (("Distortion", 0.0), ("Dispersion", 0.012)):
+                if key in lens.inputs:
+                    lens.inputs[key].default_value = val
+            if hasattr(lens, "use_fit"):
+                lens.use_fit = True
+            comp = nt.nodes.new("CompositorNodeComposite")
+            nt.links.new(rl.outputs["Image"], glare.inputs["Image"])
+            nt.links.new(glare.outputs["Image"], lens.inputs["Image"])
+            nt.links.new(lens.outputs["Image"], comp.inputs["Image"])
+        except Exception as exc:  # compositor API differs between versions; never fail the build on it
+            print("compositor skipped:", exc)
 
     def build(self):
         self.build_shell()
@@ -1385,6 +1583,31 @@ def clear_scene():
         for datablock in list(block):
             if datablock.users == 0:
                 block.remove(datablock)
+
+
+def use_cycles(samples=128):
+    """Path-traced stills: GPU when one is configured, denoised, a few minutes per frame on CPU."""
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = samples
+    scene.cycles.use_denoising = True
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        prefs.get_devices()
+        for kind in ("OPTIX", "CUDA", "HIP", "ONEAPI", "METAL"):
+            try:
+                prefs.compute_device_type = kind
+            except TypeError:
+                continue
+            gpus = [d for d in prefs.devices if d.type != "CPU"]
+            if gpus:
+                for d in prefs.devices:
+                    d.use = True
+                scene.cycles.device = "GPU"
+                print("cycles on", kind, [d.name for d in gpus])
+                break
+    except Exception as exc:
+        print("cycles GPU not configured, using CPU:", exc)
 
 
 def export_glb(path, collections=("Shell", "Windows")):
@@ -1441,15 +1664,18 @@ def restore(state):
 def main(argv=None):
     argv = list(argv) if argv is not None else (sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     opts = {"glb": None, "glb-interior": None, "render": None, "site": True, "interior": True, "blend": None,
-            "cutaway": []}
+            "cutaway": [], "engine": "eevee", "samples": 128}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--cutaway":
             opts["cutaway"].append(argv[i + 1])
             i += 2
-        elif a in ("--glb", "--glb-interior", "--render", "--blend"):
+        elif a in ("--glb", "--glb-interior", "--render", "--blend", "--engine"):
             opts[a[2:]] = argv[i + 1]
+            i += 2
+        elif a == "--samples":
+            opts["samples"] = int(argv[i + 1])
             i += 2
         elif a == "--no-site":
             opts["site"] = False
@@ -1469,6 +1695,8 @@ def main(argv=None):
     builder.build()
     n_win = len(bpy.data.collections["Windows"].objects)
     print(f"built {spec['name']}: {len(bpy.data.objects)} objects, {n_win} window groups, roof at {builder.roof_z} m")
+    if opts["engine"].lower() == "cycles":
+        use_cycles(opts["samples"])
     if opts["glb"]:
         export_glb(resolve(opts["glb"]))
     if opts["glb-interior"]:

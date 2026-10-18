@@ -21,7 +21,12 @@ ground floor with a timber soffit band, and the glass lounge stack at Dana St ×
 the published photos: wood-look plank floors with navy beds in rooms, grey carpet lounges with blue and
 purple seating and a lime accent wall, a dark stone lobby with a timber desk.
 
-All materials are procedural (panel joints, timber boards, concrete, asphalt, pavers, carpet, tiles),
+Windows and doors are real openings cut into the wall rings (an exact boolean per level, cutters kept in a hidden
+`Cutters` collection that is never exported), so reveals catch shadows. Trees have trunks, branches and clumped
+canopies; the street has curbs, signals, bike racks, benches, bins and the building name on both corner faces.
+The compositor adds a touch of bloom and chromatic aberration.
+
+All materials are procedural (panel joints with rain streaks, timber boards, concrete, asphalt, pavers, carpet, tiles),
 so nothing needs downloading. To go further, tick Poly Haven in the MCP for Blender sidebar in Blender
 (press N in the 3D viewport); `import_asset` can then swap in scanned PBR textures and an HDRI.
 
@@ -38,6 +43,7 @@ blender-launcher.exe -b -P blender/build_blackwell.py -- --glb frontend/public/m
 Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interior <path>` interiors + plant ·
 `--render <path>` hero camera (plus `street.png` beside it from `StreetCam`) · `--cutaway <LEVEL>` (repeatable) renders `renders/cutaway_<LEVEL>.png` with every
 level above hidden; below grade it uses the close `PlantCam` and a flat backdrop · `--blend <path>` save ·
+`--engine cycles [--samples N]` path-traced stills (GPU if configured, denoised; a few minutes per frame on CPU) ·
 `--no-site` / `--no-interior` skip those parts. Relative paths resolve against the repo root.
 
 **Inside a live Blender** (Python console, or through the Blender MCP):
