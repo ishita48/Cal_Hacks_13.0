@@ -965,8 +965,10 @@ BAKE_TILE = {   # metres covered by one tile; multiples of the material's grid s
     "panel_white": (4.8, 4.65), "ochre": (4.8, 5.0), "timber": (4.2, 4.2), "soffit": (3.6, 3.6), "deck": (3.6, 3.6),
     "brick": (4.4, 4.4), "paving": (4.8, 4.8), "sidewalk": (4.5, 4.5), "tile": (4.5, 4.5), "stone": (4.5, 4.5),
     "roof_tile": (4.2, 4.2), "plank": (3.2, 3.2), "slat": (3.0, 3.0), "desk_wood": (3.0, 3.0), "neighbour": (6.0, 6.0),
+    "ground": (24.0, 24.0), "roof": (8.0, 8.0), "asphalt": (8.0, 8.0), "bike_lane": (8.0, 8.0),   # low-frequency noise: big tiles
 }
-BAKE_RES = {"panel_white": 2048, "ochre": 2048, "timber": 2048, "asphalt": 2048, "sidewalk": 2048, "concrete": 2048}
+BAKE_RES = {"panel_white": 2048, "ochre": 2048, "timber": 2048, "asphalt": 2048, "sidewalk": 2048, "concrete": 2048,
+            "ground": 2048}
 
 
 def _bake_tile_size(key):
@@ -3456,7 +3458,7 @@ def export_site_glb(path, target_tris=40000):
             retyped.append((e, col))
     bpy.context.view_layer.update()
     try:
-        export_glb(path, objects=objects, image_max=512)      # seen from the street, never up close
+        export_glb(path, objects=objects, image_max=1024)     # seen from the street, never up close
     finally:
         for e, col in retyped:
             e.instance_type = "COLLECTION"
