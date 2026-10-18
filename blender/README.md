@@ -154,6 +154,9 @@ and brick; without the fetched textures the GLBs carry base colours only.
 - `build_blackwell.py` — the script (bpy + bmesh only; no add-ons needed).
 - `fetch_textures.py` — downloads the Poly Haven sets, HDRI and photoscanned models into `textures/` and writes
   `textures/manifest.json` (asset sizes in metres, file paths); the build reads the manifest.
+- `compress_glbs.py` — post-export pass over the four GLBs (needs Node): dedup, textures to 1k WebP, meshopt geometry
+  (`EXT_meshopt_compression` + `KHR_mesh_quantization`), names and extras untouched; ~100 MB becomes ~20 MB. The
+  loader must register `MeshoptDecoder` from `three/examples/jsm/libs/meshopt_decoder.module.js`.
 - `run_build.py` — runs the build with Python output captured to `renders/last_build.log` (the Store
   `blender-launcher.exe` does not pass its console to a redirected shell).
 - `render_cycles.py` — path-traced stills from the saved .blend in a second headless Blender.
