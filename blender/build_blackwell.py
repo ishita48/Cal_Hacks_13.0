@@ -550,10 +550,10 @@ def mat_tiles(name, rgb, tile=0.3, roughness=0.25):
     nt = mat.node_tree
     tc = nt.nodes.new("ShaderNodeTexCoord")
     brick = nt.nodes.new("ShaderNodeTexBrick")
-    brick.offset = 0.0
+    brick.offset = 0.5 if "brick" in name or "roof" in name else 0.0
     brick.inputs["Scale"].default_value = 1.0
     brick.inputs["Brick Width"].default_value = tile
-    brick.inputs["Row Height"].default_value = tile
+    brick.inputs["Row Height"].default_value = tile * (0.33 if "brick" in name else 1.0)
     brick.inputs["Mortar Size"].default_value = 0.004
     brick.inputs["Color1"].default_value = (*rgb, 1.0)
     brick.inputs["Color2"].default_value = (*(min(1.0, c * 1.06) for c in rgb), 1.0)
@@ -632,6 +632,22 @@ def make_materials():
         "slat": mat_wood("ceiling slats", (0.40, 0.24, 0.10), (0.72, 0.50, 0.26), board_w=0.06, vertical=False),
         "mirror": mat_plain("mirror", (0.92, 0.93, 0.95), roughness=0.02, metallic=1.0),
         "felt": mat_plain("pool felt", (0.05, 0.18, 0.48), roughness=1.0, grain=0.15),
+        # neighbourhood
+        "stucco_cream": mat_ground("stucco cream", (0.80, 0.74, 0.58), scale=6.0, roughness=0.9),
+        "stucco_sage": mat_ground("stucco sage", (0.52, 0.58, 0.46), scale=6.0, roughness=0.9),
+        "stucco_terracotta": mat_ground("stucco terracotta", (0.62, 0.36, 0.24), scale=6.0, roughness=0.9),
+        "stucco_grey": mat_ground("stucco grey", (0.55, 0.55, 0.53), scale=6.0, roughness=0.9),
+        "brick": mat_tiles("brick", (0.50, 0.24, 0.16), tile=0.22, roughness=0.85),
+        "roof_tile": mat_tiles("roof tile", (0.42, 0.20, 0.14), tile=0.35, roughness=0.8),
+        "awning_red": mat_plain("awning red", (0.55, 0.08, 0.08), roughness=0.9, grain=0.1),
+        "awning_green": mat_plain("awning green", (0.08, 0.30, 0.14), roughness=0.9, grain=0.1),
+        "awning_blue": mat_plain("awning blue", (0.08, 0.16, 0.40), roughness=0.9, grain=0.1),
+        "bike_lane": mat_ground("bike lane", (0.10, 0.42, 0.22), scale=1.5, roughness=0.95),
+        "car_white": mat_plain("car white", (0.85, 0.85, 0.84), roughness=0.2, metallic=0.1),
+        "car_silver": mat_plain("car silver", (0.55, 0.56, 0.58), roughness=0.25, metallic=0.8),
+        "car_black": mat_plain("car black", (0.03, 0.03, 0.035), roughness=0.2, metallic=0.3),
+        "car_red": mat_plain("car red", (0.45, 0.04, 0.04), roughness=0.25, metallic=0.2),
+        "car_blue": mat_plain("car blue", (0.05, 0.10, 0.30), roughness=0.25, metallic=0.4),
     }
 
 
@@ -1934,12 +1950,7 @@ class Builder:
             add_box(bm, b.x0 - 12.1, b.x0 - 11.9, b.y0 - SITE_PAD + k, b.y0 - SITE_PAD + k + 3, z - 0.199, z - 0.19, 0)
             add_box(bm, b.x0 - SITE_PAD + k, b.x0 - SITE_PAD + k + 3, b.y0 - 12.1, b.y0 - 11.9, z - 0.199, z - 0.19, 0)
         mesh_object("site_markings", bm, [m["laminate"]], self.col_site)
-        bm = bmesh.new()
-        for (x0, y0, x1, y1, h) in ((b.x1 + 14, 4, b.x1 + 34, 30, 9), (b.x1 + 14, 38, b.x1 + 30, 80, 12),
-                                    (-30, 6, -14, 40, 7), (-30, 48, -14, 80, 10), (6, -34, 40, -14, 8),
-                                    (10, b.y1 + 14, 44, b.y1 + 32, 11)):
-            add_box(bm, x0, x1, y0, y1, z, z + h, 0)
-        mesh_object("site_neighbours", bm, [m["neighbour"]], self.col_site)
+        self.build_neighbourhood(b, z)
         bm = bmesh.new()
         for y in range(8, int(b.y1) - 4, 12):
             self._tree(bm, b.x0 - 2.0, y, z, height=7.0, radius=2.4)
@@ -1953,6 +1964,201 @@ class Builder:
             add_box(bm, x - 0.3, x + 0.3, y - 0.12, y + 0.12, z + 6.8, z + 7.0, 0)
         mesh_object("site_lampposts", bm, [m["metal"]], self.col_site)
         self.build_street_furniture(b)
+
+    def build_neighbourhood(self, b, z):
+        """Berkeley-style neighbours: stucco apartment blocks with punched windows and shopfronts, a few
+        gabled houses, the campus edge north of Bancroft with lawn and big trees, parked cars, poles."""
+        m = self.mats
+        import random
+        rnd = random.Random(7)
+        stucco = [m["stucco_cream"], m["stucco_sage"], m["stucco_terracotta"], m["stucco_grey"], m["brick"]]
+        blocks = [  # (x0, y0, x1, y1, storeys, kind)
+            (b.x1 + 14, 2, b.x1 + 36, 30, 3, "apartments"),
+            (b.x1 + 14, 34, b.x1 + 30, 56, 4, "apartments"),
+            (b.x1 + 14, 60, b.x1 + 34, 82, 2, "houses"),
+            (-34, 2, -14, 24, 4, "apartments"),
+            (-34, 28, -14, 46, 2, "houses"),
+            (-34, 50, -14, 82, 3, "apartments"),
+            (-30, -36, 2, -14, 3, "apartments"),
+            (8, -36, 40, -14, 2, "shops"),
+            (46, -36, 70, -14, 3, "apartments"),
+        ]
+        walls = bmesh.new()      # per-material faces -> material index = stucco choice
+        glass = bmesh.new()
+        trim = bmesh.new()
+        roofs = bmesh.new()
+        for (x0, y0, x1, y1, storeys, kind) in blocks:
+            mi = rnd.randrange(len(stucco))
+            if kind == "houses":
+                n = max(1, int((x1 - x0) // 9))
+                for k in range(n):
+                    hx0 = x0 + k * (x1 - x0) / n + 0.8
+                    hx1 = x0 + (k + 1) * (x1 - x0) / n - 0.8
+                    hy0, hy1 = y0 + 2.0, y1 - 4.0
+                    h = 6.5
+                    add_box(walls, hx0, hx1, hy0, hy1, z, z + h, mi)
+                    # gable roof: two sloped slabs
+                    ridge = (hy0 + hy1) / 2
+                    for (ya, yb, flip) in ((hy0 - 0.4, ridge, False), (ridge, hy1 + 0.4, True)):
+                        vs = [roofs.verts.new(c) for c in (
+                            (hx0 - 0.4, ya, z + h - 0.1 if not flip else z + h + 2.2),
+                            (hx1 + 0.4, ya, z + h - 0.1 if not flip else z + h + 2.2),
+                            (hx1 + 0.4, yb, z + h + 2.2 if not flip else z + h - 0.1),
+                            (hx0 - 0.4, yb, z + h + 2.2 if not flip else z + h - 0.1))]
+                        f = roofs.faces.new(vs)
+                        f.material_index = 0
+                    for (yv, zv) in ((hy0, z + h), (hy1, z + h)):
+                        pass
+                    # windows + door on the street side
+                    for wx in (hx0 + 1.2, hx0 + 3.6):
+                        for wz in (z + 1.0, z + 3.9):
+                            self._punched(glass, trim, "x", hy0, -1, wx, wx + 1.2, wz, wz + 1.5)
+                    self._punched(glass, trim, "x", hy0, -1, hx1 - 2.2, hx1 - 1.2, z, z + 2.1, door=True)
+                    add_box(trim, hx1 - 2.6, hx1 - 0.8, hy0 - 1.2, hy0, z + 2.2, z + 2.35, 0)   # porch roof
+                    add_cyl(trim, hx1 - 2.5, hy0 - 1.1, z, z + 2.2, 0.06, 0, 8)
+                    add_cyl(trim, hx1 - 0.9, hy0 - 1.1, z, z + 2.2, 0.06, 0, 8)
+                continue
+            h = storeys * 3.3 + (1.5 if kind == "shops" else 0.6)
+            add_box(walls, x0, x1, y0, y1, z, z + h, mi)
+            add_box(roofs, x0 - 0.1, x1 + 0.1, y0 - 0.1, y1 + 0.1, z + h, z + h + 0.6, 1)           # parapet
+            add_box(roofs, x0 + 0.3, x1 - 0.3, y0 + 0.3, y1 - 0.3, z + h + 0.02, z + h + 0.1, 2)   # membrane
+            for (ux, uy) in ((x0 + 3, y0 + 3), (x1 - 5, y1 - 4)):
+                add_box(roofs, ux, ux + 2.2, uy, uy + 1.4, z + h + 0.1, z + h + 1.2, 1)
+            # which faces look at a street (the building sits between the streets and these blocks)
+            faces = []
+            if x0 > b.x1:
+                faces.append(("y", x0, -1, y0, y1))
+            if x1 < b.x0:
+                faces.append(("y", x1, +1, y0, y1))
+            if y1 < b.y0:
+                faces.append(("x", y1, +1, x0, x1))
+            if y0 > b.y1:
+                faces.append(("x", y0, -1, x0, x1))
+            for (axis, fixed, sign, lo, hi) in faces:
+                for st in range(storeys):
+                    zb = z + st * 3.3 + (1.5 if (kind == "shops" and st > 0) else 0)
+                    if kind == "shops" and st == 0:
+                        n = max(1, int((hi - lo) // 6))
+                        for k in range(n):
+                            a0 = lo + k * (hi - lo) / n + 0.5
+                            a1 = lo + (k + 1) * (hi - lo) / n - 0.5
+                            self._punched(glass, trim, axis, fixed, sign, a0, a1, z + 0.3, z + 3.6, shop=True)
+                            self._awning(trim, axis, fixed, sign, a0, a1, z + 3.7, k % 3)
+                        continue
+                    pitch = 3.0
+                    n = max(1, int((hi - lo) // pitch))
+                    for k in range(n):
+                        c = lo + (hi - lo) * (k + 0.5) / n
+                        if rnd.random() < 0.08:
+                            continue
+                        self._punched(glass, trim, axis, fixed, sign, c - 0.7, c + 0.7, zb + 0.9, zb + 2.6)
+        mesh_object("site_neighbours", walls, stucco, self.col_site)
+        mesh_object("site_neighbour_glass", glass, [m["glass"]], self.col_site)
+        mesh_object("site_neighbour_trim", trim, [m["frame"], m["awning_red"], m["awning_green"], m["awning_blue"]], self.col_site)
+        mesh_object("site_neighbour_roofs", roofs, [m["roof_tile"], m["stucco_cream"], m["roof"]], self.col_site)
+        # Campus edge north of Bancroft: lawn, path, big trees, a low campus wall.
+        bm = bmesh.new()
+        add_box(bm, -34, 70, b.y1 + 14, b.y1 + 60, z - 0.05, z + 0.1, 0)
+        add_box(bm, -34, 70, b.y1 + 14, b.y1 + 14.6, z + 0.1, z + 0.6, 1)
+        add_box(bm, 14, 18, b.y1 + 14, b.y1 + 60, z + 0.1, z + 0.12, 2)
+        mesh_object("site_campus", bm, [m["lawn"], m["concrete"], m["paving"]], self.col_site)
+        bm = bmesh.new()
+        for (x, y, hgt, rad) in ((-20, b.y1 + 26, 14, 5.5), (0, b.y1 + 34, 16, 6.5), (26, b.y1 + 24, 13, 5.0),
+                                 (44, b.y1 + 36, 17, 7.0), (60, b.y1 + 22, 12, 4.8), (10, b.y1 + 50, 15, 6.0)):
+            self._tree(bm, x, y, z + 0.1, height=hgt, radius=rad)
+        mesh_object("site_campus_trees", bm, [m["trunk"], m["canopy"]], self.col_site)
+        # Parked cars along the curbs, utility poles with wires on the far side of Dana, a bus stop.
+        bm = bmesh.new()
+        colours = [m["car_white"], m["car_silver"], m["car_black"], m["car_red"], m["car_blue"]]
+        k = 0
+        for y in range(6, int(b.y1) - 6, 7):
+            if rnd.random() < 0.7:
+                self._car(bm, b.x0 - 6.2, y, "y", k % len(colours)); k += 1
+            if rnd.random() < 0.6:
+                self._car(bm, b.x0 - 30.0, y + 3, "y", k % len(colours)); k += 1
+        for x in range(8, int(b.x1) - 6, 7):
+            if rnd.random() < 0.7:
+                self._car(bm, x, b.y0 - 6.2, "x", k % len(colours)); k += 1
+            if rnd.random() < 0.6:
+                self._car(bm, x + 3, b.y0 - 30.0, "x", k % len(colours)); k += 1
+        mesh_object("site_cars", bm, colours + [m["glass"], m["dark"]], self.col_site)
+        bm = bmesh.new()
+        px = b.x0 - 33.0
+        poles = [(px, y) for y in range(-30, int(b.y1) + 30, 30)]
+        for (x, y) in poles:
+            add_cyl(bm, x, y, z, z + 10.0, 0.14, 0, 8)
+            add_box(bm, x - 1.1, x + 1.1, y - 0.08, y + 0.08, z + 9.2, z + 9.35, 0)
+        for i in range(len(poles) - 1):
+            (xa, ya), (xb, yb) = poles[i], poles[i + 1]
+            for dx in (-0.9, 0.0, 0.9):
+                add_bar(bm, (xa + dx, ya, z + 9.35), (xb + dx, yb, z + 9.35 - 0.0), 0.012, 1)
+        mesh_object("site_poles", bm, [m["trunk"], m["dark"]], self.col_site)
+        bm = bmesh.new()
+        sx, sy = b.x0 + 12.0, b.y0 - 2.4
+        for (x, y) in ((sx, sy - 0.9), (sx + 3.6, sy - 0.9), (sx, sy + 0.9), (sx + 3.6, sy + 0.9)):
+            add_cyl(bm, x, y, z, z + 2.5, 0.04, 0, 8)
+        add_box(bm, sx - 0.3, sx + 3.9, sy - 1.2, sy + 1.2, z + 2.5, z + 2.6, 0)
+        add_box(bm, sx - 0.3, sx + 3.9, sy + 0.9, sy + 0.95, z + 0.3, z + 2.5, 1)
+        add_box(bm, sx, sx + 3.6, sy - 0.2, sy + 0.3, z + 0.45, z + 0.5, 0)
+        add_cyl(bm, sx - 1.0, sy, z, z + 0.75, 0.12, 2, 10)                      # hydrant
+        add_cyl(bm, sx - 1.0, sy, z + 0.75, z + 0.85, 0.08, 2, 10)
+        mesh_object("site_bus_stop", bm, [m["metal"], m["frosted"], m["awning_red"]], self.col_site)
+        # Bancroft Way bike lane (green) and lane arrows.
+        bm = bmesh.new()
+        add_box(bm, b.x0 - SITE_PAD, b.x1 + SITE_PAD, b.y1 + 4.2, b.y1 + 6.4, z - 0.199, z - 0.192, 0)
+        add_box(bm, b.x0 - SITE_PAD, b.x1 + SITE_PAD, b.y1 + 6.4, b.y1 + 6.55, z - 0.199, z - 0.19, 1)
+        mesh_object("site_bike_lane", bm, [m["bike_lane"], m["laminate"]], self.col_site)
+
+    def _punched(self, glass, trim, axis, fixed, sign, a0, a1, z0, z1, door=False, shop=False):
+        """A window (or door / shopfront) on a neighbour facade: dark frame, glass set 12 cm back."""
+        def box(bm, lo, hi, n0, n1, za, zb, mi):
+            p0, p1 = sorted((fixed + sign * n0, fixed + sign * n1))
+            if axis == "x":
+                add_box(bm, lo, hi, p0, p1, za, zb, mi)
+            else:
+                add_box(bm, p0, p1, lo, hi, za, zb, mi)
+        t = 0.08
+        box(glass, a0, a1, 0.01, -0.12, z0, z1, 0)
+        box(trim, a0 - t, a0, 0.02, -0.14, z0 - t, z1 + t, 0)
+        box(trim, a1, a1 + t, 0.02, -0.14, z0 - t, z1 + t, 0)
+        box(trim, a0, a1, 0.02, -0.14, z1, z1 + t, 0)
+        box(trim, a0 - t, a1 + t, 0.06, -0.14, z0 - t, z0, 0)                       # sill
+        if door:
+            box(trim, (a0 + a1) / 2 - 0.02, (a0 + a1) / 2 + 0.02, 0.0, -0.1, z0, z1, 0)
+        if shop:
+            n = max(1, int((a1 - a0) // 2.0))
+            for k in range(1, n):
+                a = a0 + (a1 - a0) * k / n
+                box(trim, a - 0.03, a + 0.03, 0.02, -0.12, z0, z1, 0)
+
+    def _awning(self, trim, axis, fixed, sign, a0, a1, z, colour):
+        n0, n1 = sorted((fixed + sign * 0.0, fixed + sign * 1.3))
+        if axis == "x":
+            add_box(trim, a0, a1, n0, n1, z, z + 0.08, 1 + colour)
+            add_box(trim, a0, a1, n0 if sign > 0 else n1 - 0.05, n0 + 0.05 if sign > 0 else n1, z - 0.25, z, 1 + colour)
+        else:
+            add_box(trim, n0, n1, a0, a1, z, z + 0.08, 1 + colour)
+            add_box(trim, n0 if sign > 0 else n1 - 0.05, n0 + 0.05 if sign > 0 else n1, a0, a1, z - 0.25, z, 1 + colour)
+
+    def _car(self, bm, x, y, axis, colour):
+        """A parked car: two stacked bodies, glass cabin, four wheels. `x, y` is the centre."""
+        L, W = 4.4, 1.8
+        if axis == "y":
+            x0, x1, y0, y1 = x - W / 2, x + W / 2, y - L / 2, y + L / 2
+            add_box(bm, x0, x1, y0, y1, 0.3, 0.85, colour)
+            add_box(bm, x0 + 0.12, x1 - 0.12, y0 + 0.9, y1 - 1.1, 0.85, 1.42, 5)        # cabin glass
+            add_box(bm, x0 + 0.08, x1 - 0.08, y0 + 1.15, y1 - 1.35, 1.38, 1.46, colour)  # roof
+            for (dx, dy) in ((0, 0.75), (0, L - 0.75)):
+                add_disc(bm, x0 - 0.02, y0 + dy, 0.32, 0.32, 0.22, "x", 6)
+                add_disc(bm, x1 + 0.02, y0 + dy, 0.32, 0.32, 0.22, "x", 6)
+        else:
+            x0, x1, y0, y1 = x - L / 2, x + L / 2, y - W / 2, y + W / 2
+            add_box(bm, x0, x1, y0, y1, 0.3, 0.85, colour)
+            add_box(bm, x0 + 0.9, x1 - 1.1, y0 + 0.12, y1 - 0.12, 0.85, 1.42, 5)
+            add_box(bm, x0 + 1.15, x1 - 1.35, y0 + 0.08, y1 - 0.08, 1.38, 1.46, colour)
+            for dx in (0.75, L - 0.75):
+                add_disc(bm, x0 + dx, y0 - 0.02, 0.32, 0.32, 0.22, "y", 6)
+                add_disc(bm, x0 + dx, y1 + 0.02, 0.32, 0.32, 0.22, "y", 6)
 
     def build_street_furniture(self, b):
         m = self.mats
@@ -2132,6 +2338,23 @@ class Builder:
         except Exception as exc:  # compositor API differs between versions; never fail the build on it
             print("compositor skipped:", exc)
 
+    def build_walk_panel(self):
+        """Register the HAVEN sidebar (walk spots, cutaway, cameras) and store it in the .blend."""
+        src_path = Path(__file__).resolve().parent / "haven_walk.py" if "__file__" in globals() else ROOT / "blender" / "haven_walk.py"
+        try:
+            code = src_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print("walk panel skipped:", exc)
+            return
+        text = bpy.data.texts.get("haven_walk.py") or bpy.data.texts.new("haven_walk.py")
+        text.clear()
+        text.write(code)
+        text.use_module = True          # re-registers on file load when Auto Run Python Scripts is on
+        try:
+            exec(compile(code, "haven_walk.py", "exec"), {"__name__": "haven_walk"})
+        except Exception as exc:
+            print("walk panel failed:", exc)
+
     def build(self):
         self.build_shell()
         self.build_facade()
@@ -2140,6 +2363,7 @@ class Builder:
         if self.with_site:
             self.build_site()
         self.build_scene()
+        self.build_walk_panel()
 
 
 # ---- helpers --------------------------------------------------------------------------------
