@@ -234,6 +234,61 @@ export interface SensorHistory {
   readings: SensorReadingRow[]
 }
 
+export interface Integrations {
+  cartesia: boolean
+  tiger: boolean
+  llm: boolean
+  sensor_token: boolean
+  fetch: boolean
+  agentverse: boolean
+  twilio: boolean
+  linear: boolean
+}
+
+/** One resident agent hosted on Fetch.ai and what it said about the current plan (backend/haven/integrations/fetch.py). */
+export interface FetchReceipt {
+  address: string
+  agent: string
+  label: string
+  round: number
+  stance: StanceKind
+  reason: string
+  verified: boolean
+  agrees: boolean
+  received_at: number
+}
+
+export interface FetchAgent {
+  id: string
+  resident: string
+  label: string
+  address: string
+  enabled: boolean
+  hosted: 'local' | 'agentverse'
+  receipts: Record<string, FetchReceipt>
+}
+
+export interface FetchStatus {
+  configured: boolean
+  running: boolean
+  error: string
+  hosted: 'local' | 'agentverse'
+  table: string | null
+  plan_version: number
+  agents: FetchAgent[]
+  received: number
+  agreeing: number
+}
+
+export interface MemoryRule {
+  code: string
+  text: string
+  times: number
+  last_used: number
+  last_run: string
+  active: boolean
+}
+
 export interface AgentInfo {
   id: string
   label: string

@@ -46,6 +46,16 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   - `haven/integrations/` optional, key-gated sponsors: `cartesia.py` (`POST /api/speak`, CARTESIA_API_KEY),
     `tiger.py` (sensor readings hypertable, TIGER_DATABASE_URL; `GET /api/sensor/{id}/history` falls back to the
     event log). `GET /api/integrations` says what is on. See `backend/.env.example`.
+    `fetch.py` (Phase 7): the residents' agents as Fetch.ai uAgents in a Bureau inside the backend (port
+    HAVEN_FETCH_PORT, local dispatch; AGENTVERSE_API_KEY adds the mailbox). The planner stays the authority:
+    `Society.offer` is an `engine.plan_listeners` callback that puts each round's steps + facts in front of the
+    hosted agents; each computes its stance with the same `_resident` function and sends a signed
+    `StanceMessage` to the table agent, whose ledger (`GET /api/fetch`) records address, stance, `verified`
+    (sender == expected address) and `agrees` (== planner's stance). An agent that is off does not reply.
+    `actions.py` performs a step's outward effect once, inside `WorldEngine._execute_due`, and returns the
+    detail that goes into the ActionEvent: `twilio.py` (plumber call, demo SMS), `linear.py` (ticket);
+    simulated text otherwise. `GET /api/memory` + `POST /api/memory/apply`: manager rules from earlier runs
+    (`EventStore.rule_history`), the cross-incident memory.
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
 - `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;

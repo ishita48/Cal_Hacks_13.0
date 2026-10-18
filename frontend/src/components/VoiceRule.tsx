@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import type { RuleParse, WorldState } from '../state/types'
+import type { MemoryRule, RuleParse, WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
@@ -38,6 +38,22 @@ export function VoiceRule({ world }: Props) {
   const recRef = useRef<SpeechRecognitionLike | null>(null)
   const supported = speechCtor() !== null
   const replay = world.mode === 'replay'
+
+  // Cross-incident memory: rules spoken in earlier runs, offered back with one tap.
+  const [memory, setMemory] = useState<MemoryRule[]>([])
+  useEffect(() => {
+    api.memory().then(setMemory).catch(() => {})
+  }, [world.run_id, world.rules.length])
+  const remembered = memory.filter((m) => !m.active)
+  const applyMemory = (code: string) => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    api
+      .applyMemory(code)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false))
+  }
 
   useEffect(() => () => recRef.current?.abort(), [])
 
@@ -141,6 +157,17 @@ export function VoiceRule({ world }: Props) {
           </button>
         ))}
       </div>
+
+      {remembered.length > 0 && !replay && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="label">last time you said</span>
+          {remembered.slice(0, 3).map((m) => (
+            <button key={m.code} disabled={busy} onClick={() => applyMemory(m.code)} className="pill pill-amber transition-colors hover:brightness-110 disabled:opacity-35" title={`${m.code} · used ${m.times}× before · tap to apply again`}>
+              “{m.text}”{m.times > 1 ? ` ×${m.times}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
 
       {result && (
         <div className={`glass-card px-3 py-2 ${result.confident ? 'tint-green' : 'tint-amber'}`}>

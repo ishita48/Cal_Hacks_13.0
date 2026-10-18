@@ -13,11 +13,25 @@ replays exactly.
 ```bash
 cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
-cd backend  && uv run pytest -q                  # 43 tests
+cd backend  && uv run pytest -q                  # 50 tests
 ```
 
-Nothing needs a key. Optional integrations are read from `backend/.env.example`: Claude (rule parsing
-fallback), Cartesia (voice), Tiger Data (sensor time-series), `HAVEN_SENSOR_TOKEN` (ESP32 auth).
+Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live
+(bright) and which are simulated (dim). Copy `backend/.env.example` to `backend/.env` and fill in what you have.
+
+## Keys to make
+
+| Key | Where | What it switches on |
+|---|---|---|
+| *(none)* | — | Fetch.ai resident agents run as local uAgents inside the backend; the plumber call and ticket are simulated and say so |
+| `ANTHROPIC_API_KEY` | console.anthropic.com | Claude parses spoken rules the regex misses, narrates the brief, lets each agent explain itself in its own words |
+| `AGENTVERSE_API_KEY` | agentverse.ai → API keys | The nine resident agents register on Agentverse (mailbox) so they are reachable and inspectable there |
+| `CARTESIA_API_KEY` (+ `CARTESIA_VOICE_ID`) | play.cartesia.ai → API keys | Spoken briefs and the plumber script in a real voice (`POST /api/speak`); browser speech otherwise |
+| `TIGER_DATABASE_URL` | console.cloud.timescale.com (Tiger Data) → service → connection string | Sensor readings land in a hypertable; `GET /api/sensor/{id}/history` reads it (event log otherwise) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` + `HAVEN_PLUMBER_NUMBER`, `HAVEN_SMS_TO` | console.twilio.com (trial works; verify the two numbers) | On approval the plumber is really phoned with the plan's script, and Maya's message is texted to the demo phone |
+| `LINEAR_API_KEY`, `LINEAR_TEAM_ID` | linear.app → Settings → API (personal key; team id from the team settings URL or the API) | On approval the facilities ticket is filed in Linear; the step shows its identifier and URL |
+| `HAVEN_SENSOR_TOKEN` | make one up | The ESP32 must send it as `X-Haven-Token`; manual and UI readings are unaffected |
+| Railway + Vercel accounts | railway.app, vercel.com | Deploy: `backend/railway.json`, `frontend/vercel.json`; set `VITE_HAVEN_WS=wss://<railway-app>/ws` at build |
 
 ## The two-minute demo
 
@@ -25,9 +39,9 @@ fallback), Cartesia (voice), Tiger Data (sensor time-series), `HAVEN_SENSOR_TOKE
 |---|---|---|
 | 0:00 "This is a $4 water sensor." | Drip on the ESP32 probe, or press **Simulate leak** | The reading lands as an input event; the riser burst starts |
 | 0:15 The cascade | Watch the **Cascade** tab and the B1 floor plan | Forecast: water reaches the switchgear in ~12.5 min, lifts die, floors 3–4 go dark, 250 residents affected; whole building dark at ~34 min if nobody acts |
-| 0:35 **The Maya moment** | **Agents** tab, toggle *Maya's agent* off, then on | Off: "Cut the power now… Maya is left behind." On: lifts held 6 min, two staff bring her down by lift first, then the cut |
-| 1:00 The manager speaks | Mic button: *"Fine, but nobody gets moved off campus."* | Parsed to `no_off_campus`; every agent re-plans under it. Try *"No one moves after midnight"* |
-| 1:20 HAVEN acts | **Approve** | Plumber called, section B and ATS-EQ cut at the safe moment, insulin moved, RAs knocking, 222 people placed by capacity, every person messaged in their language (**Messages** tab) |
+| 0:35 **The Maya moment** | **Agents** tab, toggle *Maya's agent* off, then on | Off: "Cut the power now… Maya is left behind." On: lifts held 6 min, two staff bring her down by lift first, then the cut. Each card shows the resident's own Fetch.ai agent (address, "said veto on the network") |
+| 1:00 The manager speaks | Mic button: *"Fine, but nobody gets moved off campus."* | Parsed to `no_off_campus`; every agent re-plans under it. Try *"No one moves after midnight"*. Next run, the rule is offered back ("last time you said…"): cross-incident memory off the event log |
+| 1:20 HAVEN acts | **Approve** | Plumber called (for real with Twilio keys), the ticket filed (for real with Linear keys), section B and ATS-EQ cut at the safe moment, insulin moved, RAs knocking, 222 people placed by capacity, every person messaged in their language (**Messages** tab) |
 | 1:40 The ledger | Set the clock to 60× | Maya in the lobby before the cut, valve closed at +27 min, 0 left behind, outcome strip in the Impact ledger |
 | 2:00 Close | **Replay** any recorded run | The whole thing re-derives from the event log |
 

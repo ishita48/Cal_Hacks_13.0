@@ -8,7 +8,7 @@ from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from ..integrations import cartesia
+from ..integrations import actions, cartesia, fetch
 from ..integrations.tiger import TigerSink
 
 from ..world.engine import ReplayActiveError, WorldEngine
@@ -22,12 +22,16 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     engine = WorldEngine(store)
     sensor_token = os.environ.get("HAVEN_SENSOR_TOKEN")
     tiger = TigerSink()
+    society = fetch.Society(engine.ctx)          # the residents' agents on Fetch.ai (local or Agentverse)
+    engine.plan_listeners.append(society.offer)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if run_loop:
             await engine.start()
+            await society.start()
         yield
+        await society.stop()
         await engine.stop()
 
     app = FastAPI(title="HAVEN world-state service", lifespan=lifespan)
@@ -101,7 +105,37 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
             "tiger": tiger.configured,
             "llm": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
             "sensor_token": bool(sensor_token),
+            "fetch": society.running,
+            "agentverse": fetch.agentverse() and society.running,
+            **actions.providers(),
         }
+
+    @app.get("/api/fetch")
+    async def fetch_status():
+        """The residents' agents on Fetch.ai: addresses, and what each said about the current plan."""
+        return society.status(engine.state)
+
+    @app.get("/api/memory")
+    async def memory():
+        """Cross-incident memory: rules the manager imposed in earlier runs, grouped by code."""
+        grouped: dict[str, dict] = {}
+        for row in store.rule_history(exclude_run=engine.state.run_id):
+            g = grouped.setdefault(row["code"], {"code": row["code"], "text": row["text"], "times": 0,
+                                                  "last_used": row["time"], "last_run": row["run_id"]})
+            g["times"] += 1
+        active = {r.code for r in engine.state.rules}
+        return [dict(g, active=g["code"] in active) for g in grouped.values()]
+
+    class MemoryApply(BaseModel):
+        code: str
+        actor: str = "manager"
+
+    @app.post("/api/memory/apply")
+    async def memory_apply(body: MemoryApply):
+        row = next((r for r in store.rule_history(exclude_run=engine.state.run_id) if r["code"] == body.code), None)
+        if row is None:
+            raise HTTPException(404, "no remembered rule with that code")
+        return await _submit(ManagerRule(text=row["text"], code=row["code"], actor=f"{body.actor} (remembered)"))
 
     @app.post("/api/command")
     async def post_command(cmd: EquipmentCommand):

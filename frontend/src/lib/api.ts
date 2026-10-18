@@ -1,4 +1,4 @@
-import type { AgentInfo, BuildingSpec, Roster, RuleParse, SensorHistory } from '../state/types'
+import type { AgentInfo, BuildingSpec, FetchStatus, Integrations, MemoryRule, Roster, RuleParse, SensorHistory } from '../state/types'
 
 const base = import.meta.env.VITE_HAVEN_API ?? ''
 
@@ -39,6 +39,10 @@ export const api = {
   sensorHistory: (sensorId: string, limit = 120) =>
     request<SensorHistory>('GET', `/api/sensor/${encodeURIComponent(sensorId)}/history?limit=${limit}`),
   agents: () => request<AgentInfo[]>('GET', '/api/agents'),
+  integrations: () => request<Integrations>('GET', '/api/integrations'),
+  fetchStatus: () => request<FetchStatus>('GET', '/api/fetch'),
+  memory: () => request<MemoryRule[]>('GET', '/api/memory'),
+  applyMemory: (code: string, actor = 'manager') => request('POST', '/api/memory/apply', { code, actor }),
   toggleAgent: (agent: string, enabled: boolean) => request('POST', '/api/agent', { agent, enabled }),
   decidePlan: (plan_version: number, decision: 'approve' | 'reject', actor = 'manager') =>
     request('POST', '/api/plan/decision', { plan_version, decision, actor }),

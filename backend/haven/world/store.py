@@ -82,6 +82,23 @@ class EventStore:
             for seq, rid, step, wall_time, payload in rows
         ]
 
+    def rule_history(self, exclude_run: str | None = None, limit: int = 200) -> list[dict]:
+        """Manager rules spoken in earlier runs, newest first: the cross-incident memory."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT run_id, wall_time, payload FROM events WHERE payload LIKE '%\"manager_rule\"%' "
+                "ORDER BY seq DESC LIMIT ?", (limit,),
+            ).fetchall()
+        out = []
+        for run_id, wall_time, payload in rows:
+            if run_id == exclude_run:
+                continue
+            ev = json.loads(payload)
+            if ev.get("type") != "manager_rule":
+                continue
+            out.append({"run_id": run_id, "time": wall_time, "code": ev["code"], "text": ev["text"], "actor": ev.get("actor", "manager")})
+        return out
+
     def runs(self, limit: int = 50) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(

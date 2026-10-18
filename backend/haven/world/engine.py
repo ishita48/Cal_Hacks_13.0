@@ -9,9 +9,10 @@
 import asyncio
 import contextlib
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from ..building.model import BuildingSpec
+from ..integrations import actions
 from ..people.roster import Roster
 from .context import WorldContext, build_context
 from .events import ActionEvent, EquipmentCommand, InputEvent, LoggedEvent
@@ -49,6 +50,8 @@ class WorldEngine:
         self._last_broadcast_version = -1
         self._last_broadcast_step = -1
         self._last_broadcast_at = 0.0
+        self._last_plan_version = -1
+        self.plan_listeners: list[Callable[[WorldState], None]] = []   # called when the plan version changes
         self.state: WorldState = initial_state(store.create_run(scenario), scenario, self.ctx)
 
     # ---- lifecycle -------------------------------------------------------------------
@@ -181,7 +184,13 @@ class WorldEngine:
         return out
 
     async def _execute_due(self) -> None:
+        plan = self.state.approved_plan
         for ev in self.due_actions():
+            if isinstance(ev, ActionEvent) and ev.status == "done" and plan is not None:
+                step = next((s for s in plan.steps if s.id == ev.step_id), None)
+                if step is not None and step.kind in ("call", "ticket", "notify"):
+                    # The outward effect (phone call, ticket, text) happens here, once; its result is the detail.
+                    ev.detail = await actions.perform(self.state.run_id, step, plan, ev.detail)
             await self.submit(ev)
 
     def _apply_due_replay_events(self) -> None:
@@ -199,6 +208,13 @@ class WorldEngine:
         self._last_broadcast_version = self.state.version
         self._last_broadcast_step = self.state.step
         self._last_broadcast_at = now
+        if self.state.plan.version != self._last_plan_version:
+            self._last_plan_version = self.state.plan.version
+            for fn in self.plan_listeners:
+                try:
+                    fn(self.state)
+                except Exception:  # a listener (the agent network) must never break the world
+                    log.exception("plan listener failed")
         msg = self.snapshot()
         for q in list(self._subscribers):
             if q.full():  # slow client: drop its stale frame, keep the newest

@@ -9,7 +9,7 @@ import { PlanPanel } from './components/PlanPanel'
 import { VoiceRule } from './components/VoiceRule'
 import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
-import type { Level } from './state/types'
+import type { Integrations, Level } from './state/types'
 import { connectWorld, useWorld } from './state/world'
 
 // The 3D twin is another view of the same store; it is lazy so the 2D app loads first.
@@ -28,6 +28,10 @@ export default function App() {
   }, [loadBuilding])
 
   const { connection, clock, world } = useWorld()
+  const [integrations, setIntegrations] = useState<Integrations | null>(null)
+  useEffect(() => {
+    api.integrations().then(setIntegrations).catch(() => {})
+  }, [])
   const [level, setLevel] = useState('L4')
   const [view, setView] = useState<'2d' | '3d'>('2d')
   const [rightTab, setRightTab] = useState<'agents' | 'messages' | 'cascade'>('agents')
@@ -85,6 +89,7 @@ export default function App() {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          {integrations && <IntegrationStrip flags={integrations} />}
           {world.mode === 'replay' && <span className="pill pill-amber pill-mono">REPLAY · {clock.replay_remaining} left</span>}
           <span className="flex items-center gap-2 text-[11px] text-t2">
             <span
@@ -214,6 +219,27 @@ class ViewErrorBoundary extends Component<{ fallback: ReactNode; children: React
   render() {
     return this.state.failed ? this.props.fallback : this.props.children
   }
+}
+
+/** Which sponsor integrations are live in this backend (key-gated; dim = simulated). */
+function IntegrationStrip({ flags }: { flags: Integrations }) {
+  const items: [string, boolean, string][] = [
+    ['fetch.ai', flags.fetch, flags.agentverse ? 'resident agents on Agentverse' : flags.fetch ? 'resident agents as local uAgents' : 'HAVEN_FETCH=0'],
+    ['claude', flags.llm, flags.llm ? 'rule parsing fallback + explanations' : 'set ANTHROPIC_API_KEY'],
+    ['cartesia', flags.cartesia, flags.cartesia ? 'spoken briefs' : 'set CARTESIA_API_KEY (browser speech used)'],
+    ['tiger', flags.tiger, flags.tiger ? 'sensor time-series' : 'set TIGER_DATABASE_URL (event log used)'],
+    ['twilio', flags.twilio, flags.twilio ? 'real plumber call + demo text' : 'set TWILIO_* (call simulated)'],
+    ['linear', flags.linear, flags.linear ? 'real facilities ticket' : 'set LINEAR_API_KEY (ticket simulated)'],
+  ]
+  return (
+    <span className="hidden items-center gap-1 xl:flex" title="Sponsor integrations: bright = live, dim = simulated">
+      {items.map(([name, on, tip]) => (
+        <span key={name} className={`mono rounded-full border px-1.5 py-px text-[9px] ${on ? 'border-haven-safe/50 text-haven-safe' : 'border-white/10 text-t3'}`} title={tip}>
+          {name}
+        </span>
+      ))}
+    </span>
+  )
 }
 
 function Legend() {

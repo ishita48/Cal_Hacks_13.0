@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { useBuilding } from '../state/building'
-import type { Stance, StanceKind, WorldState } from '../state/types'
+import type { FetchAgent, FetchStatus, Stance, StanceKind, WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
@@ -35,6 +35,31 @@ export function AgentConsole({ world }: Props) {
 
   const stances = new Map<string, Stance>()
   for (const s of world.plan.stances) stances.set(s.agent, s)
+
+  // The residents' agents hosted on Fetch.ai: polled when the plan version changes (their replies
+  // arrive a moment after the plan does), never part of the world state.
+  const [fetchStatus, setFetchStatus] = useState<FetchStatus | null>(null)
+  useEffect(() => {
+    let alive = true
+    let tries = 0
+    const poll = () => {
+      api
+        .fetchStatus()
+        .then((s) => {
+          if (!alive) return
+          setFetchStatus(s)
+          const hosted = s.agents.filter((a) => a.enabled).length
+          if (s.running && s.received < 2 * hosted && tries++ < 8) setTimeout(poll, 700)
+        })
+        .catch(() => {})
+    }
+    poll()
+    return () => {
+      alive = false
+    }
+  }, [world.plan.version])
+  const fetchAgents = new Map<string, FetchAgent>()
+  for (const a of fetchStatus?.agents ?? []) fetchAgents.set(a.id, a)
 
   const agentIds = Object.keys(world.agents)
   const storyIds = STORY.map((id) => `resident:${id}`).filter((id) => id in world.agents)
@@ -72,6 +97,8 @@ export function AgentConsole({ world }: Props) {
       prominent={prominent}
       replay={world.mode === 'replay'}
       onToggle={(on) => toggle(id, on)}
+      hosted={fetchStatus?.running ? fetchAgents.get(id) : undefined}
+      hostedOn={fetchStatus?.hosted}
     />
   )
 
@@ -80,6 +107,11 @@ export function AgentConsole({ world }: Props) {
       <div className="flex items-baseline justify-between">
         <span className="eyebrow">Agents · who speaks in the negotiation</span>
         <span className="mono text-[10px] text-t3">
+          {fetchStatus?.running && (
+            <span className="mr-2 text-haven-blue" title={`HAVEN's table on Fetch.ai: ${fetchStatus.table ?? ''}`}>
+              fetch.ai {fetchStatus.hosted} · {fetchStatus.agreeing}/{fetchStatus.received} confirmed
+            </span>
+          )}
           {world.plan.enabled_agents.length}/{agentIds.length} on
         </span>
       </div>
@@ -110,6 +142,8 @@ function AgentCard({
   prominent,
   replay,
   onToggle,
+  hosted,
+  hostedOn,
 }: {
   id: string
   index: number
@@ -121,6 +155,8 @@ function AgentCard({
   prominent: boolean
   replay: boolean
   onToggle: (on: boolean) => void
+  hosted?: FetchAgent
+  hostedOn?: 'local' | 'agentverse'
 }) {
   // Shake and glow the card the first time a veto appears on it.
   const prevStance = useRef<StanceKind | null>(null)
@@ -191,6 +227,7 @@ function AgentCard({
             </div>
           )}
           <Explain agent={id} version={version} />
+          {hosted && <FetchBadge agent={hosted} hostedOn={hostedOn} />}
         </div>
       ) : (
         <p className="mt-2 text-[11px] text-t3">Listening · nothing to say yet</p>
@@ -199,6 +236,26 @@ function AgentCard({
   )
 }
 
+
+/** This resident's agent on Fetch.ai: its address, and whether what it said on the network matches the plan. */
+function FetchBadge({ agent, hostedOn }: { agent: FetchAgent; hostedOn?: 'local' | 'agentverse' }) {
+  const r2 = agent.receipts['2'] ?? agent.receipts['1']
+  const short = `${agent.address.slice(0, 10)}…${agent.address.slice(-4)}`
+  return (
+    <div className="mono mt-1.5 flex flex-wrap items-center gap-1.5 text-[9px] text-t3" title={agent.address}>
+      <span className="pill pill-blue">fetch.ai</span>
+      <span>{short}</span>
+      {r2 ? (
+        <span className={r2.verified && r2.agrees ? 'text-haven-safe' : 'text-haven-amber'}>
+          {r2.verified && r2.agrees ? `✓ said ${r2.stance} on the network` : `said ${r2.stance}${r2.verified ? '' : ' (unverified)'}`}
+        </span>
+      ) : (
+        <span>awaiting its reply…</span>
+      )}
+      {hostedOn === 'agentverse' && <span className="text-t3">· agentverse</span>}
+    </div>
+  )
+}
 
 /** The agent in its own words: Claude paraphrases the stance when a key is set, a template otherwise. */
 function Explain({ agent, version }: { agent: string; version: number }) {
