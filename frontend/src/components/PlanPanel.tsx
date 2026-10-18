@@ -206,7 +206,7 @@ export function PlanPanel({ world, clock }: Props) {
 
       {plan.checks.length > 0 && <Checks checks={plan.checks} />}
 
-      {Object.keys(plan.metrics).length > 0 && (
+      {false && Object.keys(plan.metrics).length > 0 && (
         <div className="grid grid-cols-4 gap-2">
           {Object.entries(plan.metrics).map(([k, v]) => {
             const hot = (k === 'stranded' || k === 'left_behind') && v > 0

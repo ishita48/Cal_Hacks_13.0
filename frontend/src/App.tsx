@@ -66,6 +66,7 @@ export default function App() {
   const [level, setLevel] = useState('all')
   const [view, setView] = useState<View>('3d')
   const [rightTab, setRightTab] = useState<RightTab>('agents')
+  const [leftTab, setLeftTab] = useState<'inputs' | 'rule' | 'people'>('inputs')
   const [docks, setDocks] = useState({ left: true, right: true })
   const openTab = (t: RightTab) => {
     setRightTab(t)
@@ -98,6 +99,13 @@ export default function App() {
           setDocks((d) => ({ ...d, right: true }))
         }
         if (f.kind === 'step' || f.kind === 'panel') setDocks((d) => ({ ...d, right: f.kind === 'step' || f.id === 'plan' ? true : d.right, left: f.kind === 'panel' && (f.id === 'controls' || f.id === 'voice' || f.id === 'ledger') ? true : d.left }))
+        if (f.kind === 'panel' && f.id === 'controls') setLeftTab('inputs')
+        if (f.kind === 'panel' && f.id === 'voice') setLeftTab('rule')
+        if (f.kind === 'panel' && f.id === 'ledger') setLeftTab('people')
+        if (f.kind === 'tab' && (f.id === 'inputs' || f.id === 'rule' || f.id === 'people')) {
+          setLeftTab(f.id)
+          setDocks((d) => ({ ...d, left: true }))
+        }
         if (f.kind === 'level') setLevel(f.id)
       }
     }
@@ -129,7 +137,7 @@ export default function App() {
 
   return (
     <div className="app-shell grid h-full grid-cols-[232px_minmax(0,1fr)] gap-3 overflow-hidden p-3">
-      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} onGuide={() => guide.setOpen(true)} />
+      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} onGuide={() => guide.setOpen(true)} runId={world.run_id} />
 
       <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden">
         <TopNav title="Command centre" clock={clock} connection={connection} world={world} integrations={integrations} onGuide={() => guide.setOpen(true)} />
@@ -150,13 +158,19 @@ export default function App() {
 
         <main className="grid min-h-0 gap-3 overflow-hidden" style={{ gridTemplateColumns: `${docks.left ? '300px ' : ''}minmax(0,1fr)${docks.right ? ' 400px' : ''}` }}>
           {docks.left && (
-            <aside className="glass flex min-h-0 flex-col gap-4 overflow-hidden p-4 enter">
-              <Controls world={world} />
-              <div className="hairline pt-4">
-                <VoiceRule world={world} />
+            <aside className="glass flex min-h-0 flex-col overflow-hidden enter">
+              <div className="hairline-b flex items-center px-3 py-2.5">
+                <div className="seg">
+                  {(['inputs', 'rule', 'people'] as const).map((t) => (
+                    <button key={t} data-buds={`tab:${t}`} onClick={() => setLeftTab(t)} className={`seg-item ${leftTab === t ? 'is-on' : ''}`} title={t === 'inputs' ? 'The sensor and the levers: what can change the world' : t === 'rule' ? 'A rule from the manager, by voice or typed' : 'Who is affected, now or if nothing is done'}>
+                      {t === 'inputs' ? 'Inputs' : t === 'rule' ? 'Say a rule' : 'People'}
+                      {t === 'rule' && world.rules.length > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-blue/15 px-1.5 text-[10px] font-semibold text-haven-blue">{world.rules.length}</span>}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="hairline min-h-0 flex-1 pt-4">
-                <ImpactLedger world={world} clock={clock} />
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {leftTab === 'inputs' ? <Controls world={world} /> : leftTab === 'rule' ? <VoiceRule world={world} /> : <ImpactLedger world={world} clock={clock} />}
               </div>
             </aside>
           )}
@@ -164,7 +178,7 @@ export default function App() {
           {/* the stage: the simulation, with its own toolbar above the picture */}
           <section className="glass flex min-h-0 flex-col overflow-hidden" data-buds="panel:map">
             <div className="hairline-b flex flex-wrap items-center gap-2 px-3 py-2">
-              <span className="eyebrow mr-1">{view === '3d' ? '3D twin' : 'Floor plan'}</span>
+              <span className="eyebrow mr-1">{view === '3d' ? 'Building' : 'Floor'}</span>
               <div className="seg">
                 {[...levels]
                   .sort((a, b) => b.index - a.index)
@@ -272,6 +286,7 @@ function Sidebar({
   criticalMessages,
   leftBehind,
   onGuide,
+  runId,
 }: {
   view: View
   setView: (v: View) => void
@@ -281,6 +296,7 @@ function Sidebar({
   criticalMessages: number
   leftBehind: number
   onGuide: () => void
+  runId: string
 }) {
   const item = (on: boolean, Icon: React.ElementType, label: string, desc: string, onClick: () => void, badge = 0, buds?: string) => (
     <button key={label} className={`nav-item ${on ? 'is-on' : ''}`} onClick={onClick} aria-current={on ? 'page' : undefined} data-buds={buds}>
@@ -312,12 +328,12 @@ function Sidebar({
         <div>
           <p className="argus-eyebrow px-3 pb-1.5">Command centre</p>
           <div className="space-y-1">
-            {item(false, CircleHelp, 'Guide', 'What this is, what to click', onGuide)}
-            {item(view === '2d', LayoutGrid, 'Floor plan', 'Rooms, water, routes, people', () => setView('2d'))}
-            {item(view === '3d', Box, '3D twin', 'The Blender building, live', () => setView('3d'))}
-            {item(rightTab === 'agents', Bot, 'Agents', 'Who speaks, the transcript, the constraints', () => setRightTab('agents'), vetoes, 'tab:agents')}
-            {item(rightTab === 'messages', MessagesSquare, 'Messages', 'Who is told what, when', () => setRightTab('messages'), criticalMessages, 'tab:messages')}
-            {item(rightTab === 'cascade', Waypoints, 'Cascade', 'What fails next, and when', () => setRightTab('cascade'), 0, 'tab:cascade')}
+            {item(false, CircleHelp, 'Guide', 'Start here', onGuide)}
+            {item(view === '3d', Box, '3D twin', 'The building, live', () => setView('3d'))}
+            {item(view === '2d', LayoutGrid, 'Floor plan', 'One floor at a time', () => setView('2d'))}
+            {item(rightTab === 'agents', Bot, 'Agents', 'The negotiation', () => setRightTab('agents'), vetoes, 'tab:agents')}
+            {item(rightTab === 'messages', MessagesSquare, 'Messages', 'Who is told what', () => setRightTab('messages'), criticalMessages, 'tab:messages')}
+            {item(rightTab === 'cascade', Waypoints, 'Cascade', 'What fails next', () => setRightTab('cascade'), 0, 'tab:cascade')}
           </div>
         </div>
         <div>
@@ -327,21 +343,21 @@ function Sidebar({
               <Smartphone />
               <span className="min-w-0 flex-1">
                 <span className="nav-label">Manager's phone</span>
-                <span className="nav-desc">Approve, say a rule</span>
+                <span className="nav-desc">Approve from a phone</span>
               </span>
             </a>
             <a className="nav-item" href="/phone?as=ra_4" target="_blank" rel="noreferrer">
               <Radio />
               <span className="min-w-0 flex-1">
                 <span className="nav-label">Responder's phone</span>
-                <span className="nav-desc">RA floor 4 acknowledges steps</span>
+                <span className="nav-desc">An RA confirms steps</span>
               </span>
             </a>
             <a className="nav-item" href="/story">
               <BookOpen />
               <span className="min-w-0 flex-1">
                 <span className="nav-label">The story</span>
-                <span className="nav-desc">How it works, live state, stack</span>
+                <span className="nav-desc">How it works</span>
               </span>
             </a>
           </div>
@@ -350,6 +366,7 @@ function Sidebar({
       <div className={`m-3 rounded-xl border px-3 py-2.5 text-[11px] ${leftBehind ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300' : 'border-black/[0.06] bg-white/60 text-t3 dark:border-white/10 dark:bg-white/[0.04]'}`}>
         <Activity className="mr-1.5 inline h-3.5 w-3.5 align-[-2px]" />
         {leftBehind ? `${leftBehind} left behind: switch their agent on` : 'Nobody left behind'}
+        <div className="mono mt-1 truncate text-[10px] opacity-70" title={runId}>run {runId.slice(-6)}</div>
       </div>
     </aside>
   )
@@ -359,7 +376,6 @@ function TopNav({ title, clock, connection, world, integrations, onGuide }: { ti
   return (
     <header className="app-topnav flex h-14 items-center gap-4 px-4">
       <span className="truncate text-[15px] font-semibold tracking-tight text-t1">{title}</span>
-      <span className="label hidden lg:inline">David Blackwell Hall · {world.mode === 'replay' ? 'replay' : 'live'}</span>
       <div className="ml-2 flex items-center gap-3">
         <span className="mono num text-[26px] leading-none text-t1">{formatTimeOfDay(clock.time_of_day)}</span>
         <button className="btn-secondary btn-icon" onClick={() => api.clock({ playing: !clock.playing })} title={clock.playing ? 'Pause' : 'Play'} aria-label={clock.playing ? 'Pause' : 'Play'}>
@@ -374,14 +390,11 @@ function TopNav({ title, clock, connection, world, integrations, onGuide }: { ti
         </div>
       </div>
       <div className="ml-auto flex items-center gap-3">
-        {integrations && <IntegrationStrip flags={integrations} />}
         {world.mode === 'replay' && <span className="pill pill-amber pill-mono">REPLAY · {clock.replay_remaining} left</span>}
-        <span className="flex items-center gap-2 text-[11px] text-t2">
+        {integrations && <IntegrationStrip flags={integrations} />}
+        <span className="flex items-center gap-2 text-[11px] text-t2" title={`run ${world.run_id} · v${world.version}`}>
           <span className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-haven-amber' : 'bg-haven-danger'}`} style={{ boxShadow: connection === 'open' ? '0 0 8px rgba(34,197,94,0.6)' : undefined }} />
-          {connection}
-        </span>
-        <span className="mono hidden text-[11px] text-t3 xl:inline">
-          run {world.run_id} · v{world.version}
+          {connection === 'open' ? 'live' : connection}
         </span>
         <button className="btn-secondary btn-icon" onClick={onGuide} title="Guide (?)" aria-label="Guide">
           <CircleHelp className="h-3.5 w-3.5" />
