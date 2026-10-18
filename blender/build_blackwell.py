@@ -1474,21 +1474,21 @@ class Builder:
         world.use_nodes = True
         bg = next((n for n in world.node_tree.nodes if n.type == "BACKGROUND"), None)
         if bg:
+            # Start from a clean world tree: repeated builds must not pile up sky nodes.
+            for n in list(world.node_tree.nodes):
+                if n.type == "TEX_SKY":
+                    world.node_tree.nodes.remove(n)
             sky = world.node_tree.nodes.new("ShaderNodeTexSky")
             models = [i.identifier for i in sky.bl_rna.properties["sky_type"].enum_items]
-            if "HOSEK_WILKIE" in models:
-                sky.sky_type = "HOSEK_WILKIE"
-                sky.turbidity = 3.0
-                sky.ground_albedo = 0.35
-                sky.sun_direction = (-0.55, -0.5, 0.67)
-                bg.inputs[1].default_value = 0.06
-            else:
-                sky.sky_type = models[0]
-                if hasattr(sky, "sun_intensity"):
-                    sky.sun_intensity = 0.0
-                    sky.sun_elevation = math.radians(48)
-                    sky.sun_rotation = math.radians(230)
-                bg.inputs[1].default_value = 0.015
+            # Hosek-Wilkie renders black in EEVEE on Blender 5.2; the physical multiple-scattering sky works.
+            sky.sky_type = next((mm for mm in ("MULTIPLE_SCATTERING", "NISHITA") if mm in models), models[0])
+            if hasattr(sky, "sun_intensity"):
+                sky.sun_intensity = 0.0
+                sky.sun_elevation = math.radians(48)
+                sky.sun_rotation = math.radians(230)
+            if hasattr(sky, "sun_disc"):
+                sky.sun_disc = False
+            bg.inputs[1].default_value = 0.02
             world.node_tree.links.new(sky.outputs[0], bg.inputs[0])
         scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
         try:
@@ -1513,10 +1513,23 @@ class Builder:
         """Camera-like finishing: a touch of bloom and chromatic aberration."""
         scene = bpy.context.scene
         try:
-            scene.use_nodes = True
-            nt = scene.node_tree
-            for n in list(nt.nodes):
-                nt.nodes.remove(n)
+            if hasattr(scene, "compositing_node_group"):      # Blender 5.x: the compositor is a node group
+                nt = bpy.data.node_groups.get("HAVEN compositor")
+                if nt is None:
+                    nt = bpy.data.node_groups.new("HAVEN compositor", "CompositorNodeTree")
+                for n in list(nt.nodes):
+                    nt.nodes.remove(n)
+                for item in list(nt.interface.items_tree):
+                    nt.interface.remove(item)
+                nt.interface.new_socket("Image", in_out="OUTPUT", socket_type="NodeSocketColor")
+                comp = nt.nodes.new("NodeGroupOutput")
+                scene.compositing_node_group = nt
+            else:                                              # Blender 4.x
+                scene.use_nodes = True
+                nt = scene.node_tree
+                for n in list(nt.nodes):
+                    nt.nodes.remove(n)
+                comp = nt.nodes.new("CompositorNodeComposite")
             rl = nt.nodes.new("CompositorNodeRLayers")
             glare = nt.nodes.new("CompositorNodeGlare")
             glare.glare_type = "FOG_GLOW"
@@ -1529,7 +1542,6 @@ class Builder:
                     lens.inputs[key].default_value = val
             if hasattr(lens, "use_fit"):
                 lens.use_fit = True
-            comp = nt.nodes.new("CompositorNodeComposite")
             nt.links.new(rl.outputs["Image"], glare.inputs["Image"])
             nt.links.new(glare.outputs["Image"], lens.inputs["Image"])
             nt.links.new(lens.outputs["Image"], comp.inputs["Image"])
