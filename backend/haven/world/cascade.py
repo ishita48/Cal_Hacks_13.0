@@ -261,7 +261,7 @@ def _resident_message(ctx: WorldContext, r: ResidentImpact, impact: str) -> str:
 
 
 def forecast(h: Hydraulics, ctx: WorldContext, impact_now: Impact, computed_step: int,
-             horizon_s: float = 3600.0, dt: float = 1.0, moved: dict[str, str] | None = None) -> Forecast:
+             horizon_s: float = 3600.0, dt: float = 2.0, moved: dict[str, str] | None = None) -> Forecast:
     """Run the water forward from the current state and narrate what will fail, and when."""
     sim = h.copy()
     events: list[ChainEvent] = []

@@ -183,6 +183,40 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     async def run_events(run_id: str):
         return [e.model_dump(mode="json") for e in store.events(run_id)]
 
+    class ImportBody(BaseModel):
+        scenario: str = "blackwell_basement_leak"
+        label: str | None = None
+        events: list[dict]       # [{"step": int, "event": InputEvent payload}]
+
+    @app.post("/api/runs/import")
+    async def import_run(body: ImportBody):
+        """Load a recorded run (e.g. demo/blackwell_leak.json) so it can be replayed on this machine."""
+        from pydantic import TypeAdapter
+
+        from ..world.events import InputEvent
+
+        adapter: TypeAdapter[InputEvent] = TypeAdapter(InputEvent)
+        parsed = [(int(e["step"]), adapter.validate_python(e["event"])) for e in body.events]
+        run_id = store.create_run(body.scenario + (f":{body.label}" if body.label else ""))
+        for step, event in sorted(parsed, key=lambda x: x[0]):
+            store.append(run_id, step, event)
+        return {"run_id": run_id, "event_count": len(parsed)}
+
+    @app.post("/api/demo/load")
+    async def load_demo():
+        """Import the bundled canonical run (backend/demo/blackwell_leak.json) and start replaying it."""
+        import json
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "demo" / "blackwell_leak.json"
+        if not path.exists():
+            raise HTTPException(404, "no recorded demo; run tools/record_demo.py")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        imported = await import_run(ImportBody(scenario=data.get("scenario", "blackwell_basement_leak"),
+                                               label=data.get("label", "demo"), events=data["events"]))
+        state = await engine.start_replay(imported["run_id"], 5.0)
+        return {"run_id": state.run_id, "mode": state.mode, "event_count": imported["event_count"]}
+
     class ReplayBody(BaseModel):
         run_id: str
         speed: float | None = Field(default=None, gt=0)

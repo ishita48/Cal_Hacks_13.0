@@ -31,7 +31,11 @@ fallback), Cartesia (voice), Tiger Data (sensor time-series), `HAVEN_SENSOR_TOKE
 | 1:40 The ledger | Set the clock to 60× | Maya in the lobby before the cut, valve closed at +27 min, 0 left behind, outcome strip in the Impact ledger |
 | 2:00 Close | **Replay** any recorded run | The whole thing re-derives from the event log |
 
-If the hardware flakes: **runs → Replay** re-emits a recorded run deterministically.
+If the hardware flakes: **runs → Replay** re-emits a recorded run deterministically. The canonical run is
+`backend/demo/blackwell_leak.json` (leak → Maya off → Maya on → spoken rule → approve → HAVEN acts, done at
++28 min); load it on any machine with
+`curl -X POST localhost:8000/api/runs/import -H 'Content-Type: application/json' --data-binary @backend/demo/blackwell_leak.json`
+and re-record it after planner or physics changes with `cd backend && PYTHONPATH=. uv run python tools/record_demo.py`.
 
 ## Layout
 

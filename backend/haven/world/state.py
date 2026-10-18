@@ -152,21 +152,26 @@ def default_agents(ctx: WorldContext) -> list[str]:
 
 def apply_input(state: WorldState, event: InputEvent, ctx: WorldContext) -> None:
     changed = True
+    physical = True      # does the event move water or power? If not, the forecast stands.
     if isinstance(event, SensorReading):
         changed = _apply_sensor(state, event, ctx)
     elif isinstance(event, EquipmentCommand):
         _apply_command(state, event, ctx)
     elif isinstance(event, AgentToggle):
         _apply_toggle(state, event, ctx)
+        physical = False
     elif isinstance(event, ManagerRule):
         state.rules.append(Constraint(type="hard", rule=event.text, code=event.code, source=event.actor))
         state.record("rule", f'{event.actor}: "{event.text}"', "warning", code=event.code)
+        physical = False
     elif isinstance(event, PlanDecision):
         _apply_decision(state, event)
+        physical = False
     elif isinstance(event, ActionEvent):
         _apply_action(state, event, ctx)
-    if changed:          # a repeated wet/dry reading changes nothing physical: skip the forecast
-        _rederive(state, ctx, [])
+        physical = False
+    if changed:          # a repeated wet/dry reading changes nothing physical: skip everything
+        _rederive(state, ctx, [], physical=physical)
     state.version += 1
 
 
@@ -365,8 +370,12 @@ def _store_water(state: WorldState, h: Hydraulics, ctx: WorldContext) -> None:
 
 
 def _rederive(state: WorldState, ctx: WorldContext, happenings: list[Happening], h: Hydraulics | None = None,
-              narrate: bool = True) -> None:
-    """Recompute every derived view from the physical state and narrate what changed."""
+              narrate: bool = True, physical: bool = True) -> None:
+    """Recompute every derived view from the physical state and narrate what changed.
+
+    `physical=False` (agent toggles, rules, decisions, action reports) keeps the forecast: the water
+    did not change, only who is where and what the plan should be.
+    """
     h = h or _hydraulics(state, ctx)
     h.refresh_power(ctx)
     live_before = set(state.power.live)
@@ -387,7 +396,8 @@ def _rederive(state: WorldState, ctx: WorldContext, happenings: list[Happening],
     if narrate:
         for ev in describe(ctx, happenings, live_before, h.live, impact_before, state.impact):
             state.record(ev.kind, ev.message, ev.severity, id=ev.id, cause=ev.cause, **ev.data)
-    state.forecast = forecast(h, ctx, state.impact, state.step, moved=state.moved)
+    if physical or not state.forecast.events and not state.forecast.settled:
+        state.forecast = forecast(h, ctx, state.impact, state.step, moved=state.moved)
     state.plan = compute_plan(ctx, state)
 
 

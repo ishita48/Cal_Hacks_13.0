@@ -30,6 +30,7 @@ export const api = {
   reset: () => request<{ run_id: string }>('POST', '/api/scenario/reset'),
   runs: () => request<RunSummary[]>('GET', '/api/runs'),
   replay: (run_id: string, speed?: number) => request('POST', '/api/replay', { run_id, speed }),
+  loadDemo: () => request<{ run_id: string; mode: string; event_count: number }>('POST', '/api/demo/load'),
   building: () => request<BuildingSpec>('GET', '/api/building'),
   people: () => request<Roster>('GET', '/api/people'),
   agents: () => request<AgentInfo[]>('GET', '/api/agents'),

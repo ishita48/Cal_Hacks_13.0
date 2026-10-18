@@ -83,6 +83,13 @@ export function Controls({ world }: Props) {
           runs ({runs.length})
         </button>
       </div>
+      <button
+        className="rounded border border-amber-500/40 bg-ink-800 px-3 py-2 text-xs text-amber-300 hover:bg-ink-700"
+        title="Replays the recorded canonical run at 5x: leak, Maya off/on, spoken rule, approve, HAVEN acts"
+        onClick={act(api.loadDemo)}
+      >
+        Replay the recorded demo (backup)
+      </button>
       {showRuns && (
         <ul className="max-h-40 space-y-1 overflow-y-auto">
           {runs.slice(0, 12).map((r) => (

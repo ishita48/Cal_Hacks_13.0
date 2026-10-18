@@ -21,6 +21,7 @@ from .store import EventStore
 log = logging.getLogger("haven.engine")
 
 TICK_SECONDS = 0.1  # real seconds between loop iterations / broadcasts
+MAX_STEPS_PER_TICK = 60  # = MAX_SPEED * TICK_SECONDS / DT; if a tick runs late the sim slows, it never jumps
 STEP_FRAME_HZ = 2.0  # frames per second when only the clock advanced (every version change is sent at once)
 MAX_SPEED = 120.0
 
@@ -139,7 +140,7 @@ class WorldEngine:
             try:
                 async with self._lock:
                     if self.playing:
-                        self._step_budget += self.speed * TICK_SECONDS / DT
+                        self._step_budget = min(self._step_budget + self.speed * TICK_SECONDS / DT, MAX_STEPS_PER_TICK)
                         while self._step_budget >= 1.0:
                             self._step_budget -= 1.0
                             advance(self.state, self.ctx)
@@ -175,8 +176,7 @@ class WorldEngine:
                     out.append(ActionEvent(step_id=step.id, status="assigned", detail=f"{step.actor} dispatched"))
             elif cur is not None and cur.status == "assigned" and step.deadline_s is not None and step.deadline_s <= elapsed:
                 out.append(ActionEvent(step_id=step.id, status="done", detail=f"{step.actor} confirmed"))
-            elif cur is not None and cur.status == "assigned" and step.deadline_s is None and step.kind in ("shelter", "hold") \
-                    and step.at_s + 60 <= elapsed:
+            elif cur is not None and cur.status == "assigned" and step.deadline_s is None and step.at_s + 60 <= elapsed:
                 out.append(ActionEvent(step_id=step.id, status="done", detail=f"{step.actor} confirmed"))
         return out
 

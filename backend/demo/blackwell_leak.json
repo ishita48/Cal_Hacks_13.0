@@ -1,0 +1,410 @@
+{
+ "scenario": "blackwell_basement_leak",
+ "label": "demo",
+ "recorded_from": "20261017-211539-e500b9",
+ "events": [
+  {
+   "step": 25,
+   "event": {
+    "type": "sensor_reading",
+    "sensor_id": "basement_mech_1",
+    "value": 0.85,
+    "source": "esp32"
+   }
+  },
+  {
+   "step": 125,
+   "event": {
+    "type": "agent_toggle",
+    "agent": "resident:maya",
+    "enabled": false
+   }
+  },
+  {
+   "step": 200,
+   "event": {
+    "type": "agent_toggle",
+    "agent": "resident:maya",
+    "enabled": true
+   }
+  },
+  {
+   "step": 250,
+   "event": {
+    "type": "manager_rule",
+    "text": "Fine, but nobody gets moved off campus.",
+    "code": "no_off_campus",
+    "actor": "manager"
+   }
+  },
+  {
+   "step": 300,
+   "event": {
+    "type": "plan_decision",
+    "plan_version": 3,
+    "decision": "approve",
+    "actor": "manager"
+   }
+  },
+  {
+   "step": 301,
+   "event": {
+    "type": "action",
+    "step_id": "call_plumber",
+    "status": "done",
+    "detail": "plumber dispatched, ETA ~20 min",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 301,
+   "event": {
+    "type": "action",
+    "step_id": "hold_power",
+    "status": "assigned",
+    "detail": "facilities dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 301,
+   "event": {
+    "type": "action",
+    "step_id": "away_notify",
+    "status": "done",
+    "detail": "28 messages sent",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 301,
+   "event": {
+    "type": "action",
+    "step_id": "notify_each",
+    "status": "done",
+    "detail": "250 messages sent",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 301,
+   "event": {
+    "type": "action",
+    "step_id": "ticket",
+    "status": "done",
+    "detail": "ticket opened",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "move_meds_L3",
+    "status": "assigned",
+    "detail": "ra_3 dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "move_meds_L4",
+    "status": "assigned",
+    "detail": "ra_4 dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L7",
+    "status": "assigned",
+    "detail": "housing dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L6",
+    "status": "assigned",
+    "detail": "housing dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L5",
+    "status": "assigned",
+    "detail": "housing dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L2",
+    "status": "assigned",
+    "detail": "housing dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 891,
+   "event": {
+    "type": "action",
+    "step_id": "escort_maya",
+    "status": "assigned",
+    "detail": "staff dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 891,
+   "event": {
+    "type": "action",
+    "step_id": "wake_floors",
+    "status": "done",
+    "detail": "222 messages sent",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 891,
+   "event": {
+    "type": "action",
+    "step_id": "power_first",
+    "status": "assigned",
+    "detail": "ra_3 dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 891,
+   "event": {
+    "type": "action",
+    "step_id": "escort_guide_dog",
+    "status": "assigned",
+    "detail": "ra_4 dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 891,
+   "event": {
+    "type": "action",
+    "step_id": "escort_stairs",
+    "status": "assigned",
+    "detail": "staff dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "escort_maya",
+    "status": "done",
+    "detail": "staff confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "shelter_ahmed",
+    "status": "assigned",
+    "detail": "staff dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "hold_power",
+    "status": "done",
+    "detail": "facilities confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "equipment_command",
+    "equipment_id": "msb_b",
+    "command": "off",
+    "actor": "haven:plan",
+    "step_id": "isolate_msb_b"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "isolate_msb_b",
+    "status": "done",
+    "detail": "breaker opened",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "equipment_command",
+    "equipment_id": "ats_eq",
+    "command": "off",
+    "actor": "haven:plan",
+    "step_id": "isolate_ats_eq"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "isolate_ats_eq",
+    "status": "done",
+    "detail": "breaker opened",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "move_meds_L3",
+    "status": "done",
+    "detail": "ra_3 confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "move_meds_L4",
+    "status": "done",
+    "detail": "ra_4 confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2091,
+   "event": {
+    "type": "action",
+    "step_id": "power_first",
+    "status": "done",
+    "detail": "ra_3 confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 2391,
+   "event": {
+    "type": "action",
+    "step_id": "shelter_ahmed",
+    "status": "done",
+    "detail": "staff confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6291,
+   "event": {
+    "type": "equipment_command",
+    "equipment_id": "main_valve",
+    "command": "close",
+    "actor": "haven:plan",
+    "step_id": "close_valve"
+   }
+  },
+  {
+   "step": 6291,
+   "event": {
+    "type": "action",
+    "step_id": "close_valve",
+    "status": "assigned",
+    "detail": "plumber on site, closing",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "escort_guide_dog",
+    "status": "done",
+    "detail": "ra_4 confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "escort_stairs",
+    "status": "done",
+    "detail": "staff confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L7",
+    "status": "done",
+    "detail": "housing confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L6",
+    "status": "done",
+    "detail": "housing confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L5",
+    "status": "done",
+    "detail": "housing confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L2",
+    "status": "done",
+    "detail": "housing confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 8391,
+   "event": {
+    "type": "action",
+    "step_id": "close_valve",
+    "status": "done",
+    "detail": "plumber confirmed",
+    "actor": "haven"
+   }
+  }
+ ]
+}
