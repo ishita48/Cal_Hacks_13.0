@@ -37,10 +37,10 @@ Export the spec first: `cd backend && PYTHONPATH=. uv run python tools/export_bu
 **Headless** (the Microsoft Store install exposes `blender-launcher.exe`; a portable install exposes `blender`):
 
 ```powershell
-blender-launcher.exe -b -P blender/build_blackwell.py -- --glb frontend/public/models/blackwell.glb --glb-interior frontend/public/models/blackwell_interior.glb --render blender/renders/hero.png --cutaway L4 --cutaway B1 --blend blender/blackwell.blend
+blender-launcher.exe -b -P blender/build_blackwell.py -- --glb frontend/public/models/blackwell.glb --glb-interior frontend/public/models/blackwell_interior.glb --glb-furniture frontend/public/models/blackwell_furniture.glb --render blender/renders/hero.png --cutaway L4 --cutaway L1 --cutaway B1 --blend blender/blackwell.blend
 ```
 
-Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interior <path>` interiors + plant ·
+Flags: `--glb <path>` exterior (Shell + Windows) as glTF binary · `--glb-interior <path>` floors, walls, glazing, courtyard + plant · `--glb-furniture <path>` the `furniture_<L>` meshes ·
 `--render <path>` hero camera (plus `street.png` beside it from `StreetCam`) · `--cutaway <LEVEL>` (repeatable) renders `renders/cutaway_<LEVEL>.png` with every
 level above hidden; below grade it uses the close `PlantCam` and a flat backdrop · `--blend <path>` save ·
 `--engine cycles [--samples N]` path-traced stills (GPU if configured, denoised; a few minutes per frame on CPU) ·
@@ -62,8 +62,10 @@ corner), `CutawayCam` (looking down into a floor), `PlantCam` (into the basement
 ## Using the GLBs in the frontend
 
 - `frontend/public/models/blackwell.glb` — exterior only: slabs, wall rings, windows, doors, roof, podium.
-- `frontend/public/models/blackwell_interior.glb` — floors, partitions, furniture, courtyard, and every
-  equipment item as `eq_<equipment_id>`.
+- `frontend/public/models/blackwell_interior.glb` — floor tiles, partitions, glazed partitions, courtyard, and
+  every equipment item as `eq_<equipment_id>` (~2 MB).
+- `frontend/public/models/blackwell_furniture.glb` — the `furniture_<L>` meshes only (beds, desks, pods,
+  kitchens, door leaves, lights; ~23 MB). Optional: the view works without it.
 
 The glTF exporter converts Blender's z-up to glTF's y-up, so a spec point `(x, y, z)` lands at `(x, z, -y)` in
 three.js. Object names and custom properties survive as `mesh.name` and `mesh.userData`:

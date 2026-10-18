@@ -20,7 +20,8 @@ export keeps base colours only.
 Run headless (Store install exposes ``blender-launcher.exe``; a zip install exposes ``blender``):
 
     blender -b -P blender/build_blackwell.py -- --glb frontend/public/models/blackwell.glb \
-        --glb-interior frontend/public/models/blackwell_interior.glb --render blender/renders/hero.png         --cutaway L4 --cutaway B1 --blend blender/blackwell.blend
+        --glb-interior frontend/public/models/blackwell_interior.glb \
+        --glb-furniture frontend/public/models/blackwell_furniture.glb --render blender/renders/hero.png         --cutaway L4 --cutaway B1 --blend blender/blackwell.blend
 
 Run inside a live Blender (e.g. through the Blender MCP):
 
@@ -2152,13 +2153,16 @@ def use_cycles(samples=128):
         print("cycles GPU not configured, using CPU:", exc)
 
 
-def export_glb(path, collections=("Shell", "Windows")):
+def export_glb(path, collections=("Shell", "Windows"), include=None):
+    """Export the named collections; `include(name) -> bool` narrows to a subset of objects."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.object.select_all(action="DESELECT")
     bevels = []
     for name in collections:
         for ob in bpy.data.collections[name].all_objects:
+            if include is not None and not include(ob.name):
+                continue
             ob.select_set(True)
             for mod in ob.modifiers:
                 if mod.type == "BEVEL" and mod.show_viewport:
@@ -2214,15 +2218,15 @@ def restore(state):
 
 def main(argv=None):
     argv = list(argv) if argv is not None else (sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
-    opts = {"glb": None, "glb-interior": None, "render": None, "site": True, "interior": True, "blend": None,
-            "cutaway": [], "engine": "eevee", "samples": 128}
+    opts = {"glb": None, "glb-interior": None, "glb-furniture": None, "render": None, "site": True, "interior": True,
+            "blend": None, "cutaway": [], "engine": "eevee", "samples": 128}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--cutaway":
             opts["cutaway"].append(argv[i + 1])
             i += 2
-        elif a in ("--glb", "--glb-interior", "--render", "--blend", "--engine"):
+        elif a in ("--glb", "--glb-interior", "--glb-furniture", "--render", "--blend", "--engine"):
             opts[a[2:]] = argv[i + 1]
             i += 2
         elif a == "--samples":
@@ -2251,7 +2255,10 @@ def main(argv=None):
     if opts["glb"]:
         export_glb(resolve(opts["glb"]))
     if opts["glb-interior"]:
-        export_glb(resolve(opts["glb-interior"]), collections=("Interior", "Plant"))
+        export_glb(resolve(opts["glb-interior"]), collections=("Interior", "Plant"),
+                   include=lambda n: not n.startswith("furniture_"))
+    if opts["glb-furniture"]:
+        export_glb(resolve(opts["glb-furniture"]), collections=("Interior",), include=lambda n: n.startswith("furniture_"))
     if opts["blend"]:
         p = resolve(opts["blend"])
         p.parent.mkdir(parents=True, exist_ok=True)
