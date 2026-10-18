@@ -38,9 +38,12 @@ async def perform(run_id: str, step: PlanStep, plan: Plan, default_detail: str) 
             text = _message_for(plan, "plumber") or step.title
             to = twilio.plumber_number()
             if twilio.configured() and to:
-                sid = await twilio.call(to, text)
+                base = twilio.public_url()
+                answer = f"{base}/api/twilio/answer/{step.id}?vendor=0" if base else None
+                sid = await twilio.call(to, text, answer_url=answer)
                 if sid:
-                    return f"plumber called via Twilio ({sid}), ETA ~20 min"
+                    return (f"plumber called via Twilio ({sid}); waiting for a yes or no, next vendor on no" if answer
+                            else f"plumber called via Twilio ({sid}), ETA ~20 min (set HAVEN_PUBLIC_URL to hear the answer)")
                 return "plumber call failed (Twilio error); next vendor on the list, ETA ~20 min"
             return "plumber dispatched, ETA ~20 min (call simulated: set TWILIO_* and HAVEN_PLUMBER_NUMBER to dial)"
         if step.kind == "ticket":

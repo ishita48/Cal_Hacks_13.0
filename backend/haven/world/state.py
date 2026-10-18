@@ -172,7 +172,7 @@ def initial_state(run_id: str, scenario: str, ctx: WorldContext, mode: str = "li
 
 def default_agents(ctx: WorldContext) -> list[str]:
     """Specialists plus one personal agent per resident with a specific need or a story."""
-    out = ["safety", "housing", "capacity", "checker"]
+    out = ["safety", "housing", "capacity", "redteam", "checker"]
     for r in ctx.roster.residents:
         if r.needs or r.story:
             out.append(f"resident:{r.id}")
@@ -372,7 +372,7 @@ def _apply_action(state: WorldState, ev: ActionEvent, ctx: WorldContext) -> None
 def _place(ctx: WorldContext, target: str | None, kind: str) -> str | None:
     """Where people end up after a step: a space id, or 'outside' for another building."""
     if target is None:
-        return "L1-lobby" if kind == "escort" else None
+        return ctx.assembly_point if kind == "escort" else None
     if target in ctx.areas:
         return target
     if target in ctx.level_order:
@@ -387,7 +387,7 @@ def agent_label(ctx: WorldContext, agent: str) -> str:
         r = ctx.roster.by_id().get(agent.split(":", 1)[1])
         return f"{r.name.split()[0]}'s agent" if r else agent
     return {"safety": "Safety agent", "housing": "Housing agent", "capacity": "Capacity agent",
-            "checker": "Checker agent"}.get(agent, agent)
+            "redteam": "Red team", "checker": "Checker agent"}.get(agent, agent)
 
 
 def _complete_command(state: WorldState, p: PendingCommand, ctx: WorldContext) -> None:
@@ -469,12 +469,12 @@ def actor_home(ctx: WorldContext, actor: str) -> tuple[str, str | None]:
         level = actor[3:]
         name = f" ({ra.name.split()[0]})" if ra else ""
         return f"RA floor {level}{name}", (ra.room if ra else None)
-    staff = {s.id: s for s in ctx.roster.staff}
     if actor == "facilities":
-        tech = staff.get("luis")
-        return (f"Facilities ({tech.name.split()[0]})" if tech else "Facilities"), (tech.location if tech else "L1-facilities")
+        tech = ctx.staff_by_role("facilities")
+        return (f"Facilities ({tech.name.split()[0]})" if tech else "Facilities"), (tech.location if tech else ctx.assembly_point)
     if actor == "staff":
-        return "Desk staff", "L1-lobby"
+        desk = ctx.staff_by_role("desk")
+        return "Desk staff", (desk.location if desk and desk.location != "off_site" else ctx.assembly_point)
     if actor == "plumber":
         return "Plumber", None
     return actor, None
@@ -489,7 +489,7 @@ def _step_sites(ctx: WorldContext, state: "WorldState", step: Any) -> tuple[str 
     eq_space = ctx.equipment[step.target].space if step.target in ctx.equipment else None
     if step.kind == "escort":
         end = _place(ctx, step.target, "escort")
-        return room, ("L1-lobby" if end in (None, "outside") else end)
+        return room, (ctx.assembly_point if end in (None, "outside") else end)
     if step.kind == "shelter":
         return room, room
     if step.kind == "move_item":
@@ -501,7 +501,7 @@ def _step_sites(ctx: WorldContext, state: "WorldState", step: Any) -> tuple[str 
         return src or room, eq_space or src or room
     if step.kind == "relocate":
         end = _place(ctx, step.target, "relocate")
-        return room, ("L1-lobby" if end in (None, "outside") else end)
+        return room, (ctx.assembly_point if end in (None, "outside") else end)
     if eq_space:
         return eq_space, eq_space
     if step.target in ctx.areas:
@@ -571,7 +571,7 @@ def derive_actors(state: "WorldState", ctx: WorldContext) -> dict[str, ActorStat
             if step.kind in ("escort", "relocate", "shelter") and step.people:
                 cur.at = _place(ctx, step.target, step.kind) if step.kind != "shelter" else site
                 if cur.at == "outside":
-                    cur.at = "L1-lobby"
+                    cur.at = ctx.assembly_point
             elif site:
                 cur.at = site
         else:

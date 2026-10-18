@@ -85,7 +85,7 @@ def test_the_negotiator_runs_both_rounds_with_a_model_and_replay_needs_none(monk
         from haven.agents.planner import _capacity, _housing, _resident, _safety
 
         if agent == "safety":
-            st = _safety(sit, steps)
+            st = _safety(ctx, sit, steps)
         elif agent == "housing":
             st = _housing(sit, steps)
         elif agent == "capacity":

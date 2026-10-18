@@ -143,6 +143,24 @@ export function Constraints({ world }: { world: WorldState }) {
           ))}
         </ul>
       </div>
+      {(plan.attacks ?? []).length > 0 && (
+        <div>
+          <div className="eyebrow mb-1.5">Red team · tried to break the plan</div>
+          <ul className="space-y-1">
+            {(plan.attacks ?? []).map((a) => (
+              <li key={a.code} className={`glass-card flex items-start gap-2 px-3 py-2 ${!a.ok ? 'tint-red' : a.fixed ? 'tint-amber' : ''}`}>
+                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${!a.ok ? 'bg-haven-danger haven-ring' : a.fixed ? 'bg-haven-amber' : 'bg-haven-safe'}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-t1">{a.label}</div>
+                  <div className="mt-0.5 text-[11px] text-t2">{a.detail}</div>
+                  {a.fixed && <div className="mt-0.5 text-[11px] text-haven-amber">Landed. Fix applied: {a.fix}.</div>}
+                </div>
+                <span className={`pill ${!a.ok ? 'pill-red' : a.fixed ? 'pill-amber' : 'pill-green'}`}>{!a.ok ? 'broke it' : a.fixed ? 'fixed' : 'held'}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div>
         <div className="eyebrow mb-1.5">Checker · verified against the facts, whoever spoke</div>
         <ul className="space-y-1">

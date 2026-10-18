@@ -163,6 +163,15 @@ export interface Check {
   severity: 'safety' | 'access' | 'rule' | 'capacity'
 }
 
+export interface Attack {
+  code: string
+  label: string
+  ok: boolean
+  detail: string
+  fixed: boolean
+  fix: string
+}
+
 export interface Round {
   n: number
   title: string
@@ -201,6 +210,54 @@ export interface Plan {
   checks: Check[]
   signature: number
   situation?: string
+  attacks?: Attack[]
+}
+
+// ---- the dependency graph (GET /api/graph) and incident memory (GET /api/memory/incidents) -----
+
+export interface GraphNode {
+  id: string
+  type: string
+  kind: string
+  name: string
+  level: string
+  x: number
+  y: number
+  z: number
+  flood_height: number | null
+}
+
+export interface GraphEdge {
+  src: string
+  dst: string
+  rel: 'powers' | 'backs_up' | 'controls' | 'feeds_water' | 'monitors' | string
+}
+
+export interface Graph {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  verticals: { id: string; kind: string; step_free: boolean; requires: string | null; spaces: Record<string, string> }[]
+}
+
+export interface IncidentOutcome {
+  run_id: string
+  recorded_at?: number
+  minutes_to_done: number
+  minutes_to_approve: number
+  left_behind: number
+  violations: number
+  attacks_landed: number
+  residents_affected: number
+  rules: string[]
+  agents_off: string[]
+  model_stances: number
+}
+
+export interface IncidentMemory {
+  incidents: IncidentOutcome[]
+  current: IncidentOutcome | null
+  comparison: { previous_run: string; minutes_faster: number; left_behind_delta: number; violations_delta: number } | null
+  count: number
 }
 
 export interface ActionState {

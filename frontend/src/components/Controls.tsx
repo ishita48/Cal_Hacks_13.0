@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react'
 import { api, type RunSummary } from '../lib/api'
 import { STATUS_COLOR } from '../lib/labels'
 import { SensorChart } from './SensorChart'
+import { useBuilding } from '../state/building'
 import type { WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
 }
 
-const SENSOR = 'basement_mech_1'
 
 /** Inputs to the world: the sensor, and the two levers a human (or later an agent) can pull. */
 export function Controls({ world }: Props) {
@@ -25,17 +25,28 @@ export function Controls({ world }: Props) {
     api.runs().then(setRuns).catch(() => {})
   }, [world.run_id])
 
+  const equipment = useBuilding((b) => b.equipment)
+  const SENSOR = useBuilding((b) => b.sensorId) ?? Object.keys(world.sensors)[0] ?? ''
   const sensor = world.sensors[SENSOR]
-  const leak = world.leaks['water_riser']
-  const valve = world.equipment['main_valve']?.status ?? 'online'
-  const msbB = world.equipment['msb_b']?.status ?? 'online'
+  // The leak (any active one), the valve on its supply (first valve in the spec), and the switchgear the
+  // forecast says floods first: the two levers a human can pull, named from the data.
+  const leak = Object.values(world.leaks)[0]
+  const valveId = Object.values(equipment).find((e) => e.kind === 'valve')?.id
+  const valve = valveId ? (world.equipment[valveId]?.status ?? 'online') : 'online'
+  const riskId = world.forecast.events.find((e) => e.kind === 'flooded')?.id ?? world.flooded[0] ?? Object.values(equipment).find((e) => e.kind === 'switchboard' || e.kind === 'transfer_switch')?.id
+  const risk = riskId ? equipment[riskId] : undefined
+  const msbB = riskId ? (world.equipment[riskId]?.status ?? 'online') : 'online'
+  const darkSoon = world.forecast.impact.dark_levels
+  const riskHint = darkSoon.length ? `${darkSoon.join(', ')} go dark${world.forecast.impact.lifts_down.length ? ', lifts stop' : ''}` : 'nothing at risk yet'
+  const valveSecs = valveId ? Number(equipment[valveId].props?.seconds_to_close ?? 0) : 0
+  const valveHint = valveSecs ? `plumber · closes in ~${Math.max(1, Math.round(valveSecs / 60))} min` : 'plumber'
   const replay = world.mode === 'replay'
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between">
         <span className="eyebrow" data-buds="panel:controls">Sensor</span>
-        <span className="mono text-[10px] text-t3">{SENSOR}</span>
+        <span className="mono text-[10px] text-t3">{SENSOR || 'no sensor'}</span>
       </div>
 
       <div className={`glass-card p-3.5 ${sensor?.wet ? 'tint-cyan' : ''}`}>
@@ -70,19 +81,19 @@ export function Controls({ world }: Props) {
       <span className="eyebrow mt-1">Levers</span>
       <div className="grid grid-cols-2 gap-2">
         <Lever
-          label="Close main valve"
-          hint="plumber · ~7 min"
+          label={valveId ? `Close ${equipment[valveId].name.toLowerCase()}` : 'Close valve'}
+          hint={valveHint}
           status={valve}
           disabled={replay || valve !== 'online'}
-          onClick={act(() => api.command('main_valve', 'close', 'plumber'))}
+          onClick={act(() => (valveId ? api.command(valveId, 'close', 'plumber') : Promise.resolve()))}
         />
         <Lever
-          label={msbB === 'isolated' ? 'Restore MSB-B' : 'Cut MSB-B'}
-          hint="floors 3–4 dark, lifts on generator"
+          label={msbB === 'isolated' ? `Restore ${risk?.name ?? 'the switchgear'}` : `Cut ${risk?.name ?? 'the switchgear'}`}
+          hint={riskHint}
           status={msbB}
           danger={msbB !== 'isolated'}
           disabled={replay || msbB === 'flooded'}
-          onClick={act(() => api.command('msb_b', msbB === 'isolated' ? 'on' : 'off', 'manager'))}
+          onClick={act(() => (riskId ? api.command(riskId, msbB === 'isolated' ? 'on' : 'off', 'manager') : Promise.resolve()))}
         />
       </div>
 

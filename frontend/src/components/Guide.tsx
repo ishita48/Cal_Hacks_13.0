@@ -48,12 +48,12 @@ export function Guide({ world, onClose }: { world: WorldState; onClose: () => vo
     { n: 7, title: 'HAVEN acts', what: 'Plumber called, breakers opened at the safe moment, insulin moved, every person messaged in their language. Responders acknowledge from their phones.', where: 'Messages tab; Responder’s phone', done: acted },
   ]
   const panels: [string, string][] = [
-    ['Stage', 'The building: 2D floor plan or the 3D twin built in Blender. Water, dark floors, routes, people and responders are drawn from the live world state.'],
+    ['Stage', 'The building: 2D floor plan or the 3D twin built in Blender. Water, dark floors, routes, people and responders are drawn from the live world state. Click anything for its record; "Connections" draws what powers and feeds what.'],
     ['Lifecycle rail', 'Where the system is: Detect, Trace, Negotiate, Govern, Approve, Act, Done. Lit by facts, not timers.'],
     ['Numbers', 'Affected, left behind, violations, water depth, minutes to water contact.'],
     ['Left column', 'Inputs to the world: the sensor, the valve and breaker levers, a spoken rule, and the ledger of who is affected.'],
     ['Plan', 'The negotiated plan: steps with times, the checker’s verdicts, Approve.'],
-    ['Agents', 'Every agent and its stance; the transcript of the negotiation; the constraints ledger.'],
+    ['Agents', 'Every agent and its stance; the transcript of the negotiation; the constraints ledger with the red team\u2019s attacks.'],
     ['Messages', 'The outbox: one message per person, in their language, timed to a step.'],
     ['Cascade', 'What fails next and when, then what has happened.'],
     ['Buds', 'The companion: hold Ctrl+Alt and ask anything; it points at the answer and only acts after you approve.'],

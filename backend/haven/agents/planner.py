@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from ..people.roster import Resident
 from ..world.physics import Hydraulics, step
-from .models import Check, Constraint, Message, Plan, PlanStep, Round, Stance
+from .models import Attack, Check, Constraint, Message, Plan, PlanStep, Round, Stance
 from .rules import describe as describe_rule
 
 if TYPE_CHECKING:
@@ -32,15 +32,25 @@ ESCORT_LIFT_S = 240.0            # one wheelchair user down by lift, staff stays
 RELOCATION_S = 15 * 60.0         # moving a floor's residents to the overflow spaces
 FORECAST_DT = 2.0
 
-# Overflow outside the building. The hotel is unlimited but off campus.
-EXTERNAL_DESTS = [
-    ("unit2_lounges", "Unit 2 lounges (next building, on campus)", 60, False),
-    ("hotel_rooms", "Hotel rooms (booked, off campus)", 10**6, True),
-]
 OVERFLOW_KINDS = ("lounge", "study", "kitchen", "amenity")
 CRITICAL = ("stranded", "medication_at_risk", "device_power_lost")
 
-STORY_ORDER = ["maya", "dana", "jordan", "sam", "lucia", "theo", "nora", "ahmed", "grace"]
+
+def _order(ctx: WorldContext) -> dict[str, int]:
+    """Named people first, in roster order: the demo's story residents, derived from the roster."""
+    return {rid: i for i, rid in enumerate(ctx.story_order)}
+
+
+def _fridge_in_dark(ctx: WorldContext, r: Resident, dark: set[str]) -> bool:
+    eq = ctx.equipment.get(r.medication_location or "")
+    return eq is not None and eq.level in dark
+
+
+def _powered_fridge(ctx: WorldContext, dark: set[str], from_level: str) -> str | None:
+    """The nearest fridge on a floor that keeps power (closest level first, lower floors on a tie)."""
+    here = ctx.level_order[from_level]
+    best = [(abs(ctx.level_order[lv] - here), ctx.level_order[lv], fid) for lv, fid in ctx.fridges.items() if lv not in dark]
+    return min(best)[2] if best else None
 
 
 @dataclass
@@ -60,6 +70,8 @@ class Situation:
     enabled: set[str]
     dests: list[tuple[str, str, int, bool]] = field(default_factory=list)   # id, name, capacity, off_campus
     moved: dict[str, str] = field(default_factory=dict)  # already relocated by an executed step
+    at_risk: list[str] = field(default_factory=list)      # equipment the forecast says floods, in order
+    lift_feeder: str | None = None                        # the at-risk item whose loss stops the lifts
     move_deadline_s: float | None = None                 # "no moves after HH:MM", as seconds from now
     now_tod: float = 0.0
 
@@ -79,9 +91,20 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
     r1_steps = _naive_proposal(ctx, sit)
     r1_stances = _evaluate(ctx, sit, r1_steps, state.spoken.get(f"{key}#1", {}))
     r2_steps = _revised_proposal(ctx, sit, r1_stances)
+    # The red team attacks the revised plan; a landed attack changes it (a tighter cut-off re-plans).
+    from .redteam import attack as red_team
+
+    verdict = red_team(ctx, sit, r2_steps)
+    if verdict.eta_cut_s is not None and sit.eta_cut_s is not None and verdict.eta_cut_s < sit.eta_cut_s:
+        sit.eta_cut_s = verdict.eta_cut_s
+        verdict = red_team(ctx, sit, _revised_proposal(ctx, sit, r1_stances))
+        verdict.attacks[0].fixed = True
+    r2_steps = verdict.steps
+    attacks: list[Attack] = [Attack(**a.model_dump()) for a in verdict.attacks]
     r2_stances = _evaluate(ctx, sit, r2_steps, state.spoken.get(f"{key}#2", {}))
     left_behind = _uncovered(ctx, sit, r2_steps)
     checks = _check(ctx, sit, r2_steps, left_behind)
+    r2_stances.append(_redteam_stance(attacks))
     if "checker" in sit.enabled:
         r2_stances.append(_checker_stance(ctx, checks))
     feasible2 = not any(s.stance == "veto" for s in r2_stances)
@@ -96,6 +119,8 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
     metrics = _metrics(sit, r2_steps, left_behind)
     metrics["violations"] = sum(1 for c in checks if not c.ok)
     metrics["checks"] = len(checks)
+    metrics["attacks"] = len(attacks)
+    metrics["attacks_landed"] = sum(1 for a in attacks if a.fixed or not a.ok)
     headline = _headline(ctx, sit, r2_steps, left_behind)
     messages = _messages(ctx, sit, r2_steps)
 
@@ -106,7 +131,7 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
     return Plan(version=version, computed_step=state.step, status=status, rounds=rounds, steps=r2_steps,
                 stances=r2_stances, left_behind=left_behind, metrics=metrics, enabled_agents=enabled,
                 rules=list(state.rules), headline=headline, signature=signature, messages=messages,
-                checks=checks, situation=key)
+                checks=checks, situation=key, attacks=attacks)
 
 
 def situation_key(sit: Situation) -> str:
@@ -156,6 +181,14 @@ def _situation(ctx: WorldContext, state: WorldState) -> Situation:
         movers = [r for r in movers if r.presence != "asleep"]
     enabled = {a for a, on in state.agents.items() if on}
     dests = _destinations(ctx, dark_set, rules)
+    # The switchgear to isolate: electrical equipment the forecast floods before the valve can stop the
+    # water (after that the valve, not a breaker, is the answer), in the order it floods.
+    horizon = valve_closed_at if valve_closed_at is not None else float("inf")
+    at_risk = [e.id for e in f.events if e.kind == "flooded" and e.id in ctx.equipment
+               and e.eta_s <= horizon + 1e-6 and ctx.is_electrical(e.id)]
+    at_risk = list(dict.fromkeys(at_risk + [x for x in state.flooded if x in ctx.equipment and ctx.is_electrical(x)]))
+    feeders = [e for e in at_risk if ctx.powers_lifts(e)]
+    lift_feeder = min(feeders, key=ctx.hops_to_lift) if feeders else (at_risk[-1] if at_risk else None)
     now_tod = (_start_tod() + state.step * _dt()) % 86400
     move_deadline = None
     for code in rules:
@@ -169,7 +202,7 @@ def _situation(ctx: WorldContext, state: WorldState) -> Situation:
                      dark_now=list(state.impact.dark_levels), dark_planned=dark_planned,
                      valve_closed_at_s=valve_closed_at, stage2_averted=stage2, movers=movers, away=away,
                      flagged=flagged, rules=rules, enabled=enabled, dests=dests, moved=moved,
-                     move_deadline_s=move_deadline, now_tod=now_tod)
+                     move_deadline_s=move_deadline, now_tod=now_tod, at_risk=at_risk, lift_feeder=lift_feeder)
 
 
 def _start_tod() -> float:
@@ -196,7 +229,7 @@ def _planned_impacts(ctx: WorldContext, dark: set[str], lifts_up: bool, eta_cut:
         if "step_free_route" in r.needs and lifts_lost and ctx.level_order[r.level] > ctx.level_order["L1"] \
                 and not moved_ok(r.id):
             imp.append("stranded")
-        if r.medication_location and r.medication_location in {f"fridge_{lv}" for lv in dark}:
+        if r.medication_location and _fridge_in_dark(ctx, r, dark):
             imp.append("medication_at_risk")
         if "medical_device_power" in r.needs and r.level in dark and r.id not in moved:
             imp.append("device_power_lost")
@@ -250,10 +283,10 @@ def _destinations(ctx: WorldContext, dark: set[str], rules: set[str]) -> list[tu
         name = (f"the {ctx.spec.level(lv).name} lounges" if lv != "L1"
                 else "ground-floor community spaces (" + ", ".join(s.name for s in group[:3]) + ")")
         out.append((lv, name, cap, False))
-    for d in EXTERNAL_DESTS:
-        if d[3] and "no_off_campus" in rules:
+    for d in ctx.spec.external_destinations:
+        if d.off_campus and "no_off_campus" in rules:
             continue
-        out.append(d)
+        out.append((d.id, d.name, d.capacity, d.off_campus))
     return out
 
 
@@ -275,20 +308,28 @@ def _naive_proposal(ctx: WorldContext, sit: Situation) -> list[PlanStep]:
         title="Call the emergency plumber (next on the list if no answer)",
         reason="The main shut-off is a gate valve that needs a valve key; facilities cannot close it.")
     if sit.lifts_up and sit.eta_cut_s is not None:
-        add(id="isolate_msb_b", kind="isolate", actor="facilities", at_s=0.0, target="msb_b",
-            title="Cut MSB section B now", reason="Energised switchgear must not be under water.",
-            command={"equipment_id": "msb_b", "command": "off"}, satisfies=["safety"])
-        add(id="isolate_ats_eq", kind="isolate", actor="facilities", at_s=0.0, target="ats_eq",
-            title="Cut ATS-EQ now (lifts stop)", reason="Same room, same water: the generator feed is live too.",
-            command={"equipment_id": "ats_eq", "command": "off"}, satisfies=["safety"])
+        _isolate_steps(ctx, sit, add, 0.0, now=True)
     everyone = [r.id for r in sit.movers] + [r.id for r in sit.away]
-    add(id="relocate_all", kind="relocate", actor="housing", at_s=0.0, target="unit2_lounges",
-        title=f"Move all {len(everyone)} residents of floors {_floors(sit.dark_planned)} to Unit 2 lounges",
+    first_dest = next((d for d in ctx.spec.external_destinations if not d.off_campus), None)
+    add(id="relocate_all", kind="relocate", actor="housing", at_s=0.0, target=first_dest.id if first_dest else None,
+        title=f"Move all {len(everyone)} residents of floors {_floors(sit.dark_planned)} to {first_dest.name if first_dest else 'another building'}",
         reason="Those floors lose lighting, outlets and heating for the night.", people=everyone,
         count=len(everyone), satisfies=["housing"])
     add(id="notify_all", kind="notify", actor="haven", at_s=0.0, count=len(everyone),
         title="Send one building-wide alert", reason="Everyone needs to know.", people=everyone)
     return steps
+
+
+def _isolate_steps(ctx: WorldContext, sit: Situation, add, at_s: float, now: bool) -> None:
+    """One isolate step per piece of equipment the forecast says floods, named from the spec."""
+    for eid in sit.at_risk:
+        eq = ctx.equipment[eid]
+        lifts = eid == sit.lift_feeder
+        add(id=f"isolate_{eid}", kind="isolate", actor="facilities", at_s=at_s, target=eid,
+            title=f"Cut {eq.name}" + (" (lifts stop)" if lifts else "") + (" now" if now else ""),
+            reason="Energised switchgear must not be under water." if not lifts else
+                   "Same room, same water: the feed that runs the lifts is live too.",
+            command={"equipment_id": eid, "command": "off"}, satisfies=["safety"])
 
 
 def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance]) -> list[PlanStep]:
@@ -311,12 +352,13 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
     add(id="call_plumber", kind="call", actor="haven", at_s=0.0,
         title="Call the emergency plumber (next on the list if no answer)",
         reason=f"Gate valve needs a valve key; plumber ETA ~{PLUMBER_ETA_S / 60:.0f} min.")
-    if sit.valve_closed_at_s is not None:
+    valve = _supply_valve(ctx)
+    if sit.valve_closed_at_s is not None and valve is not None:
         add(id="close_valve", kind="valve", actor="plumber", at_s=max(0.0, sit.valve_closed_at_s - 420.0),
-            deadline_s=sit.valve_closed_at_s, target="main_valve", title="Close the main shut-off valve",
+            deadline_s=sit.valve_closed_at_s, target=valve.id, title=f"Close the {valve.name.lower()}",
             reason=("Stops the riser; closes before the original switchgear floods" if sit.stage2_averted
                     else "Stops the riser, but too late to save the main switchboard: prepare for the whole building"),
-            command={"equipment_id": "main_valve", "command": "close"}, satisfies=["safety"])
+            command={"equipment_id": valve.id, "command": "close"}, satisfies=["safety"])
 
     # -- power: hold for escorts, then cut before the water arrives --
     escorts: list[str] = []
@@ -341,26 +383,18 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
                     satisfies=[f"resident:{r.id}"], count=1)
                 continue
             add(id=f"escort_{r.id}", kind="escort", actor="staff", at_s=t, deadline_s=done, people=[r.id],
-                target="L1-lobby", title=f"Two staff bring {r.name} down by lift first, and stay with her"
-                if r.id == "maya" else f"Two staff bring {r.name} down by lift, and stay with them",
+                target=ctx.assembly_point, title=f"Two staff bring {r.name} down by lift first, and stay with them",
                 reason="Wheelchair user: the lift is the only step-free way out, and it dies when the power is cut.",
                 satisfies=[f"resident:{r.id}"], count=1)
             escorts.append(r.id)
             t = done
         cut_at = min(sit.eta_cut_s, max([0.0] + [st.deadline_s or 0.0 for st in steps if st.kind == "escort"]))
         if escorts:
-            add(id="hold_power", kind="hold", actor="facilities", at_s=0.0, deadline_s=cut_at, target="ats_eq",
+            add(id="hold_power", kind="hold", actor="facilities", at_s=0.0, deadline_s=cut_at, target=sit.lift_feeder,
                 title=f"Keep the lifts energised for {cut_at / 60:.0f} more minutes",
                 reason=f"Escorts finish by then; water reaches the switchgear ~{sit.eta_lifts_s / 60:.0f} min from now, "
                        f"{SAFETY_MARGIN_S / 60:.0f} min safety margin kept.", satisfies=["safety"] + [f"resident:{e}" for e in escorts])
-        add(id="isolate_msb_b", kind="isolate", actor="facilities", at_s=cut_at, target="msb_b",
-            title="Cut MSB section B" + ("" if escorts else " now"),
-            reason="Energised switchgear must not be under water.",
-            command={"equipment_id": "msb_b", "command": "off"}, satisfies=["safety"])
-        add(id="isolate_ats_eq", kind="isolate", actor="facilities", at_s=cut_at, target="ats_eq",
-            title="Cut ATS-EQ (lifts stop)" + ("" if escorts else " now"),
-            reason="Same room, same water: the generator feed is live too.",
-            command={"equipment_id": "ats_eq", "command": "off"}, satisfies=["safety"])
+        _isolate_steps(ctx, sit, add, cut_at, now=not escorts)
     else:
         cut_at = 0.0
         for r in _wheelchair_users(ctx, sit):
@@ -371,12 +405,13 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
                     satisfies=[f"resident:{r.id}"], count=1)
 
     # -- things that must move before the floors go dark --
-    meds = _story_first([r for r in ctx.roster.residents if r.medication_location and spoke(r.id)
-                         and r.medication_location in {f"fridge_{lv}" for lv in sit.dark_planned}])
-    for lv in sorted({r.medication_location[-2:] for r in meds}):
-        group = [r for r in meds if r.medication_location == f"fridge_{lv}"]
+    dark_set = set(sit.dark_planned)
+    meds = _story_first(ctx, [r for r in ctx.roster.residents if r.medication_location and spoke(r.id)
+                              and _fridge_in_dark(ctx, r, dark_set)])
+    for lv in sorted({ctx.equipment[r.medication_location].level for r in meds}, key=lambda x: ctx.level_order[x]):
+        group = [r for r in meds if ctx.equipment[r.medication_location].level == lv]
         add(id=f"move_meds_{lv}", kind="move_item", actor=f"ra_{lv[1:]}", at_s=60.0, deadline_s=cut_at or None,
-            people=[r.id for r in group], target="fridge_L2" if "L2" not in sit.dark_planned else "fridge_L5",
+            people=[r.id for r in group], target=_powered_fridge(ctx, dark_set, lv),
             title=f"Move the medication of {_names(group)} from the {lv} fridge to a powered fridge",
             reason="Insulin must stay refrigerated; that fridge dies with the floor.",
             satisfies=[f"resident:{r.id}" for r in group], count=len(group))
@@ -393,7 +428,7 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
                      if any(spoke(r.id) for r in deaf) else ""),
             reason=f"{sum(1 for r in movers if r.presence == 'asleep')} of them are asleep.",
             satisfies=[f"resident:{r.id}" for r in deaf if spoke(r.id)])
-        devices = _story_first([r for r in movers if "medical_device_power" in r.needs and spoke(r.id)])
+        devices = _story_first(ctx, [r for r in movers if "medical_device_power" in r.needs and spoke(r.id)])
         if devices:
             add(id="power_first", kind="relocate", actor="ra_" + ",ra_".join(sorted({r.level[1:] for r in devices})),
                 at_s=STAFF_RESPONSE_S, deadline_s=cut_at or None, people=[r.id for r in devices],
@@ -401,14 +436,14 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
                 title=f"{_names(devices)} first: a powered room with an outlet for their device",
                 reason="Powered medical device (CPAP); the outlet dies with the floor.",
                 satisfies=[f"resident:{r.id}" for r in devices])
-        dogs = _story_first([r for r in movers if "guide_dog" in r.needs and spoke(r.id)])
+        dogs = _story_first(ctx, [r for r in movers if "guide_dog" in r.needs and spoke(r.id)])
         if dogs:
             add(id="escort_guide_dog", kind="escort", actor="ra_" + ",ra_".join(sorted({r.level[1:] for r in dogs})),
                 at_s=STAFF_RESPONSE_S, deadline_s=cut_at + RELOCATION_S, people=[r.id for r in dogs], count=len(dogs),
                 title=f"RA escorts {_names(dogs)} and the guide dog down the stairs",
                 reason="Blind; moves independently but a dark, crowded stair is where people get hurt.",
                 satisfies=[f"resident:{r.id}" for r in dogs])
-        slow = _story_first([r for r in movers if "stairs_slow" in r.needs and spoke(r.id)])
+        slow = _story_first(ctx, [r for r in movers if "stairs_slow" in r.needs and spoke(r.id)])
         if slow:
             add(id="escort_stairs", kind="escort", actor="staff", at_s=STAFF_RESPONSE_S,
                 deadline_s=cut_at + RELOCATION_S, people=[r.id for r in slow], count=len(slow),
@@ -417,7 +452,7 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
         # Allocation by capacity, floor by floor, keeping floors together where possible.
         # People a specific step already places (lift escorts end in the lobby, shelter stays put).
         assigned: set[str] = {p for st in steps if st.kind in ("relocate", "shelter") for p in st.people}
-        assigned |= {p for st in steps if st.kind == "escort" and st.target == "L1-lobby" for p in st.people}
+        assigned |= {p for st in steps if st.kind == "escort" and st.target == ctx.assembly_point for p in st.people}
         queue = [r for r in movers if r.id not in assigned]
         groups: list[tuple[str, list[Resident]]] = []
         shelter_reason = None
@@ -463,7 +498,7 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
               + (f" ({', '.join(langs)})" if langs else ""),
         reason="Each message says what that person should do, not what the building is doing.")
     add(id="ticket", kind="ticket", actor="haven", at_s=0.0, title="Open the facilities ticket and brief the dean",
-        reason="Riser break, basement flooding, switchgear B and ATS-EQ at risk; two lines for the dean.")
+        reason=f"Riser break, basement flooding, {_cut_names(ctx, sit)} at risk; two lines for the dean.")
     return steps
 
 
@@ -489,13 +524,13 @@ def _evaluate(ctx: WorldContext, sit: Situation, steps: list[PlanStep], spoken: 
 
     out: list[Stance | None] = []
     if "safety" in sit.enabled:
-        out.append(said("safety", "Safety agent", None, _safety(sit, steps)))
+        out.append(said("safety", "Safety agent", None, _safety(ctx, sit, steps)))
     if "housing" in sit.enabled:
         out.append(said("housing", "Housing agent", None, _housing(sit, steps)))
     if "capacity" in sit.enabled:
         out.append(said("capacity", "Capacity agent", None, _capacity(sit, steps)))
     by_id = ctx.roster.by_id()
-    order = {rid: i for i, rid in enumerate(STORY_ORDER)}
+    order = _order(ctx)
     agents = sorted((a for a in sit.enabled if a.startswith("resident:")),
                     key=lambda a: (order.get(a.split(":", 1)[1], 99), a))
     for a in agents:
@@ -518,11 +553,12 @@ def _steps_for(steps: list[PlanStep], rid: str, kinds: tuple[str, ...] = ()) -> 
 
 
 def _cut_time(steps: list[PlanStep]) -> float | None:
-    st = _find(steps, "isolate", target="ats_eq")
-    return st.at_s if st else None
+    """When the switchgear is cut: the first isolate step (they are issued together)."""
+    times = [st.at_s for st in steps if st.kind == "isolate"]
+    return min(times) if times else None
 
 
-def _safety(sit: Situation, steps: list[PlanStep]) -> Stance:
+def _safety(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> Stance:
     rule = Constraint(type="hard", rule="Switchgear is de-energised before water reaches it; nobody enters the "
                                         "basement; no lift use after isolation", code="deenergise_before_contact",
                       source="safety")
@@ -538,7 +574,7 @@ def _safety(sit: Situation, steps: list[PlanStep]) -> Stance:
                                  f"margin before water contact (+{sit.eta_lifts_s / 60:.0f} min).")
         if cut == 0.0:
             return Stance(agent="safety", label="Safety agent", stance="propose", constraint=rule, step_ids=isolates,
-                          reason="Cut MSB section B and ATS-EQ now: the water is "
+                          reason=f"Cut {_cut_names(ctx, sit)} now: the water is "
                                  f"{sit.eta_lifts_s / 60:.0f} min from the switchgear and every minute energised is risk.")
         return Stance(agent="safety", label="Safety agent", stance="support", constraint=rule, step_ids=isolates,
                       reason=f"Isolation at +{cut / 60:.0f} min keeps the {SAFETY_MARGIN_S / 60:.0f} min margin. Acceptable.")
@@ -616,7 +652,7 @@ def _resident(ctx: WorldContext, sit: Situation, r: Resident, steps: list[PlanSt
             return S("support", f"Lifts are gone; staff at {first}'s door with an evacuation chair is the right fallback.", c, [shelter.id])
         return S("veto", f"Lifts are down and the plan has nobody at {first}'s door.", c)
 
-    if r.medication_location and r.medication_location in {f"fridge_{lv}" for lv in sit.dark_planned}:
+    if r.medication_location and _fridge_in_dark(ctx, r, set(sit.dark_planned)):
         c = Constraint(type="hard", rule=f"{first}'s insulin stays refrigerated", code=f"meds:{r.id}", source=agent)
         mv = _steps_for(steps, r.id, ("move_item",))
         if mv:
@@ -700,7 +736,7 @@ def _check(ctx: WorldContext, sit: Situation, steps: list[PlanStep], left_behind
                          ok=ok, severity="safety",
                          detail=(f"cut at +{cut / 60:.0f} min, water at +{sit.eta_lifts_s / 60:.0f} min, "
                                  f"{SAFETY_MARGIN_S / 60:.0f} min margin" if cut is not None else "no isolation step")))
-        late = [st for st in steps if st.kind == "escort" and st.target == "L1-lobby" and st.deadline_s is not None
+        late = [st for st in steps if st.kind == "escort" and st.target == ctx.assembly_point and st.deadline_s is not None
                 and cut is not None and st.deadline_s > cut + 1e-6]
         out.append(Check(code="no_lift_after_cut", label="No lift use after isolation", ok=not late, severity="safety",
                          detail=", ".join(st.title for st in late) if late else "every lift escort finishes before the cut"))
@@ -734,7 +770,8 @@ def _check(ctx: WorldContext, sit: Situation, steps: list[PlanStep], left_behind
     # The manager's rules.
     for code in sorted(sit.rules):
         if code == "no_off_campus":
-            bad = [st for st in steps if st.kind == "relocate" and st.target == "hotel_rooms"]
+            off_ids = {d.id for d in ctx.spec.external_destinations if d.off_campus}
+            bad = [st for st in steps if st.kind == "relocate" and st.target in off_ids]
             out.append(Check(code=code, label="Nobody moved off campus", ok=not bad, severity="rule",
                              detail=f"{sum(st.count for st in bad)} off campus" if bad else "all placements on campus"))
         elif code == "no_wake":
@@ -753,12 +790,28 @@ def _check(ctx: WorldContext, sit: Situation, steps: list[PlanStep], left_behind
             out.append(Check(code=code, label=f"No relocation after {code.split(':', 1)[1]}", ok=not bad, severity="rule",
                              detail="moves finish in time or people shelter" if not bad else f"{len(bad)} moves run past the deadline"))
         elif code == "lifts_first":
-            esc = [st for st in steps if st.kind == "escort" and st.target == "L1-lobby"]
+            esc = [st for st in steps if st.kind == "escort" and st.target == ctx.assembly_point]
             others = [st for st in steps if st.kind == "relocate" and st.id.startswith("relocate_")]
             ok = not esc or not others or min(st.at_s for st in esc) <= min(st.at_s for st in others) + 1e-6
             out.append(Check(code=code, label="Wheelchair users come down first", ok=ok, severity="rule",
                              detail="lift escorts start before any relocation" if ok else "a relocation starts before the escorts"))
     return out
+
+
+def _redteam_stance(attacks: list[Attack]) -> Stance:
+    """The attacker's own word on the final plan. Rule-based, cannot be switched off."""
+    rule = Constraint(type="hard", rule="The plan survives a faster leak, double-booked staff, stair crush, a late valve, and forgets nobody",
+                      code="redteam", source="redteam")
+    broken = [a for a in attacks if not a.ok]
+    fixed = [a for a in attacks if a.fixed]
+    if broken:
+        return Stance(agent="redteam", label="Red team", stance="veto", constraint=rule,
+                      reason=f"{len(broken)} attack{'s' if len(broken) != 1 else ''} landed and nothing fixes it: " + "; ".join(a.label for a in broken[:2]))
+    if fixed:
+        return Stance(agent="redteam", label="Red team", stance="critique", constraint=rule,
+                      reason=f"{len(fixed)} attack{'s' if len(fixed) != 1 else ''} landed; the plan was changed: " + "; ".join(f"{a.label} → {a.fix}" for a in fixed[:2]))
+    return Stance(agent="redteam", label="Red team", stance="support", constraint=rule,
+                  reason=f"{len(attacks)} attacks tried, none landed: " + "; ".join(a.label.lower() for a in attacks[:3]) + ".")
 
 
 def _checker_stance(ctx: WorldContext, checks: list[Check]) -> Stance:
@@ -772,8 +825,25 @@ def _checker_stance(ctx: WorldContext, checks: list[Check]) -> Stance:
                   reason=f"{len(checks)} checks pass: safety margin, access, medication, capacity, rules.")
 
 
-def _story_first(rs: list[Resident]) -> list[Resident]:
-    order = {rid: i for i, rid in enumerate(STORY_ORDER)}
+def _cut_names(ctx: WorldContext, sit: Situation) -> str:
+    """The at-risk switchgear, named from the spec ('MSB section B and ATS-EQ')."""
+    names = [ctx.equipment[e].name for e in sit.at_risk]
+    return " and ".join(names) if names else "the switchgear"
+
+
+def _short_name(ctx: WorldContext) -> str:
+    """The building as people say it: the last two words of its name ('Blackwell Hall')."""
+    words = ctx.spec.name.split()
+    return " ".join(words[-2:]) if len(words) > 2 else ctx.spec.name
+
+
+def _supply_valve(ctx: WorldContext):
+    """The first shut-off valve in the spec (the one upstream of the riser)."""
+    return next((e for e in ctx.spec.equipment if e.kind == "valve"), None)
+
+
+def _story_first(ctx: WorldContext, rs: list[Resident]) -> list[Resident]:
+    order = _order(ctx)
     return sorted(rs, key=lambda r: (order.get(r.id, 99), r.id))
 
 
@@ -805,12 +875,12 @@ def _uncovered(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list
             ok &= any(st.id == "power_first" for st in _steps_for(steps, rid, ("relocate",)))
         if not ok:
             out.append(rid)
-    order = {rid: i for i, rid in enumerate(STORY_ORDER)}
+    order = _order(ctx)
     return sorted(out, key=lambda x: (order.get(x, 99), x))
 
 
 def _wheelchair_users(ctx: WorldContext, sit: Situation) -> list[Resident]:
-    order = {rid: i for i, rid in enumerate(STORY_ORDER)}
+    order = _order(ctx)
     users = [r for r in ctx.roster.residents if "step_free_route" in r.needs and r.presence != "away"
              and r.id not in sit.moved]
     return sorted(users, key=lambda r: (0 if r.level in set(sit.dark_planned) else 1, order.get(r.id, 99), r.id))
@@ -819,7 +889,7 @@ def _wheelchair_users(ctx: WorldContext, sit: Situation) -> list[Resident]:
 def _metrics(sit: Situation, steps: list[PlanStep], left_behind: list[str]) -> dict[str, float | int]:
     cut = _cut_time(steps)
     reloc = sum(st.count for st in steps if st.kind == "relocate")
-    off = sum(st.count for st in steps if st.kind == "relocate" and st.target == "hotel_rooms")
+    off = sum(st.count for st in steps if st.kind == "relocate" and st.target in {d[0] for d in sit.dests if d[3]})
     return {
         "residents_affected": len(sit.movers) + len(sit.away),
         "relocated": reloc,
@@ -843,10 +913,10 @@ def _headline(ctx: WorldContext, sit: Situation, steps: list[PlanStep], left_beh
         return (f"Cut the power now and move floors {_floors(sit.dark_planned)} by the stairs. "
                 f"{names} {'is' if len(left_behind) == 1 else 'are'} left behind.")
     if cut is not None and cut > 0:
-        return (f"Hold the lifts {cut / 60:.0f} min for escorts, then cut section B and ATS-EQ; "
+        return (f"Hold the lifts {cut / 60:.0f} min for escorts, then cut {_cut_names(ctx, sit)}; "
                 f"floors {_floors(sit.dark_planned)} relocate on campus. Nobody left behind.")
     if cut is not None:
-        return (f"Cut section B and ATS-EQ now, stop the water; floors {_floors(sit.dark_planned)} relocate "
+        return (f"Cut {_cut_names(ctx, sit)} now, stop the water; floors {_floors(sit.dark_planned)} relocate "
                 "on campus. Nobody left behind.")
     return "Stop the water, keep everyone out of the basement, relocate the dark floors. Nobody left behind."
 
@@ -857,18 +927,18 @@ def _hm(tod: float) -> str:
 
 
 _GENERIC = {
-    "en": "Blackwell Hall: floors {floors} lose power tonight. Take what you need for the night and go to {dest}. "
+    "en": "{building}: floors {floors} lose power tonight. Take what you need for the night and go to {dest}. "
           "Your RA will knock. Reply HELP if you need assistance.",
-    "es": "Blackwell Hall: los pisos {floors} se quedan sin electricidad esta noche. Lleve lo necesario para la noche "
+    "es": "{building}: los pisos {floors} se quedan sin electricidad esta noche. Lleve lo necesario para la noche "
           "y vaya a {dest}. Su RA llamará a su puerta. Responda AYUDA si necesita asistencia.",
-    "zh": "Blackwell Hall：{floors} 楼今晚停电。请带上过夜所需物品前往{dest}。楼层助理会敲门通知。如需帮助请回复 HELP。",
+    "zh": "{building}：{floors} 楼今晚停电。请带上过夜所需物品前往{dest}。楼层助理会敲门通知。如需帮助请回复 HELP。",
 }
 _SHELTER_GENERIC = {
-    "en": "Blackwell Hall: floors {floors} lose power tonight. Stay in your room; emergency lighting stays on and your "
+    "en": "{building}: floors {floors} lose power tonight. Stay in your room; emergency lighting stays on and your "
           "RA will check on you. Reply HELP if you need anything.",
-    "es": "Blackwell Hall: los pisos {floors} se quedan sin electricidad esta noche. Quédese en su habitación; la "
+    "es": "{building}: los pisos {floors} se quedan sin electricidad esta noche. Quédese en su habitación; la "
           "iluminación de emergencia sigue funcionando y su RA pasará a verle. Responda AYUDA si necesita algo.",
-    "zh": "Blackwell Hall：{floors} 楼今晚停电。请留在房间内，应急照明保持开启，楼层助理会来查看。如需帮助请回复 HELP。",
+    "zh": "{building}：{floors} 楼今晚停电。请留在房间内，应急照明保持开启，楼层助理会来查看。如需帮助请回复 HELP。",
 }
 
 
@@ -881,7 +951,8 @@ def _messages(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
     cut_hm = _hm(sit.now_tod + cut) if cut is not None else None
     personal: set[str] = set()
 
-    story = set(STORY_ORDER)
+    story = set(ctx.story_order)
+    short = _short_name(ctx)
     grouped: dict[tuple[str, str], list[str]] = {}       # (step id, lang) -> resident ids
     group_text: dict[tuple[str, str], tuple[str, PlanStep, str, str]] = {}
 
@@ -904,18 +975,18 @@ def _messages(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
         ))
 
     for st in steps:
-        if st.kind == "escort" and st.target == "L1-lobby" and len(st.people) == 1:
+        if st.kind == "escort" and st.target == ctx.assembly_point and len(st.people) == 1:
             r = by_id[st.people[0]]
             personal.add(r.id)
             mins = max(1, round(st.at_s / 60))
-            msg(r.id, f"{r.name.split()[0]}, this is HAVEN at Blackwell Hall. Water in the basement means the lifts "
+            msg(r.id, f"{r.name.split()[0]}, this is HAVEN at {short}. Water in the basement means the lifts "
                       f"will stop at {cut_hm}. Two staff are coming to your door in about {mins} minutes to bring you "
                       f"down by lift. Please wait there and do not use the stairs. They will stay with you.",
                 st, "critical", channel="call" if r.contact.channel == "call" else None)
         elif st.kind == "shelter" and len(st.people) == 1:
             r = by_id[st.people[0]]
             personal.add(r.id)
-            msg(r.id, f"{r.name.split()[0]}, this is HAVEN at Blackwell Hall. Floors {floors} lose power tonight"
+            msg(r.id, f"{r.name.split()[0]}, this is HAVEN at {short}. Floors {floors} lose power tonight"
                       f"{'; your floor keeps power' if r.level not in set(sit.dark_planned) else ''}. "
                       f"Please stay where you are; a staff member will come to your door to check on you.",
                 st, "critical")
@@ -950,7 +1021,7 @@ def _messages(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
             for rid in st.people:
                 r = by_id[rid]
                 personal.add(rid)
-                msg(rid, f"{r.name.split()[0]}, this is HAVEN. A basement leak at Blackwell Hall means floors "
+                msg(rid, f"{r.name.split()[0]}, this is HAVEN. A basement leak at {short} means floors "
                          f"{floors} have no power tonight. Nothing is needed from you now. When you are back"
                          f"{' at ' + r.away_until if r.away_until else ''}, come to the front desk and we will "
                          f"show you where to sleep. Your room and belongings are secure.", st, channel="sms")
@@ -978,14 +1049,14 @@ def _messages(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
             for lang in langs:
                 tmpl = _GENERIC.get(lang, _GENERIC["en"])
                 n = sum(1 for p in rest if by_id[p].contact.lang == lang)
-                msg(f"group_{st.target}_{lang}", tmpl.format(floors=_floors(sit.dark_planned, lang), dest=dest), st, "normal", lang=lang,
+                msg(f"group_{st.target}_{lang}", tmpl.format(building=short, floors=_floors(sit.dark_planned, lang), dest=dest), st, "normal", lang=lang,
                     name=f"{n} residents → {dest}" + (f" ({lang})" if lang != "en" else ""), channel="app", count=n)
     if shelter_all:
         rest = [p for p in shelter_all.people if p not in personal]
         for lang in sorted({by_id[p].contact.lang for p in rest}):
             n = sum(1 for p in rest if by_id[p].contact.lang == lang)
             tmpl = _SHELTER_GENERIC.get(lang, _SHELTER_GENERIC["en"])
-            msg(f"group_shelter_{lang}", tmpl.format(floors=_floors(sit.dark_planned, lang)), shelter_all, "normal", lang=lang,
+            msg(f"group_shelter_{lang}", tmpl.format(building=short, floors=_floors(sit.dark_planned, lang)), shelter_all, "normal", lang=lang,
                 name=f"{n} residents stay in place" + (f" ({lang})" if lang != "en" else ""), channel="app", count=n)
 
     # -- staff --
@@ -995,31 +1066,46 @@ def _messages(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
             continue
         on_floor = [by_id[p] for st in steps for p in st.people if by_id[p].level == lv and by_id[p].id in personal]
         names = "; ".join(f"{r.name} ({ctx.spec.space(r.room).name}: {', '.join(NEED_WORDS.get(n, n) for n in r.needs) or 'see plan'})"
-                          for r in _story_first(on_floor))
+                          for r in _story_first(ctx, on_floor))
         count = sum(1 for r in ctx.roster.residents if r.level == lv and r.presence != "away")
         msg(ra.id, f"{ra.name.split()[0]}: floor {lv[1:]} goes dark at {cut_hm or 'the cut-off'}. Knock on every door "
                    f"({count} people, {sum(1 for r in ctx.roster.residents if r.level == lv and r.presence == 'asleep')} "
                    f"asleep). First, these: {names or 'nobody flagged'}.", _find(steps, "notify", id="wake_floors"),
             "critical", role="staff", channel="call", name=ra.name)
-    msg("luis", f"Luis: close nothing yet. At {cut_hm or 'the cut-off'} open MSB section B and ATS-EQ (basement electrical room, "
-                f"do not enter standing water). Plumber is called for the main valve.", _find(steps, "isolate", target="ats_eq"),
-        "critical", role="staff", channel="call")
-    msg("devon", "Devon: lobby is the assembly point. Maya Reyes (power wheelchair) arrives by lift with two staff; keep "
-                 "the accessible bathroom free and a chair-height table clear.", _find(steps, "escort", people=["maya"]),
-        "normal", role="staff", channel="app")
-    msg("plumber", f"Emergency plumber call: Blackwell Hall, 2401 Durant Ave. 4-inch domestic riser burst in the basement "
-                   f"mechanical room, ~150 L/s, main gate valve needs a valve key. Water reaches the switchgear in "
-                   f"~{sit.eta_lifts_s / 60:.0f} min. Come to the Dana St service door; facilities will meet you."
-        if sit.eta_lifts_s else "Emergency plumber call: Blackwell Hall basement riser burst; main gate valve needs a key.",
+    cut_names = " and ".join(ctx.equipment[e].name for e in sit.at_risk) or "the switchgear"
+    cut_room = ctx.spec.space(ctx.equipment[sit.at_risk[0]].space).name.lower() if sit.at_risk else "the electrical room"
+    valve = _supply_valve(ctx)
+    tech = ctx.staff_by_role("facilities")
+    if tech:
+        msg(tech.id, f"{tech.name.split()[0]}: close nothing yet. At {cut_hm or 'the cut-off'} open {cut_names} ({cut_room}, "
+                     f"do not enter standing water). Plumber is called for the {valve.name.lower() if valve else 'main valve'}.",
+            next((st for st in steps if st.kind == "isolate"), None), "critical", role="staff", channel="call")
+    desk = ctx.staff_by_role("desk")
+    first_escort = next((st for st in steps if st.kind == "escort" and st.target == ctx.assembly_point and st.people), None)
+    if desk and first_escort:
+        who = by_id[first_escort.people[0]]
+        need = NEED_WORDS.get(who.needs[0], who.needs[0]) if who.needs else "escorted"
+        msg(desk.id, f"{desk.name.split()[0]}: {ctx.spec.space(ctx.assembly_point).name.lower()} is the assembly point. "
+                     f"{who.name} ({need}) arrives by lift with two staff; keep the accessible bathroom free and a chair-height table clear.",
+            first_escort, "normal", role="staff", channel="app")
+    msg("plumber", f"Emergency plumber call: {ctx.spec.name}, {ctx.spec.address}. Riser burst in the basement "
+                   f"mechanical room, main shut-off valve needs a valve key. Water reaches the switchgear in "
+                   f"~{sit.eta_lifts_s / 60:.0f} min. Come to the service door; facilities will meet you."
+        if sit.eta_lifts_s else f"Emergency plumber call: {ctx.spec.name} basement riser burst; the main shut-off valve needs a key.",
         _find(steps, "call", id="call_plumber"), "critical", role="external", channel="call", name="Emergency plumber")
     reloc = sum(st.count for st in steps if st.kind == "relocate")
-    msg("dean", f"Blackwell Hall: basement water leak, floors {floors} without power tonight; {reloc} students relocated "
-                f"on campus, {len(sit.away)} away and informed. Every resident with an access or medical need has a "
-                f"named staff member; no one is off campus.", _find(steps, "ticket", id="ticket"), "normal",
-        role="staff", channel="sms")
-    msg("rosa", f"Rosa: plan is ready for your approval. Lifts held until {cut_hm or '—'} for escorts, then section B and "
-                f"ATS-EQ cut; {reloc} residents relocate on campus; plumber ETA ~{PLUMBER_ETA_S / 60:.0f} min. "
-                f"Say a rule or tap approve.", None, "critical", role="staff", channel="call")
+    reloc = sum(st.count for st in steps if st.kind == "relocate")
+    dean = ctx.staff_by_role("dean")
+    if dean:
+        msg(dean.id, f"{ctx.spec.name}: basement water leak, floors {floors} without power tonight; {reloc} students relocated "
+                     f"on campus, {len(sit.away)} away and informed. Every resident with an access or medical need has a "
+                     f"named staff member; no one is off campus.", _find(steps, "ticket", id="ticket"), "normal",
+            role="staff", channel="sms")
+    manager = next((st for st in ctx.roster.staff if st.on_call), None)
+    if manager:
+        msg(manager.id, f"{manager.name.split()[0]}: plan is ready for your approval. Lifts held until {cut_hm or '—'} for escorts, "
+                        f"then {cut_names} cut; {reloc} residents relocate on campus; plumber ETA ~{PLUMBER_ETA_S / 60:.0f} min. "
+                        f"Say a rule or tap approve.", None, "critical", role="staff", channel="call")
     return out
 
 
@@ -1038,7 +1124,8 @@ def _round_summary(ctx: WorldContext, n: int, stances: list[Stance]) -> str:
             parts.append("vetoed by " + ", ".join(vetoes))
         if crit:
             parts.append(f"{len(crit)} objection{'s' if len(crit) != 1 else ''}")
-        return "Cut now, move everyone to Unit 2 — " + ("; ".join(parts) if parts else "no objections")
+        first = next((d.name.split(" (")[0] for d in ctx.spec.external_destinations if not d.off_campus), "another building")
+        return f"Cut now, move everyone to {first} — " + ("; ".join(parts) if parts else "no objections")
     if vetoes:
         return "Still vetoed by " + ", ".join(vetoes)
     sup = sum(1 for s in stances if s.stance == "support")

@@ -1,4 +1,6 @@
-import { formatCountdown } from '../lib/api'
+import { useEffect, useState } from 'react'
+import { api, formatCountdown } from '../lib/api'
+import type { IncidentMemory } from '../state/types'
 import type { Clock, WorldState } from '../state/types'
 
 /**
@@ -10,7 +12,8 @@ import type { Clock, WorldState } from '../state/types'
 type Stage = { id: string; label: string; on: boolean; now: boolean; note: string }
 
 export function stages(world: WorldState, clock: Clock): Stage[] {
-  const wet = !!world.sensors['basement_mech_1']?.wet || world.wet_spaces.length > 0
+  const wetSensor = Object.entries(world.sensors).find(([, s]) => s.wet)
+  const wet = !!wetSensor || world.wet_spaces.length > 0
   const traced = world.forecast.events.length > 0
   const plan = world.plan
   const negotiated = plan.status !== 'none' && plan.rounds.length > 0
@@ -25,7 +28,7 @@ export function stages(world: WorldState, clock: Clock): Stage[] {
   const vetoes = plan.rounds[0]?.stances.filter((s) => s.stance === 'veto').length ?? 0
   const doneSteps = actions.filter((a) => a.status === 'done').length
   const out: Stage[] = [
-    { id: 'detect', label: 'Detect', on: wet, now: false, note: wet ? `${world.sensors['basement_mech_1']?.source ?? 'sensor'} reading · water in the basement` : 'a $4 probe in the basement' },
+    { id: 'detect', label: 'Detect', on: wet, now: false, note: wet ? `${wetSensor?.[1].source ?? 'sensor'} reading from ${wetSensor?.[0] ?? 'the probe'}` : 'a $4 probe in the basement' },
     { id: 'trace', label: 'Trace', on: traced, now: false, note: traced ? `${world.forecast.events.length} consequences forecast${contactIn != null ? ` · contact in ${formatCountdown(contactIn)}` : ''}` : 'one dependency graph' },
     { id: 'negotiate', label: 'Negotiate', on: negotiated, now: false, note: negotiated ? `${plan.enabled_agents.length} agents · ${vetoes} veto${vetoes === 1 ? '' : 'es'} in round 1${modelStances ? ` · ${modelStances} reasoned by Claude` : ''}` : 'specialists + one agent per resident' },
     { id: 'govern', label: 'Govern', on: governed, now: false, note: governed ? world.rules.map((r) => r.rule).join(' · ') : 'say a rule; every agent re-plans' },
@@ -41,7 +44,19 @@ export function stages(world: WorldState, clock: Clock): Stage[] {
 
 export function Lifecycle({ world, clock }: { world: WorldState; clock: Clock }) {
   const list = stages(world, clock)
+  const done = world.approved_plan?.status === 'done'
+  const [memory, setMemory] = useState<IncidentMemory | null>(null)
+  useEffect(() => {
+    api.incidents().then(setMemory).catch(() => {})
+  }, [done, world.run_id])
   const current = list.find((s) => s.now) ?? list[list.length - 1]
+  if (done && memory?.current) {
+    const c = memory.comparison
+    current.note = `${memory.current.minutes_to_done} min from drip to done · ${memory.current.left_behind} left behind` +
+      (c ? ` · ${c.minutes_faster >= 0 ? `${c.minutes_faster} min faster` : `${-c.minutes_faster} min slower`} than incident #${memory.count - 1}` : ' · first incident remembered')
+  } else if (!done && memory && memory.incidents.length > 0 && world.plan.status === 'none') {
+    current.note = `${memory.incidents.length} earlier incident${memory.incidents.length === 1 ? '' : 's'} remembered · last took ${memory.incidents[0].minutes_to_done} min`
+  }
   return (
     <div className="glass-card flex items-stretch overflow-hidden" data-buds="panel:lifecycle" title="Where the system is in the story, read from the world state">
       <ol className="flex items-center gap-0.5 px-2 py-1.5">

@@ -18,7 +18,7 @@ one basement electrical room, so water reaching that room takes out every step-f
 
 from dataclasses import dataclass, field
 
-from .model import (
+from .model import (ExternalDestination, 
     BuildingSpec,
     Dependency,
     Equipment,
@@ -257,6 +257,10 @@ def build_blackwell_hall() -> BuildingSpec:
         verticals=verticals,
         equipment=b.equipment,
         dependencies=b.deps,
+        external_destinations=[
+            ExternalDestination(id="unit2_lounges", name="Unit 2 lounges (next building, on campus)", capacity=60),
+            ExternalDestination(id="hotel_rooms", name="Hotel rooms (arranged by housing, off campus)", capacity=10**6, off_campus=True),
+        ],
         notes=[
             "Massing from aerial imagery and public project data; interior and services are a "
             "plausible reconstruction, not facilities drawings.",

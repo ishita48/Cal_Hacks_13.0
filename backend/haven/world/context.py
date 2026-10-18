@@ -41,9 +41,56 @@ class WorldContext:
     sumps: dict[str, tuple[str, float]]       # space id -> (sump pump equipment id, L/s)
     lifts: tuple[str, ...]
     level_order: dict[str, int]
+    story_order: tuple[str, ...]              # residents with a story, in roster order (the demo's named people)
+    assembly_point: str                       # the space tagged main_entrance (where lift escorts end)
+    sensor_ids: tuple[str, ...]               # water sensors, in spec order
+    fridges: dict[str, str]                   # level -> fridge equipment id
+    egress_stairs: dict[str, tuple[str, ...]] # level -> stair space ids on that level that reach the ground floor
+    ground: str                               # the ground floor level id
 
     def space_level(self, space_id: str) -> str:
         return self.spec.space(space_id).level
+
+    def staff_by_role(self, keyword: str):
+        """The first staff member whose role mentions `keyword` (facilities, desk, dean, coordinator)."""
+        k = keyword.lower()
+        return next((s for s in self.roster.staff if k in s.role.lower()), None)
+
+    def is_electrical(self, eid: str) -> bool:
+        """Part of the power graph (a source, switchgear, transfer switch, panel, controller), not a pump or heater."""
+        from ..building.graph import POWER_RELS
+
+        return any(d.get("rel") in POWER_RELS for _, _, d in self.graph.out_edges(eid, data=True))
+
+    def hops_to_lift(self, eid: str) -> int:
+        """Power hops from this equipment to the nearest lift (large when it feeds none)."""
+        from collections import deque
+
+        from ..building.graph import POWER_RELS
+
+        seen, q = {eid}, deque([(eid, 0)])
+        while q:
+            n, d = q.popleft()
+            if n in self.lifts:
+                return d
+            for _, dst, data in self.graph.out_edges(n, data=True):
+                if data.get("rel") in POWER_RELS and dst not in seen:
+                    seen.add(dst)
+                    q.append((dst, d + 1))
+        return 10**6
+
+    def powers_lifts(self, eid: str) -> bool:
+        """Does de-energising this equipment take a lift down? (A walk over the power edges.)"""
+        from ..building.graph import POWER_RELS
+
+        seen, stack = {eid}, [eid]
+        while stack:
+            n = stack.pop()
+            for _, dst, d in self.graph.out_edges(n, data=True):
+                if d.get("rel") in POWER_RELS and dst not in seen:
+                    seen.add(dst)
+                    stack.append(dst)
+        return any(l in seen for l in self.lifts)
 
 
 @lru_cache(maxsize=1)
@@ -100,10 +147,29 @@ def make_context(spec: BuildingSpec, graph: nx.MultiDiGraph, roster: Roster) -> 
 
     lifts = tuple(sorted(e.id for e in spec.equipment if e.kind == "lift"))
     level_order = {lv.id: lv.index for lv in spec.levels}
+    ground = min((lv for lv in spec.levels if lv.index >= 1), key=lambda lv: lv.index).id
+    assembly = next((s.id for s in spec.spaces if "main_entrance" in s.tags), None) \
+        or next((s.id for s in spec.spaces if s.kind == "lobby"), spec.spaces[0].id)
+    fridges = {}
+    for e in spec.equipment:
+        if e.kind == "fridge":
+            fridges.setdefault(e.level, e.id)
+    egress: dict[str, list[str]] = {}
+    for v in spec.verticals:
+        if v.kind != "stair" or ground not in v.spaces:
+            continue
+        for lv, sid in v.spaces.items():
+            egress.setdefault(lv, []).append(sid)
     return WorldContext(
         spec=spec, graph=graph, roster=roster, areas=areas, door_links=tuple(links),
         equipment=equipment, equipment_in_space={k: tuple(v) for k, v in in_space.items()},
         sensor_targets={k: tuple(v) for k, v in sensor_targets.items()},
         upstream_valves=upstream_valves, floor_drains=floor_drains, sumps=sumps, lifts=lifts,
         level_order=level_order,
+        story_order=tuple(r.id for r in roster.residents if r.story and r.role == "resident"),
+        assembly_point=assembly,
+        sensor_ids=tuple(e.id for e in spec.equipment if e.kind == "sensor"),
+        fridges=fridges,
+        egress_stairs={lv: tuple(v) for lv, v in egress.items()},
+        ground=ground,
     )

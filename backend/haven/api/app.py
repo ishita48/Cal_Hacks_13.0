@@ -4,7 +4,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -65,6 +65,21 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     @app.get("/api/people")
     async def get_people():
         return engine.roster.model_dump(mode="json")
+
+    @app.get("/api/graph")
+    async def get_graph():
+        """The dependency graph the cascade walks: equipment nodes with positions, typed edges.
+        Static for the life of the process (the live status of every node is in the state frame)."""
+        G = engine.graph
+        nodes = [{"id": n, "type": d.get("node_type"), "kind": d.get("kind"), "name": d.get("name", n),
+                  "level": d.get("level"), "x": d.get("x"), "y": d.get("y"), "z": d.get("z"),
+                  "flood_height": d.get("flood_height")}
+                 for n, d in G.nodes(data=True) if d.get("node_type") == "equipment"]
+        edges = [{"src": u, "dst": v, "rel": d["rel"]}
+                 for u, v, d in G.edges(data=True) if d.get("rel") in ("powers", "backs_up", "controls", "feeds_water", "monitors")]
+        lifts = [{"id": v.id, "kind": v.kind, "step_free": v.step_free, "requires": v.equipment, "spaces": v.spaces}
+                 for v in engine.building.verticals]
+        return {"nodes": nodes, "edges": edges, "verticals": lifts}
 
     @app.post("/api/sensor")
     async def post_sensor(reading: SensorReading, x_haven_token: str | None = Header(default=None)):
@@ -169,7 +184,10 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         if body.kind == "rule":
             return await _submit(ManagerRule(text=str(p.get("text", "")), code=str(p.get("code", "")), actor=body.actor))
         if body.kind == "leak":
-            return await _submit(SensorReading(sensor_id="basement_mech_1", value=float(p.get("value", 0.9)), source="manual"))
+            sensor = p.get("sensor_id") or (engine.ctx.sensor_ids[0] if engine.ctx.sensor_ids else None)
+            if not sensor:
+                raise HTTPException(409, "no water sensor in the spec")
+            return await _submit(SensorReading(sensor_id=str(sensor), value=float(p.get("value", 0.9)), source="manual"))
         if body.kind == "clock":
             await engine.set_clock(p.get("playing"), p.get("speed"))
             return engine.clock()
@@ -226,6 +244,39 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         detail = body.detail or f"{body.actor} confirmed from the phone"
         return await _submit(ActionEvent(step_id=step.id, status=body.status, actor=body.actor, detail=detail))
 
+    @app.post("/api/twilio/answer/{step_id}")
+    async def twilio_answer(step_id: str, request: Request):
+        """Twilio posts what the plumber said. Yes: the step is confirmed. No or silence: the next vendor
+        on the list is dialled with the same script; when the list runs out the step is marked failed."""
+        from ..integrations import twilio as tw
+
+        form = await request.form()
+        verdict = tw.parse_answer(str(form.get("SpeechResult", "")), str(form.get("Digits", "")))
+        vendor = int(request.query_params.get("vendor", "0") or 0)
+        timed_out = request.query_params.get("timeout") == "1"
+        plan = engine.state.approved_plan
+        step = next((s for s in plan.steps if s.id == step_id), None) if plan else None
+        who = form.get("To") or "the plumber"
+        if step is None:
+            return Response(content="<Response><Say>Thank you.</Say></Response>", media_type="application/xml")
+        if verdict == "yes":
+            await engine.submit(ActionEvent(step_id=step.id, status="done", actor="plumber",
+                                            detail=f"{who} said yes on the phone (vendor {vendor + 1})"))
+            return Response(content="<Response><Say>Thank you. Facilities will meet you at the Dana Street service door.</Say></Response>",
+                            media_type="application/xml")
+        nxt = vendor + 1
+        vendors = tw.vendors()
+        if nxt < len(vendors):
+            base = tw.public_url()
+            text = next((m.text for m in plan.messages if m.to == "plumber"), step.title)
+            sid = await tw.call(vendors[nxt], text, answer_url=f"{base}/api/twilio/answer/{step.id}?vendor={nxt}" if base else None)
+            await engine.submit(ActionEvent(step_id=step.id, status="assigned", actor="haven",
+                                            detail=f"vendor {vendor + 1} said {'nothing' if timed_out or verdict == 'unknown' else 'no'}; dialling vendor {nxt + 1}" + (f" ({sid})" if sid else "")))
+            return Response(content="<Response><Say>Understood. Thank you.</Say></Response>", media_type="application/xml")
+        await engine.submit(ActionEvent(step_id=step.id, status="failed", actor="haven",
+                                        detail=f"no plumber on the list could take the job ({len(vendors)} called)"))
+        return Response(content="<Response><Say>Understood. Thank you.</Say></Response>", media_type="application/xml")
+
     @app.get("/api/fetch")
     async def fetch_status():
         """The residents' agents on Fetch.ai: addresses, and what each said about the current plan."""
@@ -241,6 +292,19 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
             g["times"] += 1
         active = {r.code for r in engine.state.rules}
         return [dict(g, active=g["code"] in active) for g in grouped.values()]
+
+    @app.get("/api/memory/incidents")
+    async def memory_incidents():
+        """How earlier incidents ended, and how this one compares: the measured improvement across runs."""
+        past = [o for o in store.outcomes() if o["run_id"] != engine.state.run_id]
+        now = engine.outcome()
+        comparison = None
+        if now is not None and past:
+            prev = past[0]
+            comparison = {"previous_run": prev["run_id"], "minutes_faster": round(prev["minutes_to_done"] - now["minutes_to_done"], 1),
+                          "left_behind_delta": now["left_behind"] - prev["left_behind"],
+                          "violations_delta": now["violations"] - prev["violations"]}
+        return {"incidents": past, "current": now, "comparison": comparison, "count": len(past) + (1 if now else 0)}
 
     class MemoryApply(BaseModel):
         code: str

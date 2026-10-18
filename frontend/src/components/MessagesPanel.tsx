@@ -48,7 +48,7 @@ export function MessagesPanel({ world, clock }: Props) {
 
   const all = plan.messages ?? []
   const rows = useMemo(() => {
-    const rank = (m: Message) => (m.to === 'maya' ? 0 : m.priority === 'critical' ? 1 : m.role === 'staff' ? 2 : m.role === 'external' ? 3 : 4)
+    const rank = (m: Message) => (m.priority === 'critical' && m.role === 'resident' ? 0 : m.priority === 'critical' ? 1 : m.role === 'staff' ? 2 : m.role === 'external' ? 3 : 4)
     return [...all].sort((a, b) => rank(a) - rank(b)).map((m) => ({ m, d: delivery(m) }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [all, world.actions, world.approved_plan, clock.step])
@@ -119,7 +119,7 @@ export function MessagesPanel({ world, clock }: Props) {
                 {list.map(({ m, d }, i) => {
                   const ch = CHANNEL[m.channel] ?? { glyph: m.channel, name: m.channel }
                   const open = openId === m.id
-                  const maya = m.to === 'maya'
+                  const maya = i === 0 && m.priority === 'critical' && m.role === 'resident'
                   return (
                     <li key={m.id} className={`glass-card enter px-3 py-2.5 ${maya ? 'tint-blue' : ''} ${d.state === 'failed' ? 'tint-red' : ''}`} style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }} data-buds={`message:${m.to}`}>
                       <button className="flex w-full items-center gap-2 text-left" onClick={() => setOpenId(open ? null : m.id)} title={ch.name}>

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..agents import negotiation
 from ..agents.models import PlanStep, Stance
-from ..agents.planner import STORY_ORDER, Situation, _resident, _situation
+from ..agents.planner import Situation, _resident, _situation
 
 if TYPE_CHECKING:
     from ..world.context import WorldContext
@@ -153,7 +153,7 @@ class Society:
         if self.table is not None or not configured():
             return
         seed = os.environ.get("HAVEN_FETCH_SEED", "haven-blackwell-hall")
-        hosted = [r.id for r in self.ctx.roster.residents if r.id in STORY_ORDER]
+        hosted = list(self.ctx.story_order)
         if os.environ.get("HAVEN_FETCH_ALL") == "1":
             hosted = [r.id for r in self.ctx.roster.residents if r.needs or r.story]
         # uvicorn builds its loop through a loop factory, so the SDK's default loop lookup would pick a

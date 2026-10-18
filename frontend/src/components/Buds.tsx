@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { Companion, type Mood } from '../lib/companion'
 import { isSpeaking, speak, stopSpeaking } from '../lib/speak'
 import { listen, soundsLikeEcho, voiceSupported, type Listener } from '../lib/voice'
+import { useBuilding } from '../state/building'
 import { useWorld } from '../state/world'
 import type { BudsAction, BudsFocus, BudsReply } from '../state/types'
 
@@ -32,7 +33,7 @@ interface Msg {
   acted?: Record<number, 'done' | 'dismissed' | 'error'>
 }
 
-const SUGGESTIONS = ['Where is Maya?', 'Why are the lifts held?', 'What happens if nobody acts?', 'Who is left behind?']
+const SUGGESTIONS = (first: string | undefined) => [first ? `Where is ${first}?` : 'Who is affected?', 'Why are the lifts held?', 'What happens if nobody acts?', 'Who is left behind?']
 
 let nextId = 1
 
@@ -70,6 +71,9 @@ export function Buds() {
   const supported = voiceSupported()
   const world = useWorld((s) => s.world)
   const replay = world?.mode === 'replay'
+  const storyIds = useBuilding((b) => b.storyIds)
+  const residents = useBuilding((b) => b.residents)
+  const firstName = storyIds[0] ? residents[storyIds[0]]?.name.split(' ')[0] : undefined
   const openRef = useRef(open)
   openRef.current = open
   const activeRef = useRef(active)
@@ -448,7 +452,7 @@ export function Buds() {
 
           {msgs.length < 2 && (
             <div className="flex flex-wrap gap-1 px-3 pb-2">
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTIONS(firstName).map((s) => (
                 <button key={s} className="pill transition-colors hover:text-t1" onClick={() => void ask(s)}>
                   {s}
                 </button>

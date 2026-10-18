@@ -150,6 +150,15 @@ class Dependency(BaseModel):
     rel: Literal["powers", "backs_up", "feeds_water", "controls", "monitors"]
 
 
+class ExternalDestination(BaseModel):
+    """Somewhere outside this building people can be sent for the night."""
+
+    id: str
+    name: str
+    capacity: int
+    off_campus: bool = False
+
+
 class BuildingSpec(BaseModel):
     id: str
     name: str
@@ -161,6 +170,7 @@ class BuildingSpec(BaseModel):
     verticals: list[VerticalLink]
     equipment: list[Equipment]
     dependencies: list[Dependency]
+    external_destinations: list[ExternalDestination] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
     _idx: dict[str, Space] | None = PrivateAttr(default=None)

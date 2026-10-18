@@ -72,6 +72,17 @@ class Check(BaseModel):
     severity: Literal["safety", "access", "rule", "capacity"] = "safety"
 
 
+class Attack(BaseModel):
+    """One red-team attack on the final plan: did it survive, and what fix the planner applied."""
+
+    code: str
+    label: str
+    ok: bool
+    detail: str = ""
+    fixed: bool = False
+    fix: str = ""
+
+
 class Round(BaseModel):
     n: int
     title: str
@@ -97,3 +108,4 @@ class Plan(BaseModel):
     checks: list[Check] = Field(default_factory=list)       # the adversarial checker's verdicts
     signature: int = 0              # content hash; version bumps only when this changes
     situation: str = ""             # key of the facts the stances were given for (planner.situation_key)
+    attacks: list[Attack] = Field(default_factory=list)     # the red team's attacks on the final plan

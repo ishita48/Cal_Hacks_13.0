@@ -9,7 +9,6 @@ interface Props {
 }
 
 const SPECIALISTS = ['safety', 'housing', 'capacity']
-const STORY = ['maya', 'dana', 'jordan', 'sam', 'lucia', 'theo', 'nora', 'ahmed', 'grace']
 const SPECIALIST_LABEL: Record<string, string> = {
   safety: 'Safety agent',
   housing: 'Housing agent',
@@ -86,7 +85,9 @@ export function AgentConsole({ world }: Props) {
   const thinking = new Set((negotiation?.pending ?? []).map((p) => p.split('#')[0]))
 
   const agentIds = Object.keys(world.agents)
-  const storyIds = STORY.map((id) => `resident:${id}`).filter((id) => id in world.agents)
+  const story = useBuilding((b) => b.storyIds)
+  const storyIds = story.map((id) => `resident:${id}`).filter((id) => id in world.agents)
+  const prominent = storyIds[0]
   const rest = agentIds.filter((id) => !SPECIALISTS.includes(id) && !storyIds.includes(id))
 
   const toggle = (agent: string, enabled: boolean) => {
@@ -160,7 +161,7 @@ export function AgentConsole({ world }: Props) {
         <p className="text-[11px] text-t3">Each card is an agent in the negotiation. Its stance on the current plan is below it; switch a personal agent off and nobody speaks for that resident's needs.</p>
         {SPECIALISTS.filter((id) => id in world.agents).map((id) => card(id))}
         <div className="eyebrow pt-2">Personal agents</div>
-        {storyIds.map((id) => card(id, id === 'resident:maya'))}
+        {storyIds.map((id) => card(id, id === prominent))}
         {rest.length > 0 && (
           <button onClick={() => setShowAll((v) => !v)} className="btn-secondary btn-sm w-full">
             {showAll ? 'Hide' : 'Show'} {rest.length} more personal agents

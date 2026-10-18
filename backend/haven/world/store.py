@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS events (
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_run ON events(run_id, seq);
+CREATE TABLE IF NOT EXISTS outcomes (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+    recorded_at REAL NOT NULL,
+    payload TEXT NOT NULL
+);
 """
 
 
@@ -81,6 +86,19 @@ class EventStore:
             )
             for seq, rid, step, wall_time, payload in rows
         ]
+
+    def save_outcome(self, run_id: str, outcome: dict) -> None:
+        """How an incident ended (minutes to done, left behind, violations, rules): the memory of it."""
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO outcomes (run_id, recorded_at, payload) VALUES (?, ?, ?)",
+                               (run_id, time.time(), json.dumps(outcome)))
+            self._conn.commit()
+
+    def outcomes(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT run_id, recorded_at, payload FROM outcomes ORDER BY recorded_at DESC LIMIT ?",
+                                      (limit,)).fetchall()
+        return [dict(json.loads(payload), run_id=run_id, recorded_at=at) for run_id, at, payload in rows]
 
     def rule_history(self, exclude_run: str | None = None, limit: int = 200) -> list[dict]:
         """Manager rules spoken in earlier runs, newest first: the cross-incident memory."""

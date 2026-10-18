@@ -70,6 +70,18 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     checker is never asked. Without a key (`configured()` false) nothing is asked and `source == "rules"`.
     `GET /api/negotiation` reports mode, pending and spoken. `POST /api/action` is a responder's acknowledgement
     (actor must be on the step); `due_actions` auto-confirms at the deadline with an honest label.
+  - `haven/agents/redteam.py` (Phase 11): the attacker. `attack(ctx, sit, steps)` runs five deterministic attacks
+    on the revised plan and returns the plan after fixes plus `Attack` records; `compute_plan` re-plans with a
+    tighter `eta_cut_s` when the surge attack lands and appends the `redteam` stance (always on, never a model).
+    `GET /api/memory/incidents` + `EventStore.outcomes` / `WorldEngine.outcome()`: how incidents ended, compared.
+    `POST /api/twilio/answer/{step_id}` is the Gather webhook (yes = done, no/silence = next vendor, end = failed).
+    `GET /api/graph` serves the dependency graph for the Connections overlay and the Inspector.
+  - No building facts in code: `WorldContext` derives `story_order` (residents with a story, role resident),
+    `assembly_point` (space tagged `main_entrance`), `sensor_ids`, `fridges`, `egress_stairs`, `ground`, and
+    `is_electrical` / `powers_lifts` / `hops_to_lift` from the graph; `BuildingSpec.external_destinations`
+    carries the off-site options; the planner's isolate steps come from `sit.at_risk` (electrical equipment
+    the forecast floods before the valve closes) and `sit.lift_feeder`. The frontend reads `storyIds` and
+    `sensorId` from the building store. Keep it that way: a new building must need no code change.
   - `haven/agents/buds.py` (Phase 8): the on-screen companion. `answer()` is a deterministic intent router over
     the state (where is X, why the hold, forecast, left behind, counts, messages, plumber, agents) returning
     `Reply{speech, focus[], actions[]}`; `answer_llm()` is the Claude fallback that may only point at `pointable`

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..world.events import AgentStance
 from .models import PlanStep, Stance
-from .planner import STORY_ORDER, Situation, _cut_time, _situation, _steps_for, situation_key
+from .planner import Situation, _cut_time, _situation, _steps_for, situation_key
 
 if TYPE_CHECKING:
     from ..world.context import WorldContext
@@ -38,7 +38,7 @@ AGENT_TIMEOUT_S = 30.0
 MAX_PENDING_ROUNDS = 2
 
 ROLE = {
-    "safety": "the Safety agent. Hard rule: the switchgear (MSB section B, ATS-EQ) must be de-energised with a "
+    "safety": "the Safety agent. Hard rule: the switchgear at risk must be de-energised with a "
               "two-minute margin before water reaches it; nobody enters the basement; no lift use after isolation. "
               "You may veto a plan that cuts too late or never. You may propose cutting now.",
     "housing": "the Housing agent. You know who lives on every floor that goes dark, who is asleep, who is away, "
@@ -147,7 +147,7 @@ def _system(ctx: WorldContext, agent: str) -> str:
                "Your person's needs are hard constraints: veto any plan that leaves them stranded, without their medication, "
                "without power for a medical device, or woken/moved against a standing instruction. Support a plan that "
                "covers them; critique one that could do better for them. Do not speak for anyone else.")
-    return (f"You are {who} You are in a negotiation over an emergency plan for David Blackwell Hall (a UC Berkeley dorm). "
+    return (f"You are {who} You are in a negotiation over an emergency plan for {ctx.spec.name} ({ctx.spec.address}). "
             "A burst riser is flooding the basement towards the electrical switchgear. Read the FACTS and the proposed STEPS "
             "and return your stance. Rules: use only the facts given; keep every number; 'veto' means the plan is unacceptable "
             "to you as it stands; 'critique' means acceptable with a change; 'support' means acceptable; 'propose' only if you "
@@ -254,7 +254,7 @@ class Negotiator:
             if rnd.n == 2 and not self._round_done(state, key, 1):
                 break                                   # round 2 is built from round-1 objections: wait for them
             for agent in state.plan.enabled_agents:
-                if agent == "checker" or agent in spoken:
+                if agent in ("checker", "redteam") or agent in spoken:
                     continue
                 if not self._speaks(agent, sit):
                     continue
@@ -278,7 +278,7 @@ class Negotiator:
         r = self.ctx.roster.by_id().get(rid)
         if r is None:
             return False
-        return r.level in set(sit.dark_planned) or bool(sit.flagged.get(rid)) or rid in STORY_ORDER
+        return r.level in set(sit.dark_planned) or bool(sit.flagged.get(rid)) or rid in self.ctx.story_order
 
     def _round_done(self, state: WorldState, key: str, n: int) -> bool:
         """Round n is answered when every asked agent has spoken or timed out."""

@@ -70,8 +70,7 @@ def _first(name: str) -> str:
 def _find_resident(ctx: WorldContext, text: str):
     t = text.lower()
     for r in ctx.roster.residents:
-        if r.id in ("maya", "dana", "jordan", "sam", "lucia", "theo", "nora", "ahmed", "grace") and \
-                re.search(rf"\b{_first(r.name).lower()}\b", t):
+        if r.id in ctx.story_order and re.search(rf"\b{_first(r.name).lower()}\b", t):
             return r
     for r in ctx.roster.residents:
         if re.search(rf"\b{re.escape(r.name.lower())}\b", t):
@@ -98,10 +97,10 @@ def _where(ctx: WorldContext, state: WorldState, rid: str) -> tuple[str, str]:
     return f"in {sp.name} on {r.level}, {r.presence.replace('_', ' ')}", r.level
 
 
-def _status_line(state: WorldState) -> str:
+def _status_line(state: WorldState, ctx: WorldContext | None = None) -> str:
     plan = state.approved_plan or state.plan
     if plan.status == "none":
-        return "Blackwell Hall is quiet: no incident, nothing to plan."
+        return f"{ctx.spec.name if ctx else 'The building'} is quiet: no incident, nothing to plan."
     m = plan.metrics
     deepest = max((w.depth for w in state.water.values()), default=0.0)
     dark = ", ".join(state.impact.dark_levels) or "none"
@@ -153,7 +152,7 @@ def answer(ctx: WorldContext, state: WorldState, text: str, clock_tod: float = 0
                          actions=[Action(kind="demo", label="Load the recorded demo", payload={})], intent="demo")
         return Reply(speech="I can trip the basement water sensor, the same event the ESP32 sends.",
                      focus=[Focus(kind="panel", id="controls", label="Sensor")],
-                     actions=[Action(kind="leak", label="Simulate the leak", payload={"value": 0.9})], intent="leak")
+                     actions=[Action(kind="leak", label="Simulate the leak", payload={"value": 0.9, "sensor_id": ctx.sensor_ids[0] if ctx.sensor_ids else None})], intent="leak")
 
     if re.search(r"\b(reset|start over|clean slate)\b", t):
         return Reply(speech="I can reset the world to a quiet building (a new run in the event log).",
@@ -262,7 +261,7 @@ def answer(ctx: WorldContext, state: WorldState, text: str, clock_tod: float = 0
                      focus=[Focus(kind="tab", id="messages", label="Messages")], intent="messages")
 
     if re.search(r"\b(status|summary|going on|situation|brief|update|what.s happening)\b", t):
-        return Reply(speech=_status_line(state), focus=[Focus(kind="panel", id="plan", label="Plan")], intent="status")
+        return Reply(speech=_status_line(state, ctx), focus=[Focus(kind="panel", id="plan", label="Plan")], intent="status")
 
     if re.search(r"\b(agents?|who speaks|negotiat)", t):
         on = [a for a, v in state.agents.items() if v]
@@ -291,7 +290,7 @@ def context_for_llm(ctx: WorldContext, state: WorldState) -> dict[str, Any]:
     plan = state.approved_plan or state.plan
     by_id = ctx.roster.by_id()
     return {
-        "status": _status_line(state),
+        "status": _status_line(state, ctx),
         "headline": plan.headline, "plan_status": plan.status, "plan_version": plan.version,
         "metrics": plan.metrics, "left_behind": plan.left_behind,
         "agents_off": [a for a, on in state.agents.items() if not on],

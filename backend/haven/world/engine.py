@@ -149,10 +149,45 @@ class WorldEngine:
                             advance(self.state, self.ctx)
                             self._apply_due_replay_events()
                 await self._execute_due()
+                self._remember_outcome()
                 await self._broadcast()
             except Exception:  # keep the world alive; one bad tick must not kill the demo
                 log.exception("world loop tick failed")
             await asyncio.sleep(max(0.0, next_tick - loop.time()))
+
+    # ---- memory ------------------------------------------------------------------------------
+
+    def outcome(self) -> dict[str, Any] | None:
+        """The incident's outcome once the approved plan is done; None before that."""
+        st = self.state
+        plan = st.approved_plan
+        if plan is None or plan.status != "done":
+            return None
+        start = next((t.step for t in st.timeline if t.kind == "sensor_wet"), None)
+        done_steps = [t.step for t in st.timeline if t.kind == "action" and t.data.get("status") == "done"]
+        if start is None or not done_steps:
+            return None
+        approved = next((t.step for t in st.timeline if t.kind == "plan_approved"), start)
+        return {
+            "scenario": st.scenario, "mode": st.mode,
+            "minutes_to_done": round((max(done_steps) - start) * DT / 60, 1),
+            "minutes_to_approve": round((approved - start) * DT / 60, 1),
+            "left_behind": len(plan.left_behind),
+            "violations": int(plan.metrics.get("violations", 0)),
+            "attacks_landed": int(plan.metrics.get("attacks_landed", 0)),
+            "residents_affected": int(plan.metrics.get("residents_affected", 0)),
+            "rules": [r.code for r in st.rules],
+            "agents_off": [a for a, on in st.agents.items() if not on],
+            "model_stances": sum(1 for s in plan.stances if s.source and s.source != "rules"),
+        }
+
+    def _remember_outcome(self) -> None:
+        if self.state.mode != "live" or getattr(self, "_remembered", None) == self.state.run_id:
+            return
+        out = self.outcome()
+        if out is not None:
+            self.store.save_outcome(self.state.run_id, out)
+            self._remembered = self.state.run_id
 
     # ---- acting on the approved plan --------------------------------------------------------
 

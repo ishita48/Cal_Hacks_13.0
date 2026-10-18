@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../lib/api'
-import type { BuildingSpec, Equipment, Resident, Space } from './types'
+import type { BuildingSpec, Equipment, Graph, Resident, Space } from './types'
 
 // The building spec and roster are static for the life of the backend process; they are
 // fetched once and indexed here. Not world state (nothing in them changes), so caching is fine.
@@ -9,10 +9,15 @@ interface BuildingStore {
   residents: Record<string, Resident>
   spaces: Record<string, Space>
   equipment: Record<string, Equipment>
+  graph: Graph | null
   byLevel: Record<string, Space[]>
   equipmentByLevel: Record<string, Equipment[]>
   width: number
   depth: number
+  /** Residents with a story to tell, in roster order (the named people of the demo): derived, not listed. */
+  storyIds: string[]
+  /** The first water sensor in the spec; the Simulate button and the charts read it. */
+  sensorId: string | null
   load: () => Promise<void>
 }
 
@@ -21,13 +26,16 @@ export const useBuilding = create<BuildingStore>((set, get) => ({
   residents: {},
   spaces: {},
   equipment: {},
+  graph: null,
   byLevel: {},
   equipmentByLevel: {},
   width: 46,
   depth: 84,
+  storyIds: [],
+  sensorId: null,
   load: async () => {
     if (get().spec) return
-    const [spec, roster] = await Promise.all([api.building(), api.people()])
+    const [spec, roster, graph] = await Promise.all([api.building(), api.people(), api.graph().catch(() => null)])
     const residents: Record<string, Resident> = {}
     for (const r of roster.residents) residents[r.id] = r
     const spaces: Record<string, Space> = {}
@@ -44,6 +52,7 @@ export const useBuilding = create<BuildingStore>((set, get) => ({
     }
     set({
       spec,
+      graph,
       residents,
       spaces,
       equipment,
@@ -51,6 +60,8 @@ export const useBuilding = create<BuildingStore>((set, get) => ({
       equipmentByLevel,
       width: Math.max(...spec.footprint.map((r) => r.x1)),
       depth: Math.max(...spec.footprint.map((r) => r.y1)),
+      storyIds: roster.residents.filter((r) => r.story).map((r) => r.id),
+      sensorId: spec.equipment.find((e) => e.kind === 'sensor')?.id ?? null,
     })
   },
 }))

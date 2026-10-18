@@ -6,6 +6,7 @@ import { STATUS_COLOR } from '../lib/labels'
 import { useBuilding } from '../state/building'
 import { useWorld } from '../state/world'
 import type { ActorState, Rect, ResidentImpact, Space, WorldState } from '../state/types'
+import { select } from './Inspector'
 
 /**
  * The building as another view of the one world store. Geometry comes from the GLBs the Blender
@@ -42,9 +43,7 @@ function sunPosition(distance = 160): [number, number, number] {
 useGLTF.preload(EXTERIOR_URL)
 useGLTF.preload(INTERIOR_URL)
 
-const NAMED = new Set(['maya', 'dana', 'jordan', 'sam', 'lucia', 'theo', 'nora', 'ahmed', 'grace'])
 const ROOF_INDEX = 99
-const SENSOR_ID = 'basement_mech_1'
 
 type Tint = { mode: 'dark' | 'soon' | 'none'; water: number }
 
@@ -56,9 +55,21 @@ interface Indexed {
 
 interface Props {
   level: string // level id, or 'all'
+  connections?: boolean
 }
 
-export default function Building3D({ level }: Props) {
+/** Walk up from a clicked mesh to the first object that names a space or a piece of equipment. */
+function pick(o: THREE.Object3D | null): void {
+  let cur: THREE.Object3D | null = o
+  while (cur) {
+    const ud = cur.userData ?? {}
+    if (typeof ud.equipment_id === 'string') return select({ kind: 'equipment', id: ud.equipment_id })
+    if (typeof ud.space_id === 'string') return select({ kind: 'space', id: ud.space_id })
+    cur = cur.parent
+  }
+}
+
+export default function Building3D({ level, connections = false }: Props) {
   return (
     <div className="relative h-full w-full">
       <Canvas
@@ -69,14 +80,14 @@ export default function Building3D({ level }: Props) {
         style={{ background: 'transparent' }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.15
+          gl.toneMappingExposure = 0.95
           gl.shadowMap.enabled = true
           gl.shadowMap.type = THREE.PCFSoftShadowMap
         }}
       >
         <color attach="background" args={['#e9eef5']} />
         <Suspense fallback={<LoadingLabel />}>
-          <Scene level={level} />
+          <Scene level={level} connections={connections} />
         </Suspense>
       </Canvas>
     </div>
@@ -106,7 +117,7 @@ function LoadingLabel() {
 
 // ---- scene ---------------------------------------------------------------------------------
 
-function Scene({ level }: Props) {
+function Scene({ level, connections = false }: Props) {
   const exterior = useGLTF(EXTERIOR_URL)
   const interior = useGLTF(INTERIOR_URL)
   const spec = useBuilding((b) => b.spec)
@@ -189,13 +200,12 @@ function Scene({ level }: Props) {
       />
       {/* Daylight as Blender has it: the same HDRI for sky light and reflections, a sun in the same place
           for shadows (normal maps in the baked GLBs read off it). Light formers stand in without the file. */}
-      <hemisphereLight args={['#dfe8ff', '#3a3330', 0.55]} />
-      <directionalLight position={sunPosition()} intensity={3.4} color="#fff5e6" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02}>
+      <directionalLight position={sunPosition()} intensity={3.2} color="#fff5e6" castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.02}>
         <orthographicCamera attach="shadow-camera" args={[-130, 130, 130, -130, 1, 500]} />
       </directionalLight>
       <Optional fallback={<StudioLight />}>
         <Suspense fallback={<StudioLight />}>
-          <Environment files={SKY_URL} background backgroundBlurriness={0.35} backgroundIntensity={0.9} environmentIntensity={1.0} environmentRotation={[0, SUN.envRotationRad, 0]} backgroundRotation={[0, SUN.envRotationRad, 0]} />
+          <Environment files={SKY_URL} background backgroundBlurriness={0.15} backgroundIntensity={1.0} environmentIntensity={1.0} environmentRotation={[0, SUN.envRotationRad, 0]} backgroundRotation={[0, SUN.envRotationRad, 0]} />
         </Suspense>
       </Optional>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
@@ -204,8 +214,9 @@ function Scene({ level }: Props) {
       </mesh>
       <gridHelper args={[400, 80, '#9aa0a8', '#b3b8c0']} position={[center.x, -0.07, center.z]} />
 
-      <primitive object={exterior.scene} />
-      <primitive object={interior.scene} />
+      <primitive object={exterior.scene} onClick={(e: { stopPropagation: () => void; object: THREE.Object3D }) => { e.stopPropagation(); pick(e.object) }} />
+      <primitive object={interior.scene} onClick={(e: { stopPropagation: () => void; object: THREE.Object3D }) => { e.stopPropagation(); pick(e.object) }} />
+      {connections && <Connections index={index} level={level} levelIndex={levelIndex} />}
       <Optional>
         <Suspense fallback={null}>
           <Furniture level={level} levelIndex={levelIndex} />
@@ -292,9 +303,10 @@ function Tinter({ index, levelIndex }: { index: Indexed; levelIndex: Record<stri
         }
       }
     }
-    // Sensor flash while wet.
-    const sensor = index.eqMeshes.get(SENSOR_ID)
-    if (sensor && world.sensors[SENSOR_ID]?.wet) {
+    // Every wet sensor flashes.
+    for (const [sid, st] of Object.entries(world.sensors)) {
+      const sensor = index.eqMeshes.get(sid)
+      if (!sensor || !st.wet) continue
       const m = (Array.isArray(sensor.material) ? sensor.material[0] : sensor.material) as THREE.MeshStandardMaterial
       m.emissive.copy(WATER)
       m.emissiveIntensity = 0.4 + 1.6 * pulse
@@ -391,6 +403,51 @@ function Halos({ index }: { index: Indexed }) {
         </mesh>
       ))}
     </group>
+  )
+}
+
+// ---- the dependency graph in 3D: what powers, controls and feeds what -------------------------------
+
+const REL_COLOR_3D: Record<string, string> = { powers: '#0f62fe', backs_up: '#7c3aed', controls: '#7c3aed', feeds_water: '#0284c7', monitors: '#64748b' }
+
+function Connections({ index, level, levelIndex }: { index: Indexed; level: string; levelIndex: Record<string, number> }) {
+  const graph = useBuilding((b) => b.graph)
+  const equipment = useBuilding((b) => b.equipment)
+  const live = useWorld((s) => s.world?.power.live)
+  const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
+  const liveSet = useMemo(() => new Set(live ?? []), [live])
+  const lines = useMemo(() => {
+    const out: { key: string; a: THREE.Vector3; b: THREE.Vector3; color: string; dead: boolean }[] = []
+    if (!graph) return out
+    const pos = (id: string): THREE.Vector3 | null => {
+      const mesh = index.eqMeshes.get(id)
+      if (mesh) {
+        const v = new THREE.Vector3()
+        mesh.getWorldPosition(v)
+        v.y += 0.6
+        return v
+      }
+      const e = equipment[id]
+      return e ? new THREE.Vector3(e.x, (levelIndex[e.level] ?? 0) * 0 + 0.6, -e.y) : null
+    }
+    for (const e of graph.edges) {
+      const ea = equipment[e.src]
+      const eb = equipment[e.dst]
+      if (!ea || !eb) continue
+      if ((levelIndex[ea.level] ?? 0) > focus && (levelIndex[eb.level] ?? 0) > focus) continue
+      const a = pos(e.src)
+      const b = pos(e.dst)
+      if (!a || !b) continue
+      out.push({ key: `${e.src}-${e.dst}-${e.rel}`, a, b, color: REL_COLOR_3D[e.rel] ?? '#64748b', dead: !liveSet.has(e.src) })
+    }
+    return out
+  }, [graph, equipment, index, levelIndex, focus, liveSet])
+  return (
+    <>
+      {lines.map((l) => (
+        <Line key={l.key} points={[l.a, l.b]} color={l.dead ? '#94a3b8' : l.color} lineWidth={l.dead ? 1.2 : 2.2} transparent opacity={l.dead ? 0.45 : 0.9} dashed={l.dead} dashSize={0.6} gapSize={0.4} />
+      ))}
+    </>
   )
 }
 
@@ -498,9 +555,11 @@ function People({
   const leftBehind = useWorld((s) => s.world?.plan.left_behind)
   const agents = useWorld((s) => s.world?.agents)
   const roster = useBuilding((b) => b.residents)
+  const storyIds = useBuilding((b) => b.storyIds)
   const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
 
   const marks = useMemo(() => {
+    const NAMED = new Set(storyIds)
     const out: { id: string; name: string; pos: [number, number, number]; color: string; label: boolean; faded: boolean; tag: string | null; left: boolean }[] = []
     const behind = new Set(leftBehind ?? [])
     const src: ResidentImpact[] = residents && residents.length ? residents : (forecastResidents ?? [])
@@ -540,7 +599,7 @@ function People({
       })
     }
     return out
-  }, [residents, forecastResidents, moved, leftBehind, agents, roster, spaces, levelIndex, levelElev, focus])
+  }, [residents, forecastResidents, moved, leftBehind, agents, roster, storyIds, spaces, levelIndex, levelElev, focus])
 
   return (
     <>
@@ -696,11 +755,14 @@ function Furniture({ level, levelIndex }: { level: string; levelIndex: Record<st
 /** The light rig used when the HDRI is missing: a soft sky panel and two rim panels, no network fetch. */
 function StudioLight() {
   return (
-    <Environment resolution={64} frames={1}>
+    <>
+      <hemisphereLight args={['#dfe8ff', '#3a3330', 0.55]} />
+      <Environment resolution={64} frames={1}>
       <Lightformer intensity={2.2} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[14, 14, 1]} color="#dbe7ff" />
       <Lightformer intensity={0.8} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[12, 3, 1]} color="#ffe9c8" />
       <Lightformer intensity={0.6} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[12, 3, 1]} color="#cfe0ff" />
-    </Environment>
+      </Environment>
+    </>
   )
 }
 

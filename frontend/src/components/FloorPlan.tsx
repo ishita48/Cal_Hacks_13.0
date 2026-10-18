@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { KIND_FILL, STATUS_COLOR } from '../lib/labels'
 import { useBuilding } from '../state/building'
 import type { Space, WorldState } from '../state/types'
+import { select } from './Inspector'
 
 interface Props {
   world: WorldState
   level: string
+  connections?: boolean
 }
 
-const NAMED = new Set(['maya', 'dana', 'jordan', 'sam', 'lucia', 'theo', 'nora', 'ahmed', 'grace'])
+const REL_COLOR: Record<string, string> = { powers: '#0f62fe', backs_up: '#7c3aed', controls: '#7c3aed', feeds_water: '#0284c7', monitors: '#64748b' }
+
 
 /**
  * One level of the building drawn straight from the spec: x east, y north (SVG y is
@@ -16,8 +19,17 @@ const NAMED = new Set(['maya', 'dana', 'jordan', 'sam', 'lucia', 'theo', 'nora',
  * Motion is event-driven: overlays ease rather than switch, a space ripples once when it
  * first gets wet, a route draws itself on, a stranded person gets a pulsing ring.
  */
-export function FloorPlan({ world, level }: Props) {
-  const { byLevel, equipmentByLevel, spaces, spec, width, depth, residents } = useBuilding()
+export function FloorPlan({ world, level, connections = false }: Props) {
+  const { byLevel, equipmentByLevel, spaces, spec, width, depth, residents, graph, storyIds } = useBuilding()
+  const NAMED = useMemo(() => new Set(storyIds), [storyIds])
+  const live = new Set(world.power.live)
+  const equipmentById = useBuilding((b) => b.equipment)
+  const links = useMemo(() => {
+    if (!connections || !graph) return []
+    return graph.edges
+      .map((e) => ({ e, a: equipmentById[e.src], b: equipmentById[e.dst] }))
+      .filter(({ a, b }) => a && b && (a.level === level || b.level === level))
+  }, [connections, graph, equipmentById, level])
   const here = byLevel[level] ?? []
   const equipment = equipmentByLevel[level] ?? []
   const openings = useMemo(() => (spec?.openings ?? []).filter((o) => o.level === level), [spec, level])
@@ -168,7 +180,7 @@ export function FloorPlan({ world, level }: Props) {
           const rh = s.rect.y1 - s.rect.y0
           return (
             <g key={s.id}>
-              <rect x={rx} y={ry} width={rw} height={rh} fill={KIND_FILL[s.kind] ?? 'rgba(15,23,42,0.04)'} stroke="var(--fp-line-soft)" strokeWidth={0.08}>
+              <rect x={rx} y={ry} width={rw} height={rh} fill={KIND_FILL[s.kind] ?? 'rgba(15,23,42,0.04)'} stroke="var(--fp-line-soft)" strokeWidth={0.08} style={{ cursor: 'pointer' }} onClick={() => select({ kind: 'space', id: s.id })}>
                 <title>
                   {s.name} · {s.kind}
                   {w ? ` · water ${(w.depth * 100).toFixed(0)} cm` : ''}
@@ -227,11 +239,25 @@ export function FloorPlan({ world, level }: Props) {
           )
         })}
 
+        {/* the dependency graph, drawn: what powers, controls and feeds what on this floor; dead edges go grey */}
+        {links.map(({ e, a, b }) => {
+          const dead = !live.has(e.src)
+          const offFloor = a.level !== level ? a : b.level !== level ? b : null
+          return (
+            <g key={`${e.src}-${e.dst}-${e.rel}`} className="fp-fade-in">
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={dead ? '#94a3b8' : REL_COLOR[e.rel] ?? '#64748b'} strokeWidth={dead ? 0.18 : 0.28} strokeDasharray={e.rel === 'feeds_water' ? '0.8 0.5' : offFloor ? '0.4 0.4' : undefined} opacity={dead ? 0.5 : 0.85} />
+              <circle cx={(a.x + b.x) / 2} cy={(a.y + b.y) / 2} r={0.3} fill={dead ? '#94a3b8' : REL_COLOR[e.rel] ?? '#64748b'}>
+                <title>{a.name} {e.rel.replace('_', ' ')} {b.name}{offFloor ? ` (${offFloor.name} is on ${offFloor.level})` : ''}{dead ? ' · no power' : ''}</title>
+              </circle>
+            </g>
+          )
+        })}
+
         {equipment.map((e) => {
           const st = world.equipment[e.id]?.status ?? 'online'
           const leaking = world.leaks[e.id]?.active
           return (
-            <g key={e.id}>
+            <g key={e.id} style={{ cursor: 'pointer' }} onClick={() => select({ kind: 'equipment', id: e.id })}>
               {leaking && <circle cx={e.x} cy={e.y} r={2.2} fill="#0ea5e9" opacity={0.3} className="haven-pulse" />}
               <circle className="fp-fill" cx={e.x} cy={e.y} r={e.kind === 'sensor' ? 0.55 : 0.7} fill={STATUS_COLOR[st]} stroke="var(--fp-mark-stroke)" strokeWidth={0.12}>
                 <title>
@@ -255,7 +281,7 @@ export function FloorPlan({ world, level }: Props) {
           const color = r.severity === 'critical' ? '#dc2626' : '#d97706'
           return (
             <g key={r.id}>
-              <circle className="mark-in fp-fill" cx={cx} cy={cy} r={NAMED.has(r.id) ? 1.1 : 0.7} fill={color} opacity={predicted ? 0.55 : 1} stroke="var(--fp-mark-stroke)" strokeWidth={0.15}>
+              <circle className="mark-in fp-fill" cx={cx} cy={cy} r={NAMED.has(r.id) ? 1.1 : 0.7} fill={color} opacity={predicted ? 0.55 : 1} stroke="var(--fp-mark-stroke)" strokeWidth={0.15} style={{ cursor: 'pointer' }} onClick={() => select({ kind: 'resident', id: r.id })}>
                 <title>
                   {r.name} · {space.name} · {r.impacts.join(', ')}
                 </title>

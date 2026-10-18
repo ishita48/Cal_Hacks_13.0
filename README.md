@@ -13,7 +13,7 @@ replays exactly.
 ```bash
 cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
-cd backend  && uv run pytest -q                  # 60 tests
+cd backend  && uv run pytest -q                  # 64 tests
 ```
 
 Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live
@@ -29,6 +29,11 @@ Judges ask. Here is the honest list.
 | The building and people | | Blackwell Hall's spec and the 250-person roster are synthetic (no facilities data agreement): the rehearsal mode the product ships with |
 | Physics and cascade | Deterministic hydraulics and graph traversal (`haven/world`), replayable from the event log | A simplified model: volume per space, weir flow through doors, equipment floods at a height |
 | The negotiation | With `ANTHROPIC_API_KEY`, every enabled agent reasons with Claude over the facts and its stance is logged as an `agent_stance` input; the revised plan is built from the objections, so an agent that fails to object leaves its person in `left_behind`. Residents reason inside their own Fetch.ai uAgent and sign the stance. Replay needs no model | Without a key, deterministic rule functions speak (same shape, same codes). The checker is always rule-based and cannot be switched off |
+| The red team | A rule-based attacker runs on every plan version: a 30 % faster leak, two escorts on the same desk staff, stairwell load at the cut-off, a valve too late to matter, people the plan forgot. A landed attack changes the plan (the second escort moves to a free RA; a too-long hold is cut short) and is reported as "fixed" | It does not invent new attack classes; the five are fixed and their parameters are declared at the top of `redteam.py` |
+| Memory | Every incident's outcome (minutes from drip to done, left behind, violations, rules) is recorded when the plan completes; the next incident's Done note says how it compares with the last one, and earlier rules are offered back | No learned policy: the improvement is measured, not inferred |
+| Click to inspect | Click a room, a switchboard, a lift or a person on the plan or the twin: the record shows what the spec says, what is true now, what powers or feeds it, and the levers for it | |
+| Connections | The dependency graph drawn on the plan and the twin (powers, controls, feeds water); dead edges go grey as power is lost | |
+| The plumber call | With Twilio and `HAVEN_PUBLIC_URL`, the call asks for a yes or no (speech or keypad) and posts the answer back; no or silence dials the next number on the list, the end of the list fails the step honestly | Without a public URL the script is spoken and no answer is heard |
 | The human gate | Approve/reject on the phone or dashboard; Buds only proposes | |
 | Responders | RAs, desk staff, facilities and the plumber acknowledge their steps from their own phone view (`/phone?as=ra_4`), logged as inputs | A step nobody acknowledges is closed by the clock at its deadline and labelled "auto-confirmed (no acknowledgement)" |
 | Outward actions | Plumber call and demo text (Twilio), ticket (Linear) with keys | Labelled "simulated" without keys |
@@ -44,6 +49,11 @@ Judges ask. Here is the honest list.
   run after you tap **Approve**: the same input events the buttons send. Alt+C opens the chat, Alt+Shift+V is
   hands-free (talk over it and it stops), Esc hushes it. Deterministic answers first
   (`backend/haven/agents/buds.py`), Claude only as the fallback.
+- **Nothing about the building is in code.** The planner, the red team, Buds and every panel read the named
+  people from the roster (residents with a story), the assembly point from the space tagged `main_entrance`,
+  the sensor, valves, fridges and egress stairs from the spec, the off-site destinations from
+  `external_destinations`, and the switchgear to isolate from the forecast (electrical equipment that floods
+  before the valve can close). Swap the spec and roster and the same code plans a different building.
 - **Reading the screen.** The lifecycle rail across the top of the stage says where the system is (Detect,
   Trace, Negotiate, Govern, Approve, Act, Done), each stage lit by a fact in the world state. The Agents dock has
   three readings of the same plan: the agent cards (switch one off to silence it), the **Transcript** (round 1's
@@ -71,7 +81,7 @@ Judges ask. Here is the honest list.
 | `ELEVENLABS_API_KEY` (+ `ELEVENLABS_VOICE_ID`, `ELEVENLABS_AGENT_ID`) | elevenlabs.io → Profile → API keys; Conversational AI → create an agent for the id | HAVEN's voice, first in line: Buds, the plumber script, the briefs (flash v2.5, multilingual). The agent id enables a live, interruptible voice agent grounded in the world (`GET /api/voice/agent`) |
 | `CARTESIA_API_KEY` (+ `CARTESIA_VOICE_ID`) | play.cartesia.ai → API keys | Second voice in line for `POST /api/speak`; the browser's own speech is last |
 | `TIGER_DATABASE_URL` | console.cloud.timescale.com (Tiger Data) → service → connection string | Sensor readings land in a hypertable; `GET /api/sensor/{id}/history` reads it (event log otherwise) |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` + `HAVEN_PLUMBER_NUMBER`, `HAVEN_SMS_TO` | console.twilio.com (trial works; verify the two numbers) | On approval the plumber is really phoned with the plan's script, and Maya's message is texted to the demo phone |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` + `HAVEN_PLUMBER_NUMBER` (`_2`, `_3` for the on-call list), `HAVEN_SMS_TO`, `HAVEN_PUBLIC_URL` | console.twilio.com (trial works; verify the numbers); the public URL is a tunnel or the deployed host | On approval the plumber is really phoned with the plan's script and asked yes or no; no or silence dials the next number; the first critical resident message is texted to the demo phone |
 | `LINEAR_API_KEY`, `LINEAR_TEAM_ID` | linear.app → Settings → API (personal key; team id from the team settings URL or the API) | On approval the facilities ticket is filed in Linear; the step shows its identifier and URL |
 | `HAVEN_SENSOR_TOKEN` | make one up | The ESP32 must send it as `X-Haven-Token`; manual and UI readings are unaffected |
 | Railway + Vercel accounts | railway.app, vercel.com | Deploy: `backend/railway.json`, `frontend/vercel.json`; set `VITE_HAVEN_WS=wss://<railway-app>/ws` at build |

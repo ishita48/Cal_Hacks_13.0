@@ -181,7 +181,7 @@ function ResponderBody({ world, clock, me }: { world: WorldState; clock: Clock; 
   const [busy, setBusy] = useState<string | null>(null)
   const approved = world.approved_plan
   const mine = (approved?.steps ?? []).filter((s) => s.actor.split(',').map((a) => a.trim()).includes(me))
-  const name = roster[me]?.name ?? { staff: 'Desk staff', facilities: 'Luis Ortega (facilities)', plumber: 'Emergency plumber' }[me] ?? me
+  const name = world.actors[me]?.label ?? roster[me]?.name ?? me
   const brief = (approved ?? world.plan).messages.find((m) => m.to === me)
   const ack = (stepId: string, status: 'done' | 'failed') => {
     setBusy(stepId)

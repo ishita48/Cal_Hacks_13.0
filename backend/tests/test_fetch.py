@@ -15,6 +15,7 @@ SENSOR = "basement_mech_1"
 
 
 def test_resident_stance_on_the_network_equals_the_planner(monkeypatch):
+    monkeypatch.setenv("HAVEN_FETCH", "1")
     monkeypatch.setenv("HAVEN_FETCH_PORT", "8031")
     monkeypatch.delenv("AGENTVERSE_API_KEY", raising=False)
 

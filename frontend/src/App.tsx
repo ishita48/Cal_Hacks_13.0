@@ -13,6 +13,7 @@ import {
   PanelRight,
   Pause,
   Play,
+  Share2,
   Radio,
   Smartphone,
   Sun,
@@ -25,6 +26,7 @@ import { Controls } from './components/Controls'
 import { FloorPlan } from './components/FloorPlan'
 import { Guide, useGuide } from './components/Guide'
 import { ImpactLedger } from './components/ImpactLedger'
+import { Inspector, useSelection } from './components/Inspector'
 import { Lifecycle } from './components/Lifecycle'
 import { MessagesPanel } from './components/MessagesPanel'
 import { PlanPanel } from './components/PlanPanel'
@@ -52,6 +54,7 @@ export default function App() {
   useEffect(() => connectWorld(), [])
   const loadBuilding = useBuilding((b) => b.load)
   const spec = useBuilding((b) => b.spec)
+  const sensorId = useBuilding((b) => b.sensorId)
   const levels = spec?.levels ?? NO_LEVELS
   useEffect(() => {
     loadBuilding().catch(() => {})
@@ -66,8 +69,16 @@ export default function App() {
   const [level, setLevel] = useState('all')
   const [view, setView] = useState<View>('3d')
   const [rightTab, setRightTab] = useState<RightTab>('agents')
-  const [leftTab, setLeftTab] = useState<'inputs' | 'rule' | 'people'>('inputs')
+  const [leftTab, setLeftTab] = useState<'inputs' | 'rule' | 'people' | 'selected'>('inputs')
   const [docks, setDocks] = useState({ left: true, right: true })
+  const [connections, setConnections] = useState(false)
+  const [selection] = useSelection()
+  useEffect(() => {
+    if (selection) {
+      setLeftTab('selected')
+      setDocks((d) => ({ ...d, left: true }))
+    }
+  }, [selection])
   const openTab = (t: RightTab) => {
     setRightTab(t)
     setDocks((d) => ({ ...d, right: true }))
@@ -134,10 +145,15 @@ export default function App() {
   const contact = world.forecast.events.find((e) => e.kind === 'flooded' || e.kind === 'lifts_down')
   const contactIn = contact ? Math.max(0, (world.forecast.computed_step * clock.dt + contact.eta_s - clock.sim_time) / 60) : null
   const leftBehind = world.plan.left_behind.length
+  // The responder's phone link: the RA with something to do (a moving or done step), else the first RA.
+  const actors = Object.values(world.actors)
+  const responderActor = actors.find((a) => a.actor.startsWith('ra_') && a.status !== 'idle' && a.status !== 'offsite') ?? actors.find((a) => a.actor.startsWith('ra_')) ?? actors[0]
+  const responder = responderActor?.actor ?? 'staff'
+  const responderLabel = responderActor?.label ?? 'A responder'
 
   return (
     <div className="app-shell grid h-full grid-cols-[232px_minmax(0,1fr)] gap-3 overflow-hidden p-3">
-      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} onGuide={() => guide.setOpen(true)} runId={world.run_id} />
+      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} onGuide={() => guide.setOpen(true)} runId={world.run_id} sensorId={sensorId} responder={responder} responderLabel={responderLabel} />
 
       <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden">
         <TopNav title="Command centre" clock={clock} connection={connection} world={world} integrations={integrations} onGuide={() => guide.setOpen(true)} />
@@ -161,16 +177,16 @@ export default function App() {
             <aside className="glass flex min-h-0 flex-col overflow-hidden enter">
               <div className="hairline-b flex items-center px-3 py-2.5">
                 <div className="seg">
-                  {(['inputs', 'rule', 'people'] as const).map((t) => (
-                    <button key={t} data-buds={`tab:${t}`} onClick={() => setLeftTab(t)} className={`seg-item ${leftTab === t ? 'is-on' : ''}`} title={t === 'inputs' ? 'The sensor and the levers: what can change the world' : t === 'rule' ? 'A rule from the manager, by voice or typed' : 'Who is affected, now or if nothing is done'}>
-                      {t === 'inputs' ? 'Inputs' : t === 'rule' ? 'Say a rule' : 'People'}
+                  {(['inputs', 'rule', 'people', 'selected'] as const).map((t) => (
+                    <button key={t} data-buds={`tab:${t}`} onClick={() => setLeftTab(t)} className={`seg-item ${leftTab === t ? 'is-on' : ''}`} title={t === 'inputs' ? 'The sensor and the levers: what can change the world' : t === 'rule' ? 'A rule from the manager, by voice or typed' : t === 'people' ? 'Who is affected, now or if nothing is done' : 'The record of whatever you clicked on the plan or the twin'}>
+                      {t === 'inputs' ? 'Inputs' : t === 'rule' ? 'Say a rule' : t === 'people' ? 'People' : 'Selected'}
                       {t === 'rule' && world.rules.length > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-blue/15 px-1.5 text-[10px] font-semibold text-haven-blue">{world.rules.length}</span>}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {leftTab === 'inputs' ? <Controls world={world} /> : leftTab === 'rule' ? <VoiceRule world={world} /> : <ImpactLedger world={world} clock={clock} />}
+                {leftTab === 'inputs' ? <Controls world={world} /> : leftTab === 'rule' ? <VoiceRule world={world} /> : leftTab === 'people' ? <ImpactLedger world={world} clock={clock} /> : <Inspector world={world} selection={selection} />}
               </div>
             </aside>
           )}
@@ -214,6 +230,10 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <button className={`seg-item ${connections ? 'is-on' : ''}`} style={{ background: connections ? undefined : 'var(--chip-bg)' }} onClick={() => setConnections((c) => !c)} title="Draw the dependency graph: what powers, controls and feeds what. Dead edges go grey.">
+                <Share2 className="mr-1 inline h-3 w-3" />
+                Connections
+              </button>
               <Legend />
               <div className="ml-auto flex items-center gap-1">
                 <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, left: !d.left }))} title={docks.left ? 'Hide the controls column (T)' : 'Show the controls column (T)'} aria-label="Toggle controls">
@@ -228,11 +248,11 @@ export default function App() {
               {view === '3d' ? (
                 <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
                   <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
-                    <Building3D level={level} />
+                    <Building3D level={level} connections={connections} />
                   </Suspense>
                 </ViewErrorBoundary>
               ) : (
-                <FloorPlan world={world} level={level === 'all' ? 'L4' : level} />
+                <FloorPlan world={world} level={level === 'all' ? 'L4' : level} connections={connections} />
               )}
             </div>
           </section>
@@ -287,6 +307,9 @@ function Sidebar({
   leftBehind,
   onGuide,
   runId,
+  sensorId,
+  responder,
+  responderLabel,
 }: {
   view: View
   setView: (v: View) => void
@@ -297,6 +320,9 @@ function Sidebar({
   leftBehind: number
   onGuide: () => void
   runId: string
+  sensorId: string | null
+  responder: string
+  responderLabel: string
 }) {
   const item = (on: boolean, Icon: React.ElementType, label: string, desc: string, onClick: () => void, badge = 0, buds?: string) => (
     <button key={label} className={`nav-item ${on ? 'is-on' : ''}`} onClick={onClick} aria-current={on ? 'page' : undefined} data-buds={buds}>
@@ -320,7 +346,7 @@ function Sidebar({
         </div>
       </a>
       <div className="px-3 pb-3">
-        <button onClick={() => api.sensor('basement_mech_1', 0.9).catch(() => {})} className="argus-btn flex w-full items-center justify-center gap-2 rounded-full px-3 py-2.5 text-sm font-semibold text-white">
+        <button onClick={() => sensorId && api.sensor(sensorId, 0.9).catch(() => {})} className="argus-btn flex w-full items-center justify-center gap-2 rounded-full px-3 py-2.5 text-sm font-semibold text-white">
           <Droplets className="h-4 w-4" /> Simulate leak
         </button>
       </div>
@@ -346,11 +372,11 @@ function Sidebar({
                 <span className="nav-desc">Approve from a phone</span>
               </span>
             </a>
-            <a className="nav-item" href="/phone?as=ra_4" target="_blank" rel="noreferrer">
+            <a className="nav-item" href={`/phone?as=${responder}`} target="_blank" rel="noreferrer">
               <Radio />
               <span className="min-w-0 flex-1">
                 <span className="nav-label">Responder's phone</span>
-                <span className="nav-desc">An RA confirms steps</span>
+                <span className="nav-desc">{responderLabel} confirms steps</span>
               </span>
             </a>
             <a className="nav-item" href="/story">
