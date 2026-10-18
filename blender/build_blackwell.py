@@ -21,7 +21,8 @@ Run headless (Store install exposes ``blender-launcher.exe``; a zip install expo
 
     blender -b -P blender/build_blackwell.py -- --glb frontend/public/models/blackwell.glb \
         --glb-interior frontend/public/models/blackwell_interior.glb \
-        --glb-furniture frontend/public/models/blackwell_furniture.glb --render blender/renders/hero.png         --cutaway L4 --cutaway B1 --blend blender/blackwell.blend
+        --glb-furniture frontend/public/models/blackwell_furniture.glb --render blender/renders/hero.png \
+        --cutaway L4 --cutaway L1 --cutaway B1 --blend blender/blackwell.blend
 
 Run inside a live Blender (e.g. through the Blender MCP):
 
