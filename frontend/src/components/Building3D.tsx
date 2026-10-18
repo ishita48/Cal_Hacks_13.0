@@ -552,7 +552,7 @@ function People({
           </mesh>
           {m.left && <PulsingRing position={[0, -1.05, 0]} color="#bf5af2" />}
           {m.label && (
-            <Html center position={[0, 1.4, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+            <Html center position={[0, 1.4, 0]} zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
               <div
                 className="rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap"
                 style={{ borderColor: m.color, color: '#0f172a', background: 'rgba(255,255,255,0.92)', opacity: m.faded ? 0.7 : 1 }}
@@ -611,10 +611,11 @@ function Actors({
       from[0] += 1.4 + off
       to[0] += 1.4 + off
       const step = steps?.find((st) => st.id === a.step_id)
+      if (a.status === 'idle' && level === 'all') continue   // idle RAs stack on one spot across floors: dots only
       out.push({ id: a.actor, label: a.label, task: step?.title ?? null, from, to, status: a.status })
     }
     return out
-  }, [actors, steps, spaces, levelIndex, levelElev, focus])
+  }, [actors, steps, spaces, levelIndex, levelElev, focus, level])
 
   return (
     <>
@@ -653,7 +654,7 @@ function ActorFigure({ label, task, from, to, status }: { label: string; task: s
         <sphereGeometry args={[0.24, 12, 12]} />
         <meshStandardMaterial color="#f5f5f7" emissive={color} emissiveIntensity={0.3} />
       </mesh>
-      <Html center position={[0, 1.7, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <Html center position={[0, 1.7, 0]} zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
         <div className="rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap" style={{ borderColor: color, color: '#0f172a', background: 'rgba(255,255,255,0.92)' }}>
           <span className="font-semibold">{label}</span>
           {task && status !== 'idle' && (

@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
 import {
   Activity,
+  CircleHelp,
   BookOpen,
   Bot,
   Box,
@@ -22,6 +23,7 @@ import { Buds } from './components/Buds'
 import { CascadePanel } from './components/CascadePanel'
 import { Controls } from './components/Controls'
 import { FloorPlan } from './components/FloorPlan'
+import { Guide, useGuide } from './components/Guide'
 import { ImpactLedger } from './components/ImpactLedger'
 import { Lifecycle } from './components/Lifecycle'
 import { MessagesPanel } from './components/MessagesPanel'
@@ -56,6 +58,7 @@ export default function App() {
   }, [loadBuilding])
 
   const { connection, clock, world } = useWorld()
+  const guide = useGuide(world)
   const [integrations, setIntegrations] = useState<Integrations | null>(null)
   useEffect(() => {
     api.integrations().then(setIntegrations).catch(() => {})
@@ -76,6 +79,7 @@ export default function App() {
       if (e.altKey || e.ctrlKey || e.metaKey || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))) return
       if (e.key === 't' || e.key === 'T') setDocks((d) => ({ ...d, left: !d.left }))
       if (e.key === 'n' || e.key === 'N') setDocks((d) => ({ ...d, right: !d.right }))
+      if (e.key === '?') guide.setOpen(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -124,40 +128,44 @@ export default function App() {
   const leftBehind = world.plan.left_behind.length
 
   return (
-    <div className="app-shell h-full overflow-hidden">
-      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} />
-      <TopNav title="Command centre" clock={clock} connection={connection} world={world} integrations={integrations} />
+    <div className="app-shell grid h-full grid-cols-[232px_minmax(0,1fr)] gap-3 overflow-hidden p-3">
+      <Sidebar view={view} setView={setView} rightTab={rightTab} setRightTab={openTab} vetoes={vetoes} criticalMessages={criticalMessages} leftBehind={leftBehind} onGuide={() => guide.setOpen(true)} />
 
-      <main className="absolute top-[5.25rem] right-4 bottom-4 left-[17rem] overflow-hidden">
-        {/* The stage: the simulation fills everything; panels dock over it like Blender's viewport. */}
-        <section className="glass relative h-full w-full overflow-hidden" data-buds="panel:map">
-          <div className="absolute inset-0" style={{ padding: view === '2d' ? `104px ${docks.right ? 404 : 16}px 16px ${docks.left ? 332 : 16}px` : 0 }}>
-            {view === '3d' ? (
-              <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
-                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
-                  <Building3D level={level} />
-                </Suspense>
-              </ViewErrorBoundary>
-            ) : (
-              <FloorPlan world={world} level={level === 'all' ? 'L4' : level} />
-            )}
+      <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden">
+        <TopNav title="Command centre" clock={clock} connection={connection} world={world} integrations={integrations} onGuide={() => guide.setOpen(true)} />
+
+        {/* where we are, and the numbers that matter: one strip, never over the picture */}
+        <div className="flex flex-wrap items-stretch gap-2">
+          <div className="min-w-0 flex-1">
+            <Lifecycle world={world} clock={clock} />
           </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Hud k="affected" v={incident ? Number(m.residents_affected ?? 0) : 0} tone={incident ? 'text-haven-power' : undefined} />
+            <Hud k="left behind" v={leftBehind} tone={leftBehind ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} hot={leftBehind > 0} buds="panel:plan" />
+            <Hud k="violations" v={incident ? Number(m.violations ?? 0) : 0} tone={Number(m.violations ?? 0) ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} />
+            <Hud k="water" v={`${Math.round(deepest * 100)} cm`} tone={deepest > 0 ? 'text-haven-water' : undefined} />
+            <Hud k={contact ? 'contact in' : 'plan'} v={contact && contactIn != null ? `${contactIn.toFixed(0)} min` : shown.status === 'none' ? 'quiet' : shown.status} tone={contact && contactIn != null && contactIn < 5 ? 'text-haven-danger' : contact ? 'text-haven-amber' : undefined} />
+          </div>
+        </div>
 
-          {/* HUD: where we are in the story, then the numbers that matter, along the top of the stage */}
-          <div className="pointer-events-none absolute top-3 left-3 right-3 z-20 flex flex-col gap-2">
-            <div className="pointer-events-auto">
-              <Lifecycle world={world} clock={clock} />
-            </div>
-          <div className="flex items-start gap-2">
-            <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
-              <Hud k="affected" v={incident ? Number(m.residents_affected ?? 0) : 0} tone={incident ? 'text-haven-power' : undefined} />
-              <Hud k="left behind" v={leftBehind} tone={leftBehind ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} hot={leftBehind > 0} buds="panel:plan" />
-              <Hud k="violations" v={incident ? Number(m.violations ?? 0) : 0} tone={Number(m.violations ?? 0) ? 'text-haven-danger' : incident ? 'text-haven-safe' : undefined} />
-              <Hud k="water" v={`${Math.round(deepest * 100)} cm`} tone={deepest > 0 ? 'text-haven-water' : undefined} />
-              <Hud k={contact ? 'contact in' : 'plan'} v={contact && contactIn != null ? `${contactIn.toFixed(0)} min` : shown.status === 'none' ? 'quiet' : shown.status} tone={contact && contactIn != null && contactIn < 5 ? 'text-haven-danger' : contact ? 'text-haven-amber' : undefined} />
-            </div>
-            <div className="pointer-events-auto ml-auto flex items-center gap-2">
-              <div className="seg glass-card p-1">
+        <main className="grid min-h-0 gap-3 overflow-hidden" style={{ gridTemplateColumns: `${docks.left ? '300px ' : ''}minmax(0,1fr)${docks.right ? ' 400px' : ''}` }}>
+          {docks.left && (
+            <aside className="glass flex min-h-0 flex-col gap-4 overflow-hidden p-4 enter">
+              <Controls world={world} />
+              <div className="hairline pt-4">
+                <VoiceRule world={world} />
+              </div>
+              <div className="hairline min-h-0 flex-1 pt-4">
+                <ImpactLedger world={world} clock={clock} />
+              </div>
+            </aside>
+          )}
+
+          {/* the stage: the simulation, with its own toolbar above the picture */}
+          <section className="glass flex min-h-0 flex-col overflow-hidden" data-buds="panel:map">
+            <div className="hairline-b flex flex-wrap items-center gap-2 px-3 py-2">
+              <span className="eyebrow mr-1">{view === '3d' ? '3D twin' : 'Floor plan'}</span>
+              <div className="seg">
                 {[...levels]
                   .sort((a, b) => b.index - a.index)
                   .map((lv) => {
@@ -177,7 +185,8 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <div className="seg seg-xs glass-card p-1">
+              <span className="label">{level === 'all' ? 'whole building' : levels.find((l) => l.id === level)?.name}</span>
+              <div className="seg seg-xs">
                 {(['3d', '2d'] as const).map((v) => (
                   <button
                     key={v}
@@ -191,32 +200,31 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, left: !d.left }))} title={docks.left ? 'Hide the controls (T)' : 'Show the controls (T)'} aria-label="Toggle controls">
-                <PanelLeft className="h-3.5 w-3.5" />
-              </button>
-              <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, right: !d.right }))} title={docks.right ? 'Hide the plan (N)' : 'Show the plan (N)'} aria-label="Toggle plan">
-                <PanelRight className="h-3.5 w-3.5" />
-              </button>
+              <Legend />
+              <div className="ml-auto flex items-center gap-1">
+                <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, left: !d.left }))} title={docks.left ? 'Hide the controls column (T)' : 'Show the controls column (T)'} aria-label="Toggle controls">
+                  <PanelLeft className="h-3.5 w-3.5" />
+                </button>
+                <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, right: !d.right }))} title={docks.right ? 'Hide the plan column (N)' : 'Show the plan column (N)'} aria-label="Toggle plan">
+                  <PanelRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
-          </div>
-          </div>
+            <div className="relative min-h-0 flex-1 overflow-hidden" style={{ padding: view === '2d' ? 12 : 0 }}>
+              {view === '3d' ? (
+                <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
+                  <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
+                    <Building3D level={level} />
+                  </Suspense>
+                </ViewErrorBoundary>
+              ) : (
+                <FloorPlan world={world} level={level === 'all' ? 'L4' : level} />
+              )}
+            </div>
+          </section>
 
-          {/* left dock: inputs to the world */}
-          {docks.left && (
-            <aside className="glass absolute top-[6.4rem] bottom-3 left-3 z-10 flex w-[316px] flex-col gap-4 overflow-hidden p-4 enter">
-              <Controls world={world} />
-              <div className="hairline pt-4">
-                <VoiceRule world={world} />
-              </div>
-              <div className="hairline min-h-0 flex-1 pt-4">
-                <ImpactLedger world={world} clock={clock} />
-              </div>
-            </aside>
-          )}
-
-          {/* right dock: the plan, and who said what */}
           {docks.right && (
-            <aside className="absolute top-[6.4rem] right-3 bottom-3 z-10 grid w-[388px] grid-rows-[minmax(0,1.05fr)_minmax(0,1fr)] gap-3 enter">
+            <aside className="grid min-h-0 grid-rows-[minmax(0,1.05fr)_minmax(0,1fr)] gap-3 enter">
               <div className={`glass min-h-0 overflow-hidden p-4 ${leftBehind ? 'tint-red' : ''}`}>
                 <PlanPanel world={world} clock={clock} />
               </div>
@@ -238,18 +246,13 @@ export default function App() {
               </div>
             </aside>
           )}
-
-          <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
-            <Legend />
-          </div>
-        </section>
-      </main>
+        </main>
+      </div>
+      {guide.open && <Guide world={world} onClose={guide.close} />}
       <Buds />
     </div>
   )
 }
-
-// ---- shell ---------------------------------------------------------------------------------------
 
 function Hud({ k, v, tone, hot, buds }: { k: string; v: number | string; tone?: string; hot?: boolean; buds?: string }) {
   return (
@@ -268,6 +271,7 @@ function Sidebar({
   vetoes,
   criticalMessages,
   leftBehind,
+  onGuide,
 }: {
   view: View
   setView: (v: View) => void
@@ -276,6 +280,7 @@ function Sidebar({
   vetoes: number
   criticalMessages: number
   leftBehind: number
+  onGuide: () => void
 }) {
   const item = (on: boolean, Icon: React.ElementType, label: string, desc: string, onClick: () => void, badge = 0, buds?: string) => (
     <button key={label} className={`nav-item ${on ? 'is-on' : ''}`} onClick={onClick} aria-current={on ? 'page' : undefined} data-buds={buds}>
@@ -288,7 +293,7 @@ function Sidebar({
     </button>
   )
   return (
-    <aside className="app-sidebar fixed top-4 bottom-4 left-4 z-50 flex w-60 flex-col overflow-hidden">
+    <aside className="app-sidebar flex min-h-0 flex-col overflow-hidden">
       <a href="/story" className="flex items-center gap-3 px-5 py-5 transition-opacity hover:opacity-80">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-black/[0.06] bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_24px_-8px_rgba(15,98,254,0.45)] dark:border-white/10 dark:bg-white/[0.06]">
           <span className="h-3 w-3 rounded-full bg-haven-blue" style={{ boxShadow: '0 0 0 4px rgba(15,98,254,0.18)' }} />
@@ -307,6 +312,7 @@ function Sidebar({
         <div>
           <p className="argus-eyebrow px-3 pb-1.5">Command centre</p>
           <div className="space-y-1">
+            {item(false, CircleHelp, 'Guide', 'What this is, what to click', onGuide)}
             {item(view === '2d', LayoutGrid, 'Floor plan', 'Rooms, water, routes, people', () => setView('2d'))}
             {item(view === '3d', Box, '3D twin', 'The Blender building, live', () => setView('3d'))}
             {item(rightTab === 'agents', Bot, 'Agents', 'Who speaks, the transcript, the constraints', () => setRightTab('agents'), vetoes, 'tab:agents')}
@@ -349,9 +355,9 @@ function Sidebar({
   )
 }
 
-function TopNav({ title, clock, connection, world, integrations }: { title: string; clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; world: NonNullable<ReturnType<typeof useWorld.getState>['world']>; integrations: Integrations | null }) {
+function TopNav({ title, clock, connection, world, integrations, onGuide }: { title: string; clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; world: NonNullable<ReturnType<typeof useWorld.getState>['world']>; integrations: Integrations | null; onGuide: () => void }) {
   return (
-    <header className="app-topnav fixed top-4 right-4 left-[17rem] z-40 flex h-14 items-center gap-4 px-4">
+    <header className="app-topnav flex h-14 items-center gap-4 px-4">
       <span className="truncate text-[15px] font-semibold tracking-tight text-t1">{title}</span>
       <span className="label hidden lg:inline">David Blackwell Hall · {world.mode === 'replay' ? 'replay' : 'live'}</span>
       <div className="ml-2 flex items-center gap-3">
@@ -377,6 +383,9 @@ function TopNav({ title, clock, connection, world, integrations }: { title: stri
         <span className="mono hidden text-[11px] text-t3 xl:inline">
           run {world.run_id} · v{world.version}
         </span>
+        <button className="btn-secondary btn-icon" onClick={onGuide} title="Guide (?)" aria-label="Guide">
+          <CircleHelp className="h-3.5 w-3.5" />
+        </button>
         <ThemeToggle />
       </div>
     </header>
@@ -427,7 +436,7 @@ function Legend() {
     </span>
   )
   return (
-    <div className="glass-card pointer-events-auto flex gap-3 px-3 py-1.5 text-[10px] text-t3">
+    <div className="hidden items-center gap-3 text-[10px] text-t3 2xl:flex">
       {item('#0284c7', 'water')}
       {item('rgba(220,38,38,0.6)', 'dark now')}
       {item('rgba(217,119,6,0.7)', 'dark if nothing is done')}
