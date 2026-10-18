@@ -57,10 +57,14 @@ export function AgentConsole({ world }: Props) {
     return r.story ?? `${r.name} · ${r.room} · ${r.presence.replace('_', ' ')}`
   }
 
+  // Display order drives the stagger when a new plan version lands.
+  let order = 0
   const card = (id: string, prominent = false) => (
     <AgentCard
       key={id}
       id={id}
+      index={order++}
+      version={world.plan.version}
       label={labelFor(id)}
       blurb={storyFor(id)}
       enabled={world.agents[id] ?? false}
@@ -97,6 +101,8 @@ export function AgentConsole({ world }: Props) {
 
 function AgentCard({
   id,
+  index,
+  version,
   label,
   blurb,
   enabled,
@@ -106,6 +112,8 @@ function AgentCard({
   onToggle,
 }: {
   id: string
+  index: number
+  version: number
   label: string
   blurb: string | null
   enabled: boolean
@@ -114,7 +122,7 @@ function AgentCard({
   replay: boolean
   onToggle: (on: boolean) => void
 }) {
-  // Shake the card the first time a veto appears on it.
+  // Shake and glow the card the first time a veto appears on it.
   const prevStance = useRef<StanceKind | null>(null)
   const [shake, setShake] = useState(false)
   useEffect(() => {
@@ -130,17 +138,35 @@ function AgentCard({
     prevStance.current = stance?.stance ?? null
   })
 
+  // A new plan version pops every stance pill in display order (60 ms stagger).
+  const [popKey, setPopKey] = useState(0)
+  const prevVersion = useRef(version)
+  useEffect(() => {
+    if (version !== prevVersion.current) {
+      prevVersion.current = version
+      setPopKey((k) => k + 1)
+    }
+  }, [version])
+
   const veto = enabled && stance?.stance === 'veto'
+  const edge = prominent
+    ? enabled
+      ? 'inset 3px 0 0 #0a84ff, 0 10px 30px rgba(10,132,255,0.10)'
+      : 'inset 3px 0 0 #6e6e73, 0 0 0 rgba(0,0,0,0)'
+    : undefined
 
   return (
     <div
-      className={`glass-card relative ${prominent ? 'p-3.5' : 'p-3'} ${!enabled ? 'opacity-45' : ''} ${shake ? 'haven-shake' : ''} ${veto ? 'tint-red' : ''} transition-opacity`}
-      style={prominent ? { boxShadow: 'inset 3px 0 0 #0a84ff, 0 10px 30px rgba(10,132,255,0.10)' } : undefined}
+      className={`agent-card glass-card relative ${prominent ? 'p-3.5' : 'p-3'} ${!enabled ? 'opacity-45' : ''} ${shake ? 'haven-shake veto-glow' : ''} ${veto ? 'tint-red' : ''}`}
+      style={edge ? { boxShadow: edge } : undefined}
     >
       <div className="flex items-center gap-2.5">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${enabled ? 'bg-haven-safe' : 'bg-t3'}`} style={enabled ? { boxShadow: '0 0 8px rgba(48,209,88,0.5)' } : undefined} />
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full transition-colors duration-300 ${enabled ? 'bg-haven-safe' : 'bg-t3'}`}
+          style={enabled ? { boxShadow: '0 0 8px rgba(48,209,88,0.5)' } : undefined}
+        />
         <span className={`font-semibold ${prominent ? 'text-[15px] text-t1' : 'text-[13px] text-t1'}`}>{label}</span>
-        {prominent && <span className="pill pill-blue">the Maya moment</span>}
+        {prominent && (enabled ? <span className="pill pill-blue">the Maya moment</span> : <span className="pill fade-swap">silenced</span>)}
         <label className="switch ml-auto" title={`${id}: ${enabled ? 'in' : 'out of'} the negotiation`}>
           <input type="checkbox" checked={enabled} disabled={replay} onChange={(e) => onToggle(e.target.checked)} />
           <span className="track" />
@@ -149,11 +175,13 @@ function AgentCard({
       </div>
       {blurb && <p className={`mt-1.5 ${prominent ? 'text-[12px] text-t2' : 'text-[11px] text-t3'}`}>{blurb}</p>}
       {!enabled ? (
-        <p className="mt-2 text-[11px] text-t3">Not in the negotiation · nobody speaks for this constraint</p>
+        <p className="fade-swap mt-2 text-[11px] text-t3">Not in the negotiation · nobody speaks for this constraint</p>
       ) : stance ? (
         <div className="mt-2">
           <div className="flex items-start gap-2">
-            <span className={`pill ${STANCE_PILL[stance.stance]} shrink-0`}>{stance.stance}</span>
+            <span key={popKey} className={`pill ${STANCE_PILL[stance.stance]} pop shrink-0`} style={{ animationDelay: `${index * 60}ms` }}>
+              {stance.stance}
+            </span>
             <span className="text-[11px] leading-snug text-t1">{stance.reason}</span>
           </div>
           {stance.constraint && (

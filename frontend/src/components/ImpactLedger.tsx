@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IMPACT_LABEL, NEED_LABEL, PRESENCE_LABEL, SEVERITY_DOT } from '../lib/labels'
 import { useBuilding } from '../state/building'
 import type { Clock, Impact, WorldState } from '../state/types'
@@ -18,6 +18,7 @@ const STAT_KEYS: [string, string][] = [
   ['needs_visual_alert', 'visual alert'],
   ['away', 'away'],
 ]
+const HOT = new Set(['stranded', 'medication_at_risk', 'device_power_lost'])
 
 /** Who is affected, now or if nothing is done. Every row is a person the agents will speak for. */
 export function ImpactLedger({ world, clock }: Props) {
@@ -60,7 +61,7 @@ export function ImpactLedger({ world, clock }: Props) {
       </div>
 
       {outcome && (
-        <div className="glass-card tint-green px-3.5 py-2.5">
+        <div className="glass-card tint-green enter px-3.5 py-2.5">
           <div className="eyebrow text-haven-safe">Outcome · plan v{outcome.version} done</div>
           <ul className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-t1">
             <li className="flex items-center gap-1.5">
@@ -80,20 +81,13 @@ export function ImpactLedger({ world, clock }: Props) {
       )}
 
       <div className="grid grid-cols-4 gap-2">
-        {STAT_KEYS.map(([k, label]) => {
-          const n = impact.counts[k] ?? 0
-          const hot = n > 0 && ['stranded', 'medication_at_risk', 'device_power_lost'].includes(k)
-          return (
-            <div key={k} className="glass-card px-2.5 py-2">
-              <div className={`num text-[26px] leading-none ${hot ? 'text-haven-danger glow-red' : n > 0 ? 'text-t1' : 'text-t3'}`}>{n}</div>
-              <div className="label mt-1 leading-tight">{label}</div>
-            </div>
-          )
-        })}
+        {STAT_KEYS.map(([k, label]) => (
+          <StatTile key={k} value={impact.counts[k] ?? 0} label={label} hot={HOT.has(k)} />
+        ))}
       </div>
 
       {(impact.dark_levels.length > 0 || impact.lifts_down.length > 0 || impact.fridges_down.length > 0 || impact.wet_spaces.length > 0) && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="enter flex flex-wrap gap-1.5">
           {impact.dark_levels.length > 0 && <span className="pill pill-red">dark · {impact.dark_levels.join(', ')}</span>}
           {impact.lifts_down.length > 0 && <span className="pill pill-red">lifts down · {impact.lifts_down.join(', ')}</span>}
           {impact.fridges_down.length > 0 && <span className="pill pill-amber">fridges off · {impact.fridges_down.length}</span>}
@@ -111,24 +105,22 @@ export function ImpactLedger({ world, clock }: Props) {
 
       <ul className="min-h-0 flex-1 overflow-y-auto pr-1">
         {total === 0 && <li className="glass-card px-3 py-5 text-center text-[12px] text-t3">Nobody affected.</li>}
+        {/* keys are resident ids, so only newly affected rows run the enter animation */}
         {impact.residents.map((r) => (
-          <li key={r.id} className="row py-2">
+          <li key={r.id} className="row enter py-2">
             <div className="flex items-center gap-2">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[r.severity]}`} />
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300 ${SEVERITY_DOT[r.severity]}`} />
               <span className="text-[13px] font-medium text-t1">{r.name}</span>
               {r.role === 'ra' && <span className="pill">RA</span>}
               <span className="mono ml-auto truncate text-[11px] text-t3">
-                {whereNow(r.id) ? <span className="text-haven-safe">now in {whereNow(r.id)}</span> : `${spaces[r.room]?.name ?? r.room} · ${PRESENCE_LABEL[r.presence] ?? r.presence}`}
+                {whereNow(r.id) ? <span className="fade-swap text-haven-safe">now in {whereNow(r.id)}</span> : `${spaces[r.room]?.name ?? r.room} · ${PRESENCE_LABEL[r.presence] ?? r.presence}`}
               </span>
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1 pl-3.5">
               {r.impacts
                 .filter((i) => i !== 'power_lost' || r.impacts.length === 1)
                 .map((i) => (
-                  <span
-                    key={i}
-                    className={`pill ${['stranded', 'medication_at_risk', 'device_power_lost'].includes(i) ? 'pill-red' : i === 'away' || i === 'power_lost' ? '' : 'pill-amber'}`}
-                  >
+                  <span key={i} className={`pill pop ${HOT.has(i) ? 'pill-red' : i === 'away' || i === 'power_lost' ? '' : 'pill-amber'}`}>
                     {IMPACT_LABEL[i] ?? i}
                   </span>
                 ))}
@@ -142,11 +134,11 @@ export function ImpactLedger({ world, clock }: Props) {
           </li>
         ))}
         {others.map((r) => (
-          <li key={r.id} className="row flex items-center gap-2 py-1.5 text-[12px] text-t2">
+          <li key={r.id} className="row enter flex items-center gap-2 py-1.5 text-[12px] text-t2">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-t3/60" />
             <span>{r.name}</span>
             <span className="mono ml-auto truncate text-[11px] text-t3">
-              {whereNow(r.id) ? <span className="text-haven-safe">now in {whereNow(r.id)}</span> : `${spaces[r.room]?.name ?? r.room} · ${PRESENCE_LABEL[r.presence] ?? r.presence}`}
+              {whereNow(r.id) ? <span className="fade-swap text-haven-safe">now in {whereNow(r.id)}</span> : `${spaces[r.room]?.name ?? r.room} · ${PRESENCE_LABEL[r.presence] ?? r.presence}`}
             </span>
           </li>
         ))}
@@ -155,9 +147,59 @@ export function ImpactLedger({ world, clock }: Props) {
   )
 }
 
+/** Numbers tween to their new value over 500 ms; a hot tile pulses its glow once when it rises. */
+function StatTile({ value, label, hot }: { value: number; label: string; hot: boolean }) {
+  const shown = useTween(value)
+  const prev = useRef(value)
+  const [glow, setGlow] = useState(false)
+  useEffect(() => {
+    if (hot && value > prev.current) {
+      setGlow(true)
+      const t = setTimeout(() => setGlow(false), 950)
+      prev.current = value
+      return () => clearTimeout(t)
+    }
+    prev.current = value
+  }, [value, hot])
+  const isHot = hot && value > 0
+  return (
+    <div className="glass-card px-2.5 py-2">
+      <div className={`num text-[26px] leading-none transition-colors duration-300 ${isHot ? `text-haven-danger glow-red ${glow ? 'glow-once' : ''}` : value > 0 ? 'text-t1' : 'text-t3'}`}>{shown}</div>
+      <div className="label mt-1 leading-tight">{label}</div>
+    </div>
+  )
+}
+
+function useTween(target: number, ms = 500): number {
+  const [shown, setShown] = useState(target)
+  const from = useRef(target)
+  useEffect(() => {
+    const start = performance.now()
+    const a = from.current
+    if (a === target) return
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      from.current = target
+      setShown(target)
+      return
+    }
+    let raf = 0
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / ms)
+      const e = 1 - Math.pow(1 - t, 3)
+      const v = Math.round(a + (target - a) * e)
+      setShown(v)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else from.current = target
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, ms])
+  return shown
+}
+
 function Check() {
   return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#30d158" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="pop-check" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#30d158" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M1.5 5.5l2.5 2.5 4.5-5" />
     </svg>
   )

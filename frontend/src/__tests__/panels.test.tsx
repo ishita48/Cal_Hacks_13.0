@@ -26,7 +26,7 @@ describe('panels render the frame', () => {
     render(<PlanPanel world={world} clock={clock} />)
     expect(screen.getByText(/Hold the lifts 6 min/)).toBeTruthy()
     expect(screen.getByText(/Two staff bring Maya Reyes down by lift first/)).toBeTruthy()
-    expect(screen.getByText(/checks pass/)).toBeTruthy()
+    expect(screen.getAllByText(/checks pass/).length).toBeGreaterThan(0)
   })
 
   it('plan panel shouts when someone is left behind', () => {

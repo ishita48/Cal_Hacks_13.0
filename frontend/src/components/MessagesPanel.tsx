@@ -57,6 +57,9 @@ export function MessagesPanel({ world, clock }: Props) {
     )
   }
 
+  // Cards stagger in whenever the plan version changes (the list is keyed on the version).
+  let order = 0
+
   return (
     <div className="flex h-full flex-col gap-2.5 overflow-hidden">
       <div className="flex items-center justify-between">
@@ -75,7 +78,7 @@ export function MessagesPanel({ world, clock }: Props) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+      <div key={plan.version} className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         {groups.map(([title, msgs]) => {
           const rows = msgs.filter(visible)
           if (rows.length === 0) return null
@@ -88,8 +91,9 @@ export function MessagesPanel({ world, clock }: Props) {
                 {rows.map((m) => {
                   const at = sentAt(m)
                   const maya = m.to === 'maya'
+                  const delay = Math.min(order++, 15) * 30
                   return (
-                    <li key={m.id} className={`glass-card px-3 py-2.5 ${maya ? 'tint-blue' : ''}`}>
+                    <li key={m.id} className={`glass-card enter px-3 py-2.5 ${maya ? 'tint-blue' : ''}`} style={{ animationDelay: `${delay}ms` }}>
                       <div className="flex items-center gap-2">
                         <span
                           className={`mono flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-1.5 text-[9px] font-semibold ${
@@ -105,7 +109,12 @@ export function MessagesPanel({ world, clock }: Props) {
                         {m.priority === 'critical' && <span className="pill pill-red">critical</span>}
                         <span className="mono ml-auto shrink-0 text-[10px]">
                           {at != null ? (
-                            <span className="text-haven-safe">sent {formatTimeOfDay(clock.time_of_day - (clock.step - at) * clock.dt)}</span>
+                            <span key={at} className="pop-check inline-flex items-center gap-1 text-haven-safe">
+                              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M1.5 5.5l2.5 2.5 4.5-5" />
+                              </svg>
+                              sent {formatTimeOfDay(clock.time_of_day - (clock.step - at) * clock.dt)}
+                            </span>
                           ) : world.approved_plan ? (
                             <span className="text-t3">queued</span>
                           ) : (

@@ -263,6 +263,114 @@ body::before {
 }
 .haven-ring { animation: haven-ring 1.2s ease-out infinite; }
 
+/* ---- event-driven motion (animation pass) ------------------------------------------------ */
+/* Every class below is triggered by a world event (new plan version, new forecast, a step done,
+   a space getting wet). Mount-time animations run once because list keys are stable. */
+
+@keyframes haven-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.enter { animation: haven-enter 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes haven-slide-top {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.slide-top { animation: haven-slide-top 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes haven-pop {
+  from { transform: scale(0.9); opacity: 0.6; }
+  to { transform: scale(1); opacity: 1; }
+}
+.pop { animation: haven-pop 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes haven-pop-check {
+  0% { transform: scale(0.6); opacity: 0.4; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop-check { animation: haven-pop-check 250ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes haven-fade-swap {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-swap { animation: haven-fade-swap 300ms ease-out both; }
+
+/* one-shot highlights that fade over 1.2 s, in the entry's severity colour */
+@keyframes haven-hl-critical { 0% { background-color: rgba(255, 69, 58, 0.18); } 100% { background-color: transparent; } }
+@keyframes haven-hl-warning { 0% { background-color: rgba(255, 214, 10, 0.14); } 100% { background-color: transparent; } }
+@keyframes haven-hl-info { 0% { background-color: rgba(255, 255, 255, 0.08); } 100% { background-color: transparent; } }
+.hl-critical { animation: haven-slide-top 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both, haven-hl-critical 1.2s ease-out both; border-radius: 8px; }
+.hl-warning { animation: haven-slide-top 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both, haven-hl-warning 1.2s ease-out both; border-radius: 8px; }
+.hl-info { animation: haven-slide-top 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both, haven-hl-info 1.2s ease-out both; border-radius: 8px; }
+
+/* a veto landing: one red edge glow */
+@keyframes haven-veto-glow {
+  0% { box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.55), 0 0 24px rgba(255, 69, 58, 0.35); }
+  100% { box-shadow: 0 0 0 6px rgba(255, 69, 58, 0), 0 0 0 rgba(255, 69, 58, 0); }
+}
+.veto-glow { animation: haven-veto-glow 900ms ease-out 1; }
+
+/* a hot number going up: one glow pulse */
+@keyframes haven-glow-once {
+  0% { text-shadow: 0 0 18px rgba(255, 69, 58, 0.45); }
+  40% { text-shadow: 0 0 34px rgba(255, 69, 58, 0.95), 0 0 6px rgba(255, 69, 58, 0.8); }
+  100% { text-shadow: 0 0 18px rgba(255, 69, 58, 0.45); }
+}
+.glow-once { animation: haven-glow-once 900ms ease-out 1; }
+
+/* a removed plan step: collapse with a strike-through */
+@keyframes haven-collapse {
+  0% { opacity: 0.7; max-height: 120px; }
+  100% { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+}
+.leave { animation: haven-collapse 400ms cubic-bezier(0.4, 0, 0.6, 1) both; overflow: hidden; text-decoration: line-through; text-decoration-color: rgba(255, 255, 255, 0.35); }
+
+/* slide a block open or closed (left-behind) */
+.reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 380ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 300ms ease; }
+.reveal.is-open { grid-template-rows: 1fr; opacity: 1; }
+.reveal > * { overflow: hidden; min-height: 0; }
+
+/* agent cards: edge and dimming transitions */
+.agent-card { transition: opacity 300ms ease, box-shadow 450ms ease, background-color 300ms ease, border-color 300ms ease; }
+
+/* status glyphs tween their colour as a step moves ring -> assigned -> done */
+.glyph { transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease; }
+
+/* countdown pills must not jitter as they tick */
+.pill-count { min-width: 76px; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+
+/* ---- floor plan (SVG) ---- */
+.fp-fill { transition: opacity 500ms ease, fill 500ms ease; }
+.fp-fade-in { animation: haven-fp-fade 500ms ease-out both; }
+@keyframes haven-fp-fade { from { opacity: 0; } }
+
+@keyframes haven-fp-ripple {
+  0% { transform: scale(0.15); opacity: 0.7; }
+  100% { transform: scale(3); opacity: 0; }
+}
+.fp-ripple { transform-box: fill-box; transform-origin: center; animation: haven-fp-ripple 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both; pointer-events: none; }
+
+/* route draws itself on (pathLength=1 on the polyline) */
+@keyframes haven-fp-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.fp-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: haven-fp-draw 800ms cubic-bezier(0.2, 0.8, 0.2, 1) 1 both; }
+.fp-draw-dash { animation: haven-fp-fade 800ms ease-out both; }
+
+/* a person stranded: a red ring pulsing in at the room */
+@keyframes haven-fp-ring {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.fp-ring { transform-box: fill-box; transform-origin: center; animation: haven-fp-ring 1.4s ease-out infinite; pointer-events: none; }
+
+@keyframes haven-fp-mark {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.mark-in { transform-box: fill-box; transform-origin: center; animation: haven-fp-mark 320ms cubic-bezier(0.34, 1.4, 0.64, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
