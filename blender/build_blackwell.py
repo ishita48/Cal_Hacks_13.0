@@ -2343,21 +2343,23 @@ class Builder:
             print("compositor skipped:", exc)
 
     def build_walk_panel(self):
-        """Register the HAVEN sidebar (walk spots, cutaway, cameras) and store it in the .blend."""
-        src_path = Path(__file__).resolve().parent / "haven_walk.py" if "__file__" in globals() else ROOT / "blender" / "haven_walk.py"
-        try:
-            code = src_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            print("walk panel skipped:", exc)
-            return
-        text = bpy.data.texts.get("haven_walk.py") or bpy.data.texts.new("haven_walk.py")
-        text.clear()
-        text.write(code)
-        text.use_module = True          # re-registers on file load when Auto Run Python Scripts is on
-        try:
-            exec(compile(code, "haven_walk.py", "exec"), {"__name__": "haven_walk"})
-        except Exception as exc:
-            print("walk panel failed:", exc)
+        """Register the HAVEN sidebar panels and store them in the .blend: haven_walk.py (walk spots,
+        cutaway, cameras) and haven_live.py (the live link to the backend world state)."""
+        here = Path(__file__).resolve().parent if "__file__" in globals() else ROOT / "blender"
+        for fname in ("haven_walk.py", "haven_live.py"):
+            try:
+                code = (here / fname).read_text(encoding="utf-8")
+            except OSError as exc:
+                print(f"{fname} skipped:", exc)
+                continue
+            text = bpy.data.texts.get(fname) or bpy.data.texts.new(fname)
+            text.clear()
+            text.write(code)
+            text.use_module = True          # re-registers on file load when Auto Run Python Scripts is on
+            try:
+                exec(compile(code, fname, "exec"), {"__name__": fname[:-3]})
+            except Exception as exc:
+                print(f"{fname} failed:", exc)
 
     def build(self):
         self.build_shell()
