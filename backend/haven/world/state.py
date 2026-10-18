@@ -19,7 +19,7 @@ from ..agents.planner import compute_plan
 from ..building.graph import POWER_RELS, powered_levels
 from .cascade import Forecast, Impact, assess, describe, forecast
 from .context import WorldContext
-from .events import AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision, SensorReading
+from .events import ActionEvent, AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision, SensorReading
 from .physics import Happening, Hydraulics, step
 
 # Fixed simulation step, in simulated seconds.
@@ -74,6 +74,13 @@ class PendingCommand(BaseModel):
     completes_step: int
 
 
+class ActionState(BaseModel):
+    step_id: str
+    status: Literal["assigned", "done", "failed"]
+    step: int
+    detail: str = ""
+
+
 class PowerState(BaseModel):
     live: list[str] = Field(default_factory=list)
     levels: dict[str, bool] = Field(default_factory=dict)
@@ -102,6 +109,9 @@ class WorldState(BaseModel):
     agents: dict[str, bool] = Field(default_factory=dict)            # agent id -> enabled
     rules: list[Constraint] = Field(default_factory=list)            # manager-imposed constraints
     approved_plan_version: int | None = None
+    approved_plan: Plan | None = None            # frozen copy being executed; state.plan keeps advising
+    actions: dict[str, ActionState] = Field(default_factory=dict)    # step id -> progress
+    moved: dict[str, str] = Field(default_factory=dict)              # resident id -> space they are in now
 
     # -- derived views (recomputed by the reducer, never logged) --
     equipment: dict[str, EquipmentState] = Field(default_factory=dict)
@@ -153,6 +163,8 @@ def apply_input(state: WorldState, event: InputEvent, ctx: WorldContext) -> None
         state.record("rule", f'{event.actor}: "{event.text}"', "warning", code=event.code)
     elif isinstance(event, PlanDecision):
         _apply_decision(state, event)
+    elif isinstance(event, ActionEvent):
+        _apply_action(state, event, ctx)
     if changed:          # a repeated wet/dry reading changes nothing physical: skip the forecast
         _rederive(state, ctx, [])
     state.version += 1
@@ -267,10 +279,50 @@ def _apply_decision(state: WorldState, ev: PlanDecision) -> None:
         return
     if ev.decision == "approve":
         state.approved_plan_version = ev.plan_version
-        state.record("plan_approved", f"{ev.actor} approved plan v{ev.plan_version}", "info", version=ev.plan_version)
+        state.approved_plan = state.plan.model_copy(deep=True)
+        state.approved_plan.status = "approved"
+        state.record("plan_approved", f"{ev.actor} approved plan v{ev.plan_version}: HAVEN is acting", "info",
+                     version=ev.plan_version)
     else:
         state.approved_plan_version = None
+        state.approved_plan = None
         state.record("plan_rejected", f"{ev.actor} rejected plan v{ev.plan_version}", "warning", version=ev.plan_version)
+
+
+def _apply_action(state: WorldState, ev: ActionEvent, ctx: WorldContext) -> None:
+    plan = state.approved_plan
+    step = next((s for s in plan.steps if s.id == ev.step_id), None) if plan else None
+    if step is None:
+        state.record("command_rejected", f"Action on unknown step {ev.step_id}", "warning")
+        return
+    state.actions[ev.step_id] = ActionState(step_id=ev.step_id, status=ev.status, step=state.step, detail=ev.detail)
+    sev = "warning" if ev.status == "failed" else "info"
+    verb = {"assigned": "assigned", "done": "done", "failed": "FAILED"}[ev.status]
+    state.record("action", f"{verb}: {step.title}" + (f" — {ev.detail}" if ev.detail else ""), sev,
+                 step_id=step.id, status=ev.status, step_kind=step.kind, people=step.people)
+    if ev.status == "done" and step.kind in ("escort", "relocate", "shelter") and step.people:
+        where = _place(ctx, step.target, step.kind)
+        for rid in step.people:
+            if step.kind == "shelter":
+                state.moved.pop(rid, None)
+            elif where:
+                state.moved[rid] = where
+    if plan is not None:
+        statuses = [state.actions.get(s.id).status if s.id in state.actions else None for s in plan.steps]
+        plan.status = "done" if all(st == "done" for st in statuses) else "executing"
+
+
+def _place(ctx: WorldContext, target: str | None, kind: str) -> str | None:
+    """Where people end up after a step: a space id, or 'outside' for another building."""
+    if target is None:
+        return "L1-lobby" if kind == "escort" else None
+    if target in ctx.areas:
+        return target
+    if target in ctx.level_order:
+        for s in ctx.spec.spaces:
+            if s.level == target and s.kind in ("lounge", "study", "kitchen", "amenity") and s.capacity > 0:
+                return s.id
+    return "outside"
 
 
 def agent_label(ctx: WorldContext, agent: str) -> str:
@@ -331,11 +383,11 @@ def _rederive(state: WorldState, ctx: WorldContext, happenings: list[Happening],
         cur = state.equipment.get(eid)
         if cur is None or cur.status != status:
             state.equipment[eid] = EquipmentState(status=status, since_step=state.step)
-    state.impact = assess(ctx, h.live, h.wet)
+    state.impact = assess(ctx, h.live, h.wet, state.moved)
     if narrate:
         for ev in describe(ctx, happenings, live_before, h.live, impact_before, state.impact):
             state.record(ev.kind, ev.message, ev.severity, id=ev.id, cause=ev.cause, **ev.data)
-    state.forecast = forecast(h, ctx, state.impact, state.step)
+    state.forecast = forecast(h, ctx, state.impact, state.step, moved=state.moved)
     state.plan = compute_plan(ctx, state)
 
 

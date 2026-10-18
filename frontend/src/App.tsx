@@ -4,7 +4,9 @@ import { CascadePanel } from './components/CascadePanel'
 import { Controls } from './components/Controls'
 import { FloorPlan } from './components/FloorPlan'
 import { ImpactLedger } from './components/ImpactLedger'
+import { MessagesPanel } from './components/MessagesPanel'
 import { PlanPanel } from './components/PlanPanel'
+import { VoiceRule } from './components/VoiceRule'
 import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
 import { connectWorld, useWorld } from './state/world'
@@ -19,7 +21,7 @@ export default function App() {
 
   const { connection, clock, world } = useWorld()
   const [level, setLevel] = useState('L4')
-  const [rightTab, setRightTab] = useState<'agents' | 'cascade'>('agents')
+  const [rightTab, setRightTab] = useState<'agents' | 'messages' | 'cascade'>('agents')
 
   if (!world || !clock) {
     return <div className="flex h-full items-center justify-center text-slate-500">connecting to the world…</div>
@@ -68,8 +70,11 @@ export default function App() {
       <main className="grid min-h-0 flex-1 grid-cols-[320px_1fr_400px] gap-px overflow-hidden bg-ink-700">
         <section className="flex min-h-0 flex-col gap-4 overflow-hidden bg-ink-900 p-4">
           <Controls world={world} />
+          <div className="border-t border-ink-700 pt-3">
+            <VoiceRule world={world} />
+          </div>
           <div className="min-h-0 flex-1 border-t border-ink-700 pt-3">
-            <ImpactLedger world={world} />
+            <ImpactLedger world={world} clock={clock} />
           </div>
         </section>
 
@@ -109,18 +114,34 @@ export default function App() {
           </div>
           <div className="flex min-h-0 flex-col overflow-hidden bg-ink-900">
             <div className="flex gap-1 border-b border-ink-700 px-4 pt-2">
-              {(['agents', 'cascade'] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setRightTab(t)}
-                  className={`rounded-t px-3 py-1 text-xs uppercase tracking-wider ${rightTab === t ? 'bg-ink-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                >
-                  {t === 'agents' ? `Agents (${world.plan.stances.filter((s) => s.stance === 'veto').length} veto)` : 'Cascade'}
-                </button>
-              ))}
+              {(['agents', 'messages', 'cascade'] as const).map((t) => {
+                const shown = world.approved_plan ?? world.plan
+                const critical = shown.messages?.filter((m) => m.priority === 'critical').length ?? 0
+                const label =
+                  t === 'agents'
+                    ? `Agents (${world.plan.stances.filter((s) => s.stance === 'veto').length} veto)`
+                    : t === 'messages'
+                      ? `Messages${critical ? ` (${critical} critical)` : ''}`
+                      : 'Cascade'
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setRightTab(t)}
+                    className={`rounded-t px-3 py-1 text-xs uppercase tracking-wider ${rightTab === t ? 'bg-ink-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
             </div>
             <div className="min-h-0 flex-1 overflow-hidden p-4">
-              {rightTab === 'agents' ? <AgentConsole world={world} /> : <CascadePanel world={world} clock={clock} />}
+              {rightTab === 'agents' ? (
+                <AgentConsole world={world} />
+              ) : rightTab === 'messages' ? (
+                <MessagesPanel world={world} clock={clock} />
+              ) : (
+                <CascadePanel world={world} clock={clock} />
+              )}
             </div>
           </div>
         </section>

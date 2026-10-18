@@ -4,9 +4,12 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from ..integrations import cartesia
+from ..integrations.tiger import TigerSink
 
 from ..world.engine import ReplayActiveError, WorldEngine
 from ..world.events import AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading
@@ -18,6 +21,7 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     store = store or EventStore(os.environ.get("HAVEN_DB", "data/haven.db"))
     engine = WorldEngine(store)
     sensor_token = os.environ.get("HAVEN_SENSOR_TOKEN")
+    tiger = TigerSink()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -59,7 +63,45 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
             logged = await engine.submit(reading)
         except ReplayActiveError as e:
             raise HTTPException(409, str(e)) from e
+        wet = engine.state.sensors[reading.sensor_id].wet
+        await tiger.record(reading.sensor_id, logged.run_id, logged.step, reading.value, wet, reading.source)
         return {"seq": logged.seq, "step": logged.step}
+
+    @app.get("/api/sensor/{sensor_id}/history")
+    async def sensor_history(sensor_id: str, limit: int = 200):
+        """Readings over time: from Tiger Data when configured, otherwise from this run's event log."""
+        if tiger.configured:
+            rows = await tiger.history(sensor_id, limit)
+            if rows:
+                return {"source": "tiger", "readings": rows}
+        rows = [
+            {"time": e.wall_time, "value": e.event.value, "wet": e.event.value >= 0.5, "source": e.event.source,
+             "run_id": e.run_id, "step": e.step}
+            for e in store.events(engine.state.run_id)
+            if e.event.type == "sensor_reading" and e.event.sensor_id == sensor_id
+        ][-limit:]
+        return {"source": "event_log", "readings": rows}
+
+    class SpeakBody(BaseModel):
+        text: str
+        lang: str = "en"
+
+    @app.post("/api/speak")
+    async def speak(body: SpeakBody):
+        """Cartesia voice for a message in the plan (the plumber call, the manager alert)."""
+        audio = await cartesia.speak(body.text, body.lang)
+        if audio is None:
+            raise HTTPException(503, "voice not configured (set CARTESIA_API_KEY); use browser speech")
+        return Response(content=audio, media_type="audio/mpeg")
+
+    @app.get("/api/integrations")
+    async def integrations():
+        return {
+            "cartesia": cartesia.configured(),
+            "tiger": tiger.configured,
+            "llm": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
+            "sensor_token": bool(sensor_token),
+        }
 
     @app.post("/api/command")
     async def post_command(cmd: EquipmentCommand):
@@ -92,6 +134,28 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     @app.post("/api/rule")
     async def post_rule(rule: ManagerRule):
         return await _submit(rule)
+
+    class RuleText(BaseModel):
+        text: str
+        actor: str = "manager"
+        submit: bool = True
+
+    @app.post("/api/rule/parse")
+    async def parse_rule_text(body: RuleText):
+        from ..agents.rules import parse_rule
+
+        parsed = parse_rule(body.text)
+        if not parsed.confident:
+            from ..agents.llm import parse_rule_llm
+
+            llm = await parse_rule_llm(body.text)
+            if llm is not None:
+                parsed = llm
+        result = {"code": parsed.code, "summary": parsed.summary, "confident": parsed.confident, "text": body.text}
+        if body.submit and parsed.confident:
+            logged = await _submit(ManagerRule(text=body.text, code=parsed.code, actor=body.actor))
+            result.update(logged)
+        return result
 
     @app.post("/api/plan/decision")
     async def post_decision(decision: PlanDecision):

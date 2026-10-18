@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, formatClockHM, formatCountdown } from '../lib/api'
+import { api, formatClockHM, formatCountdown, formatTimeOfDay } from '../lib/api'
 import { useBuilding } from '../state/building'
-import type { Clock, PlanStep, Stance, StepKind, WorldState } from '../state/types'
+import type { ActionState, Clock, PlanStep, Stance, StepKind, WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
@@ -45,7 +45,9 @@ const METRIC_LABEL: Record<string, string> = {
 /** The computed plan: steps with reasons, who is left behind, the negotiation that produced it. */
 export function PlanPanel({ world, clock }: Props) {
   const roster = useBuilding((b) => b.residents)
-  const plan = world.plan
+  const live = world.plan
+  const executing = world.approved_plan
+  const plan = executing ?? live
   const [showRounds, setShowRounds] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -66,14 +68,16 @@ export function PlanPanel({ world, clock }: Props) {
     prevIds.current = new Set(plan.steps.map((s) => s.id))
   }, [plan.version, plan.steps])
 
-  const approvedThis = world.approved_plan_version === plan.version
-  const approvedStale = world.approved_plan_version !== null && !approvedThis
+  const approvedThis = executing !== null
+  const adviceDiffers = executing !== null && live.version !== executing.version
   const base = plan.computed_step * clock.dt
   const replay = world.mode === 'replay'
+  const doneCount = plan.steps.filter((s) => world.actions[s.id]?.status === 'done').length
+  const failedCount = plan.steps.filter((s) => world.actions[s.id]?.status === 'failed').length
 
   const decide = (decision: 'approve' | 'reject') => {
     setError(null)
-    api.decidePlan(plan.version, decision).catch((e: Error) => setError(e.message))
+    api.decidePlan(live.version, decision).catch((e: Error) => setError(e.message))
   }
 
   const nameOf = (id: string) => roster[id]?.name ?? id
@@ -100,7 +104,13 @@ export function PlanPanel({ world, clock }: Props) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {approvedThis ? (
-            <span className="rounded border border-haven-safe/60 bg-haven-safe/10 px-2 py-1 text-xs font-semibold text-haven-safe">Approved v{plan.version}</span>
+            <span
+              className={`rounded border px-2 py-1 text-xs font-semibold ${
+                plan.status === 'done' ? 'border-haven-safe bg-haven-safe/20 text-haven-safe' : 'border-haven-safe/60 bg-haven-safe/10 text-haven-safe haven-pulse'
+              }`}
+            >
+              {plan.status === 'done' ? `Done · v${plan.version}` : `Executing v${plan.version}`}
+            </span>
           ) : (
             <button
               disabled={replay}
@@ -110,10 +120,29 @@ export function PlanPanel({ world, clock }: Props) {
               Approve
             </button>
           )}
-          {approvedStale && <span className="text-[10px] text-amber-400">plan changed since approval (v{world.approved_plan_version})</span>}
         </div>
       </div>
       {error && <p className="text-xs text-haven-danger">{error}</p>}
+
+      {executing && (
+        <div>
+          <div className="flex items-center justify-between text-[10px] text-slate-500">
+            <span>
+              {doneCount} of {plan.steps.length} steps done{failedCount > 0 && <span className="text-haven-danger"> · {failedCount} failed</span>}
+            </span>
+            <span className="font-mono">{plan.steps.length ? Math.round((doneCount / plan.steps.length) * 100) : 0}%</span>
+          </div>
+          <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-ink-700">
+            <div className="h-full bg-haven-safe transition-all duration-500" style={{ width: `${plan.steps.length ? (doneCount / plan.steps.length) * 100 : 0}%` }} />
+          </div>
+        </div>
+      )}
+      {adviceDiffers && (
+        <div className="rounded border border-amber-400/40 bg-amber-400/5 px-2.5 py-1.5 text-[11px]">
+          <span className="font-semibold uppercase tracking-wider text-amber-400">current advice v{live.version} differs</span>
+          <p className="mt-0.5 text-slate-300">{live.headline}</p>
+        </div>
+      )}
 
       {plan.left_behind.length > 0 && (
         <div className="rounded-lg border-2 border-haven-danger bg-haven-danger/15 px-3 py-2 haven-pulse">
@@ -141,7 +170,7 @@ export function PlanPanel({ world, clock }: Props) {
 
       <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
         {plan.steps.map((s) => (
-          <StepRow key={s.id} step={s} fresh={fresh.has(s.id)} base={base} clock={clock} />
+          <StepRow key={s.id} step={s} fresh={fresh.has(s.id)} base={base} clock={clock} action={executing ? world.actions[s.id] : undefined} />
         ))}
       </ol>
 
@@ -184,16 +213,25 @@ export function PlanPanel({ world, clock }: Props) {
   )
 }
 
-function StepRow({ step, fresh, base, clock }: { step: PlanStep; fresh: boolean; base: number; clock: Clock }) {
+function StepRow({ step, fresh, base, clock, action }: { step: PlanStep; fresh: boolean; base: number; clock: Clock; action?: ActionState }) {
   const [glyph, cls] = KIND_GLYPH[step.kind] ?? ['•', 'bg-ink-700 text-slate-300']
   const startAt = base + step.at_s
   const startIn = startAt - clock.sim_time
   const deadlineAt = step.deadline_s != null ? base + step.deadline_s : null
   const deadlineIn = deadlineAt != null ? deadlineAt - clock.sim_time : null
+  const status = action?.status
+  const border =
+    status === 'done' ? 'border-haven-safe/50' : status === 'failed' ? 'border-haven-danger/60' : status === 'assigned' ? 'border-amber-400/50' : 'border-ink-700'
+  const actionTime = action ? formatTimeOfDay(clock.time_of_day - (clock.step - action.step) * clock.dt) : null
   return (
-    <li className={`flex gap-2 rounded border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-xs ${fresh ? 'haven-flash' : ''}`}>
-      <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] ${cls}`} title={step.kind}>
-        {glyph}
+    <li className={`flex gap-2 rounded border bg-ink-900 px-2.5 py-1.5 text-xs ${border} ${fresh ? 'haven-flash' : ''} ${status === 'done' ? 'opacity-80' : ''}`}>
+      <span
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] ${
+          status === 'done' ? 'bg-haven-safe/20 text-haven-safe' : status === 'failed' ? 'bg-haven-danger/20 text-haven-danger' : status === 'assigned' ? 'bg-amber-400/20 text-amber-300 haven-pulse' : cls
+        }`}
+        title={status ? `${step.kind} · ${status}` : step.kind}
+      >
+        {status === 'done' ? '✓' : status === 'failed' ? '✗' : glyph}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
@@ -214,6 +252,12 @@ function StepRow({ step, fresh, base, clock }: { step: PlanStep; fresh: boolean;
           )}
           {step.satisfies.length > 0 && <span className="truncate">for {step.satisfies.map((a) => a.replace('resident:', '')).join(', ')}</span>}
         </div>
+        {action && (
+          <div className={`mt-0.5 font-mono text-[10px] ${status === 'done' ? 'text-haven-safe' : status === 'failed' ? 'text-haven-danger' : 'text-amber-300'}`}>
+            {status === 'done' ? '✓ done' : status === 'failed' ? '✗ failed' : '… assigned'} {actionTime}
+            {action.detail ? ` · ${action.detail}` : ''}
+          </div>
+        )}
       </div>
     </li>
   )

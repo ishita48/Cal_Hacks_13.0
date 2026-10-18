@@ -153,6 +153,19 @@ export interface Round {
   feasible: boolean
 }
 
+export interface Message {
+  id: string
+  to: string
+  name: string
+  role: 'resident' | 'staff' | 'external'
+  channel: string
+  lang: string
+  priority: 'critical' | 'normal'
+  text: string
+  step_ids: string[]
+  count: number
+}
+
 export interface Plan {
   version: number
   computed_step: number
@@ -165,7 +178,24 @@ export interface Plan {
   enabled_agents: string[]
   rules: Constraint[]
   headline: string
+  messages: Message[]
   signature: number
+}
+
+export interface ActionState {
+  step_id: string
+  status: 'assigned' | 'done' | 'failed'
+  step: number
+  detail: string
+}
+
+export interface RuleParse {
+  code: string
+  summary: string
+  confident: boolean
+  text: string
+  seq?: number
+  step?: number
 }
 
 export interface AgentInfo {
@@ -192,6 +222,9 @@ export interface WorldState {
   agents: Record<string, boolean>
   rules: Constraint[]
   approved_plan_version: number | null
+  approved_plan: Plan | null
+  actions: Record<string, ActionState>
+  moved: Record<string, string>
   equipment: Record<string, EquipmentState>
   power: PowerState
   impact: Impact

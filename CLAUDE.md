@@ -31,12 +31,25 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     speak, and anyone with a critical need nobody spoke for lands in `plan.left_behind`: that is the Maya moment.
     Inputs: `POST /api/agent` (toggle), `/api/rule` (manager constraint code), `/api/plan/decision` (approve).
     No LLM decides anything here; an LLM may only paraphrase stances later.
+  - `haven/agents/rules.py` voice governance (Phase 5): a spoken sentence -> one constraint code
+    (`no_off_campus`, `no_wake`, `shelter_in_place`, `no_moves_after:HH:MM`, `lifts_first`); regex first,
+    `haven/agents/llm.py` (Anthropic SDK, key-gated) only as the fallback parser / narrator. The planner
+    honours codes, never prose. `POST /api/rule/parse` parses and submits a `ManagerRule` event.
+  - Messages: `plan.messages` is derived with the plan (one per person with a need, grouped per step and
+    language for everyone else, plus RA / facilities / plumber / dean / manager briefs; es + zh templates).
+  - Execution: approving freezes `state.approved_plan`; `WorldEngine.due_actions()` turns its steps into
+    input events at their time (`EquipmentCommand` with `step_id`, `ActionEvent` assigned/done). People moved
+    by a done step live in `state.moved`, and `assess` judges them where they are. Replay reproduces it all.
+  - `haven/integrations/` optional, key-gated sponsors: `cartesia.py` (`POST /api/speak`, CARTESIA_API_KEY),
+    `tiger.py` (sensor readings hypertable, TIGER_DATABASE_URL; `GET /api/sensor/{id}/history` falls back to the
+    event log). `GET /api/integrations` says what is on. See `backend/.env.example`.
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
 - `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;
   `src/state/building.ts` caches the static spec + roster (not world state). Components: `FloorPlan`
   (SVG from the spec, coloured only by world state), `ImpactLedger`, `CascadePanel` (forecast + timeline), `Controls`.
-- `firmware/` — ESP32 water sensor → `POST /api/sensor` (Phase 7).
+- `firmware/haven_sensor/haven_sensor.ino` — ESP32 + resistive probe → `POST /api/sensor` with
+  `X-Haven-Token`; posts on every wet/dry crossing and a 15 s heartbeat. Calibrate DRY_RAW / WET_RAW from Serial.
 - `blender/` — scripted exterior built from the same building spec (Phase 3).
 
 ## Commands

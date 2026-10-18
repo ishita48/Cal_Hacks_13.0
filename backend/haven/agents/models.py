@@ -46,6 +46,21 @@ class PlanStep(BaseModel):
     count: int = 0                  # people covered (for relocate/notify)
 
 
+class Message(BaseModel):
+    """One tailored message the plan implies: who, how, in what language, saying what."""
+
+    id: str
+    to: str                         # resident id, staff id, or "plumber" / "dean"
+    name: str
+    role: Literal["resident", "staff", "external"]
+    channel: str                    # sms | call | app | text_only | email
+    lang: str = "en"
+    priority: Literal["critical", "normal"] = "normal"
+    text: str
+    step_ids: list[str] = Field(default_factory=list)
+    count: int = 1                  # people this message goes to (grouped messages)
+
+
 class Round(BaseModel):
     n: int
     title: str
@@ -67,4 +82,5 @@ class Plan(BaseModel):
     enabled_agents: list[str] = Field(default_factory=list)
     rules: list[Constraint] = Field(default_factory=list)     # manager-imposed (voice) constraints
     headline: str = ""
+    messages: list[Message] = Field(default_factory=list)
     signature: int = 0              # content hash; version bumps only when this changes

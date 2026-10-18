@@ -15,7 +15,7 @@ const NAMED = new Set(['maya', 'dana', 'jordan', 'sam', 'lucia', 'theo', 'nora',
  * flipped inside the <g>). Everything that changes colour comes from the world state.
  */
 export function FloorPlan({ world, level }: Props) {
-  const { byLevel, equipmentByLevel, spaces, spec, width, depth } = useBuilding()
+  const { byLevel, equipmentByLevel, spaces, spec, width, depth, residents } = useBuilding()
   const here = byLevel[level] ?? []
   const equipment = equipmentByLevel[level] ?? []
   const openings = useMemo(() => (spec?.openings ?? []).filter((o) => o.level === level), [spec, level])
@@ -28,10 +28,34 @@ export function FloorPlan({ world, level }: Props) {
     const src = world.impact.residents.length ? world.impact.residents : world.forecast.impact.residents
     const predicted = world.impact.residents.length === 0
     return src
-      .filter((r) => r.level === level && r.severity !== 'info')
+      .filter((r) => r.level === level && r.severity !== 'info' && !world.moved[r.id])
       .map((r) => ({ r, predicted, space: spaces[r.room] }))
       .filter((m) => m.space)
-  }, [world.impact.residents, world.forecast.impact.residents, level, spaces])
+  }, [world.impact.residents, world.forecast.impact.residents, world.moved, level, spaces])
+
+  // People an executed step has moved: drawn where they are now, spread around the space.
+  const movedMarks = useMemo(() => {
+    const out: { id: string; name: string; x: number; y: number; named: boolean }[] = []
+    const perSpace: Record<string, number> = {}
+    for (const [rid, sid] of Object.entries(world.moved)) {
+      const s = spaces[sid]
+      if (!s || s.level !== level) continue
+      const k = perSpace[sid] ?? 0
+      perSpace[sid] = k + 1
+      const w = s.rect.x1 - s.rect.x0
+      const cols = Math.max(1, Math.floor(w / 1.2))
+      const x = s.rect.x0 + 0.8 + (k % cols) * 1.2
+      const y = s.rect.y0 + 0.8 + Math.floor(k / cols) * 1.2
+      out.push({
+        id: rid,
+        name: residents[rid]?.name ?? rid,
+        x: Math.min(x, s.rect.x1 - 0.5),
+        y: Math.min(y, s.rect.y1 - 0.5),
+        named: NAMED.has(rid),
+      })
+    }
+    return out
+  }, [world.moved, spaces, level, residents])
 
   const routes = useMemo(() => {
     const out: { id: string; points: string }[] = []
@@ -120,6 +144,12 @@ export function FloorPlan({ world, level }: Props) {
           )
         })}
 
+        {movedMarks.map((m) => (
+          <circle key={`moved-${m.id}`} cx={m.x} cy={m.y} r={m.named ? 0.8 : 0.45} fill="#2ecc8f" stroke="#07090c" strokeWidth={0.12}>
+            <title>{m.name} · moved here</title>
+          </circle>
+        ))}
+
         {marks.map(({ r, predicted, space }) => {
           const cx = (space.rect.x0 + space.rect.x1) / 2
           const cy = (space.rect.y0 + space.rect.y1) / 2
@@ -150,6 +180,13 @@ export function FloorPlan({ world, level }: Props) {
           .map(({ r, space }) => (
             <text key={r.id} x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 - 1.5} textAnchor="middle" fontSize={1.3} fill="#fff" fontWeight={600}>
               {r.name.split(' ')[0]}
+            </text>
+          ))}
+        {movedMarks
+          .filter((m) => m.named)
+          .map((m) => (
+            <text key={`moved-label-${m.id}`} x={m.x} y={depth - m.y - 1.2} textAnchor="middle" fontSize={1.3} fill="#2ecc8f" fontWeight={600}>
+              {m.name.split(' ')[0]}
             </text>
           ))}
       </g>

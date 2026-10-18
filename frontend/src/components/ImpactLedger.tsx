@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { IMPACT_LABEL, NEED_LABEL, PRESENCE_LABEL, SEVERITY_DOT } from '../lib/labels'
 import { useBuilding } from '../state/building'
-import type { Impact, WorldState } from '../state/types'
+import type { Clock, Impact, WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
+  clock?: Clock
 }
 
 const STAT_KEYS: [string, string][] = [
@@ -19,9 +20,23 @@ const STAT_KEYS: [string, string][] = [
 ]
 
 /** Who is affected, now or if nothing is done. Every row is a person the agents will speak for. */
-export function ImpactLedger({ world }: Props) {
+export function ImpactLedger({ world, clock }: Props) {
   const spaces = useBuilding((b) => b.spaces)
   const roster = useBuilding((b) => b.residents)
+  const outcome = world.approved_plan?.status === 'done' ? world.approved_plan : null
+  const whereNow = (id: string): string | null => {
+    const sp = world.moved[id]
+    if (!sp) return null
+    if (sp === 'outside') return 'another building'
+    return spaces[sp]?.name ?? sp
+  }
+  const minutesToDone = (() => {
+    if (!outcome || !clock) return null
+    const start = world.timeline.find((t) => t.kind === 'sensor_wet')?.step
+    const doneSteps = world.timeline.filter((t) => t.kind === 'action' && t.data.status === 'done').map((t) => t.step)
+    if (start == null || doneSteps.length === 0) return null
+    return ((Math.max(...doneSteps) - start) * clock.dt) / 60
+  })()
   const hasNow = world.impact.residents.length > 0
   const [view, setView] = useState<'auto' | 'now' | 'forecast'>('auto')
   const showing: 'now' | 'forecast' = view === 'auto' ? (hasNow ? 'now' : 'forecast') : view
@@ -49,6 +64,20 @@ export function ImpactLedger({ world }: Props) {
           ))}
         </div>
       </div>
+
+      {outcome && (
+        <div className="rounded-lg border border-haven-safe/60 bg-haven-safe/10 px-3 py-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-haven-safe">Outcome · plan v{outcome.version} done</div>
+          <ul className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-slate-200">
+            <li>✓ everyone with a need: named step</li>
+            <li>✓ {outcome.metrics.relocated ?? 0} relocated</li>
+            <li className={outcome.left_behind.length ? 'text-haven-danger' : ''}>
+              {outcome.left_behind.length ? '✗' : '✓'} {outcome.left_behind.length} left behind
+            </li>
+            <li>{minutesToDone != null ? `✓ ${minutesToDone.toFixed(0)} min detection → done` : '✓ done'}</li>
+          </ul>
+        </div>
+      )}
 
       <div className="grid grid-cols-4 gap-1">
         {STAT_KEYS.map(([k, label]) => {
@@ -86,7 +115,7 @@ export function ImpactLedger({ world }: Props) {
               <span className="font-medium text-white">{r.name}</span>
               {r.role === 'ra' && <span className="rounded bg-ink-700 px-1 text-[9px] uppercase text-slate-400">RA</span>}
               <span className="ml-auto font-mono text-[10px] text-slate-500">
-                {spaces[r.room]?.name ?? r.room} · {PRESENCE_LABEL[r.presence] ?? r.presence}
+                {whereNow(r.id) ? <span className="text-haven-safe">now in {whereNow(r.id)}</span> : `${spaces[r.room]?.name ?? r.room} · ${PRESENCE_LABEL[r.presence] ?? r.presence}`}
               </span>
             </div>
             <div className="mt-1 flex flex-wrap gap-1">
@@ -111,7 +140,7 @@ export function ImpactLedger({ world }: Props) {
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600" />
             <span>{r.name}</span>
             <span className="ml-auto font-mono text-[10px] text-slate-500">
-              {spaces[r.room]?.name ?? r.room} · {PRESENCE_LABEL[r.presence] ?? r.presence}
+              {whereNow(r.id) ? <span className="text-haven-safe">now in {whereNow(r.id)}</span> : `${spaces[r.room]?.name ?? r.room} · ${PRESENCE_LABEL[r.presence] ?? r.presence}`}
             </span>
           </li>
         ))}

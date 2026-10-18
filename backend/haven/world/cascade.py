@@ -80,7 +80,8 @@ class Forecast(BaseModel):
 # ---- impact --------------------------------------------------------------------------------
 
 
-def assess(ctx: WorldContext, live: set[str], wet: set[str]) -> Impact:
+def assess(ctx: WorldContext, live: set[str], wet: set[str], moved: dict[str, str] | None = None) -> Impact:
+    moved = moved or {}
     G = ctx.graph
     levels = powered_levels(G, live)
     dark = sorted((lv for lv, ok in levels.items() if not ok), key=lambda lv: ctx.level_order[lv])
@@ -96,7 +97,7 @@ def assess(ctx: WorldContext, live: set[str], wet: set[str]) -> Impact:
     counts.update(on_dark_floors=0, asleep=0, affected=0)
 
     for r in ctx.roster.residents:
-        impacts = _resident_impacts(ctx, r, live, dark_set, lifts_ok, routes)
+        impacts = _resident_impacts(ctx, r, live, dark_set, lifts_ok, routes, moved.get(r.id))
         if not impacts or impacts == ["away"]:
             continue
         for k in impacts:
@@ -123,12 +124,16 @@ def assess(ctx: WorldContext, live: set[str], wet: set[str]) -> Impact:
 
 
 def _resident_impacts(ctx: WorldContext, r: Resident, live: set[str], dark: set[str], lifts_ok: bool,
-                      routes: dict[str, list[str] | None]) -> list[str]:
+                      routes: dict[str, list[str] | None], moved_to: str | None = None) -> list[str]:
     out: list[str] = []
-    here = r.location if r.presence == "elsewhere" and r.location else r.room
+    here = moved_to or (r.location if r.presence == "elsewhere" and r.location else r.room)
+    if here == "outside":
+        return []
     level_here = ctx.space_level(here)
     in_building = r.presence != "away"
     upstairs = ctx.level_order[level_here] > ctx.level_order["L1"]
+    # Someone already moved to a powered space has what they need tonight.
+    sleeps_dark = (level_here if moved_to else r.level) in dark
 
     if "step_free_route" in r.needs:
         path = route(ctx.graph, here, OUTSIDE, live, step_free_only=True) if in_building else None
@@ -137,15 +142,15 @@ def _resident_impacts(ctx: WorldContext, r: Resident, live: set[str], dark: set[
             out.append("stranded")
     if r.medication_location and r.medication_location not in live:
         out.append("medication_at_risk")
-    if "medical_device_power" in r.needs and r.level in dark:
+    if "medical_device_power" in r.needs and sleeps_dark:
         out.append("device_power_lost")
     if "stairs_slow" in r.needs and in_building and upstairs and not lifts_ok:
         out.append("stairs_only_slow")
     if "guide_dog" in r.needs and in_building and level_here in dark:
         out.append("needs_escort")
-    if "visual_alerts" in r.needs and in_building and (level_here in dark or r.level in dark):
+    if "visual_alerts" in r.needs and in_building and sleeps_dark:
         out.append("needs_visual_alert")
-    if r.level in dark:
+    if sleeps_dark:
         out.append("power_lost")
     if not in_building:
         out.append("away")
@@ -256,7 +261,7 @@ def _resident_message(ctx: WorldContext, r: ResidentImpact, impact: str) -> str:
 
 
 def forecast(h: Hydraulics, ctx: WorldContext, impact_now: Impact, computed_step: int,
-             horizon_s: float = 3600.0, dt: float = 1.0) -> Forecast:
+             horizon_s: float = 3600.0, dt: float = 1.0, moved: dict[str, str] | None = None) -> Forecast:
     """Run the water forward from the current state and narrate what will fail, and when."""
     sim = h.copy()
     events: list[ChainEvent] = []
@@ -272,7 +277,7 @@ def forecast(h: Hydraulics, ctx: WorldContext, impact_now: Impact, computed_step
         hap = step(sim, ctx, dt)
         if not hap:
             continue
-        new_impact = assess(ctx, sim.live, sim.wet) if sim.live != live_before else impact
+        new_impact = assess(ctx, sim.live, sim.wet, moved) if sim.live != live_before else impact
         events.extend(describe(ctx, hap, live_before, sim.live, impact, new_impact, eta_s=t))
         live_before, impact = set(sim.live), new_impact
     return Forecast(computed_step=computed_step, horizon_s=horizon_s, events=events, impact=impact, settled=settled)

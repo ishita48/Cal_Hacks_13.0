@@ -32,6 +32,17 @@ class EquipmentCommand(BaseModel):
     equipment_id: str
     command: Literal["close", "open", "off", "on"]
     actor: str = "operator"
+    step_id: str | None = None    # set when an approved plan step issued it
+
+
+class ActionEvent(BaseModel):
+    """HAVEN (or staff) reports progress on an approved plan step. Logged like any input."""
+
+    type: Literal["action"] = "action"
+    step_id: str
+    status: Literal["assigned", "done", "failed"]
+    detail: str = ""
+    actor: str = "haven"
 
 
 class AgentToggle(BaseModel):
@@ -61,7 +72,8 @@ class PlanDecision(BaseModel):
 
 
 InputEvent = Annotated[
-    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision], Field(discriminator="type")
+    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent],
+    Field(discriminator="type"),
 ]
 
 

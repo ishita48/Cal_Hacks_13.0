@@ -14,13 +14,14 @@ from typing import Any
 from ..building.model import BuildingSpec
 from ..people.roster import Roster
 from .context import WorldContext, build_context
-from .events import InputEvent, LoggedEvent
+from .events import ActionEvent, EquipmentCommand, InputEvent, LoggedEvent
 from .state import DT, SCENARIO_START_TOD, WorldState, advance, apply_input, initial_state
 from .store import EventStore
 
 log = logging.getLogger("haven.engine")
 
 TICK_SECONDS = 0.1  # real seconds between loop iterations / broadcasts
+STEP_FRAME_HZ = 2.0  # frames per second when only the clock advanced (every version change is sent at once)
 MAX_SPEED = 120.0
 
 
@@ -46,6 +47,7 @@ class WorldEngine:
         self._task: asyncio.Task | None = None
         self._last_broadcast_version = -1
         self._last_broadcast_step = -1
+        self._last_broadcast_at = 0.0
         self.state: WorldState = initial_state(store.create_run(scenario), scenario, self.ctx)
 
     # ---- lifecycle -------------------------------------------------------------------
@@ -142,23 +144,61 @@ class WorldEngine:
                             self._step_budget -= 1.0
                             advance(self.state, self.ctx)
                             self._apply_due_replay_events()
+                await self._execute_due()
                 await self._broadcast()
             except Exception:  # keep the world alive; one bad tick must not kill the demo
                 log.exception("world loop tick failed")
             await asyncio.sleep(max(0.0, next_tick - loop.time()))
+
+    # ---- acting on the approved plan --------------------------------------------------------
+
+    def due_actions(self) -> list[InputEvent]:
+        """Events the executor owes the world right now: commands at their time, progress reports."""
+        st = self.state
+        plan = st.approved_plan
+        if st.mode != "live" or plan is None or plan.status == "done":
+            return []
+        elapsed = (st.step - plan.computed_step) * DT
+        out: list[InputEvent] = []
+        for step in plan.steps:
+            cur = st.actions.get(step.id)
+            if cur is None and step.at_s <= elapsed:
+                if step.command:
+                    out.append(EquipmentCommand(**step.command, actor="haven:plan", step_id=step.id))
+                if step.kind in ("call", "notify", "ticket", "valve", "isolate"):
+                    detail = {"call": "plumber dispatched, ETA ~20 min", "notify": f"{step.count} messages sent",
+                              "ticket": "ticket opened", "valve": "plumber on site, closing",
+                              "isolate": "breaker opened"}.get(step.kind, "")
+                    out.append(ActionEvent(step_id=step.id, status="done" if step.kind != "valve" else "assigned",
+                                           detail=detail))
+                else:
+                    out.append(ActionEvent(step_id=step.id, status="assigned", detail=f"{step.actor} dispatched"))
+            elif cur is not None and cur.status == "assigned" and step.deadline_s is not None and step.deadline_s <= elapsed:
+                out.append(ActionEvent(step_id=step.id, status="done", detail=f"{step.actor} confirmed"))
+            elif cur is not None and cur.status == "assigned" and step.deadline_s is None and step.kind in ("shelter", "hold") \
+                    and step.at_s + 60 <= elapsed:
+                out.append(ActionEvent(step_id=step.id, status="done", detail=f"{step.actor} confirmed"))
+        return out
+
+    async def _execute_due(self) -> None:
+        for ev in self.due_actions():
+            await self.submit(ev)
 
     def _apply_due_replay_events(self) -> None:
         while self._replay_queue and self._replay_queue[0].step <= self.state.step:
             apply_input(self.state, self._replay_queue.pop(0).event, self.ctx)
 
     async def _broadcast(self, force: bool = False) -> None:
-        if not force and (
-            self.state.version == self._last_broadcast_version
-            and self.state.step == self._last_broadcast_step
-        ):
-            return
+        now = asyncio.get_running_loop().time()
+        if not force:
+            if self.state.version == self._last_broadcast_version and self.state.step == self._last_broadcast_step:
+                return
+            # Only the clock moved: frames can be large, so cap step-only frames at STEP_FRAME_HZ.
+            if self.state.version == self._last_broadcast_version and now - self._last_broadcast_at < 1.0 / STEP_FRAME_HZ:
+                return
         self._last_broadcast_version = self.state.version
         self._last_broadcast_step = self.state.step
+        self._last_broadcast_at = now
         msg = self.snapshot()
         for q in list(self._subscribers):
             if q.full():  # slow client: drop its stale frame, keep the newest

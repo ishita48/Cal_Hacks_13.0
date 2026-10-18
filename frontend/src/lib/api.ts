@@ -1,4 +1,4 @@
-import type { AgentInfo, BuildingSpec, Roster } from '../state/types'
+import type { AgentInfo, BuildingSpec, Roster, RuleParse } from '../state/types'
 
 const base = import.meta.env.VITE_HAVEN_API ?? ''
 
@@ -37,6 +37,8 @@ export const api = {
   decidePlan: (plan_version: number, decision: 'approve' | 'reject', actor = 'manager') =>
     request('POST', '/api/plan/decision', { plan_version, decision, actor }),
   rule: (text: string, code: string, actor = 'manager') => request('POST', '/api/rule', { text, code, actor }),
+  parseRule: (text: string, actor = 'manager', submit = true) =>
+    request<RuleParse>('POST', '/api/rule/parse', { text, actor, submit }),
 }
 
 export function formatTimeOfDay(seconds: number): string {
