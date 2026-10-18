@@ -35,3 +35,17 @@ def test_history_falls_back_to_the_event_log_and_speak_reports_unconfigured(monk
         assert client.post("/api/speak", json={"text": "hi"}).status_code == 503
         flags = client.get("/api/integrations").json()
         assert flags["cartesia"] is False and flags["tiger"] is False
+
+
+def test_agent_explanation_has_a_template_fallback(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    app = create_app(store=EventStore(), run_loop=False)
+    with TestClient(app) as client:
+        client.post("/api/sensor", json={"sensor_id": "basement_mech_1", "value": 0.9})
+        r = client.post("/api/agents/explain", json={"agent": "resident:maya", "round": 1}).json()
+        assert r["stance"] == "veto" and r["source"] == "template"
+        assert r["text"].startswith("I cannot accept") and "wheelchair" in r["text"]
+        r = client.post("/api/agents/explain", json={"agent": "resident:maya"}).json()
+        assert r["stance"] == "support"
+        assert client.post("/api/agents/explain", json={"agent": "resident:nobody"}).status_code == 404

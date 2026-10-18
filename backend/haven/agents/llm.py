@@ -103,3 +103,41 @@ async def narrate(plan_summary: str, audience: str = "the on-call manager") -> s
     if response.stop_reason == "refusal":
         return None
     return next((b.text for b in response.content if b.type == "text"), None)
+
+
+async def explain_stance(agent_label: str, stance: str, reason: str, rule: str | None, story: str | None,
+                         headline: str) -> str | None:
+    """One or two first-person sentences from an agent about its stance. Paraphrase only: the stance,
+    the reason and the rule are given; the model may not add facts or change the position."""
+    client = _client()
+    if client is None:
+        return None
+    facts = (f"Agent: {agent_label}. Stance: {stance}. Reason: {reason}. "
+             f"Hard rule: {rule or 'none'}. Who they speak for: {story or 'n/a'}. Plan headline: {headline}")
+    try:
+        response = await client.beta.messages.create(
+            model=MODEL,
+            max_tokens=200,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            system="You voice one agent in a building-emergency negotiation. Write one or two short first-person "
+                   "sentences explaining the agent's stance to the on-call manager. Use only the facts given; keep "
+                   "every number; do not change the stance; no preamble.",
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": facts}],
+        )
+    except Exception:
+        log.exception("explain failed")
+        return None
+    if response.stop_reason == "refusal":
+        return None
+    return next((b.text for b in response.content if b.type == "text"), None)
+
+
+def template_explanation(agent_label: str, stance: str, reason: str, rule: str | None, story: str | None) -> str:
+    """The no-key version: the same content, first person, deterministic."""
+    who = f" I speak for someone who {story[0].lower() + story[1:]}" if story else ""
+    opener = {"veto": "I cannot accept this plan.", "critique": "I can live with this plan, with one change.",
+              "support": "I support this plan.", "propose": "Here is what I propose."}.get(stance, "")
+    tail = f" My hard rule: {rule}." if rule else ""
+    return f"{opener} {reason}{tail}{who}".strip()

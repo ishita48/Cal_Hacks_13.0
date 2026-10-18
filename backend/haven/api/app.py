@@ -179,6 +179,32 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         polished = await narrate(summary)
         return {"text": polished or summary, "source": "llm" if polished else "template", "version": plan.version}
 
+    class ExplainBody(BaseModel):
+        agent: str
+        round: int = 2
+
+    @app.post("/api/agents/explain")
+    async def explain_agent(body: ExplainBody):
+        """An agent explains its stance in first person: Claude when a key is set, a template otherwise."""
+        from ..agents.llm import explain_stance, template_explanation
+
+        st = engine.state
+        plan = st.approved_plan or st.plan
+        rounds = {r.n: r for r in plan.rounds}
+        rnd = rounds.get(body.round) or (plan.rounds[-1] if plan.rounds else None)
+        stance = next((s for s in (rnd.stances if rnd else []) if s.agent == body.agent), None)
+        if stance is None:
+            raise HTTPException(404, f"{body.agent} has no stance in round {body.round}")
+        story = None
+        if stance.resident:
+            r = engine.ctx.roster.by_id().get(stance.resident)
+            story = r.story if r else None
+        rule = stance.constraint.rule if stance.constraint else None
+        text = await explain_stance(stance.label, stance.stance, stance.reason, rule, story, plan.headline)
+        source = "llm" if text else "template"
+        return {"agent": body.agent, "label": stance.label, "stance": stance.stance, "source": source,
+                "text": text or template_explanation(stance.label, stance.stance, stance.reason, rule, story)}
+
     class ClockBody(BaseModel):
         playing: bool | None = None
         speed: float | None = Field(default=None, gt=0)
