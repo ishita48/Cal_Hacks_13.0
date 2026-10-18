@@ -50,8 +50,16 @@ export function Phone() {
   )
 }
 
+/** Who holds this phone: the manager (default) or a responder named in ?as=... (ra_4, staff, facilities, plumber). */
+function whoAmI(): string {
+  const as = new URLSearchParams(location.search).get('as')
+  return as && /^[a-z_0-9]+$/.test(as) ? as : 'manager'
+}
+
 function PhoneBody({ world, clock, connection }: { world: WorldState; clock: Clock; connection: string }) {
   const roster = useBuilding((b) => b.residents)
+  const me = whoAmI()
+  if (me !== 'manager') return <ResponderBody world={world} clock={clock} me={me} />
   const approved = world.approved_plan
   const plan: Plan = approved ?? world.plan
   const incident = plan.status !== 'none'
@@ -161,6 +169,80 @@ function PhoneBody({ world, clock, connection }: { world: WorldState; clock: Clo
           )}
         </div>
       )}
+    </>
+  )
+}
+
+/** A responder's phone: only their steps, with a Done button. A tap is a real acknowledgement, logged as
+ *  an input event; a step nobody acknowledges is closed by the clock and labelled as such. */
+function ResponderBody({ world, clock, me }: { world: WorldState; clock: Clock; me: string }) {
+  const roster = useBuilding((b) => b.residents)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const approved = world.approved_plan
+  const mine = (approved?.steps ?? []).filter((s) => s.actor.split(',').map((a) => a.trim()).includes(me))
+  const name = roster[me]?.name ?? { staff: 'Desk staff', facilities: 'Luis Ortega (facilities)', plumber: 'Emergency plumber' }[me] ?? me
+  const brief = (approved ?? world.plan).messages.find((m) => m.to === me)
+  const ack = (stepId: string, status: 'done' | 'failed') => {
+    setBusy(stepId)
+    setError(null)
+    api
+      .acknowledge(stepId, me, status)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(null))
+  }
+  return (
+    <>
+      <header className="glass sticky top-0 z-10 flex items-center gap-3 rounded-none border-x-0 border-t-0 px-4 py-3">
+        <span className="text-[13px] font-semibold tracking-[0.18em] text-t1">HAVEN</span>
+        <span className="text-[11px] text-t3">{name}</span>
+        <span className="mono ml-auto text-[15px] font-semibold text-t1">{formatTimeOfDay(clock.time_of_day)}</span>
+      </header>
+      <main className="flex flex-1 flex-col gap-3 px-3 pt-3 pb-10">
+        {brief && (
+          <section className="glass px-4 py-3.5">
+            <span className="eyebrow">Your brief</span>
+            <p className="mt-1.5 text-[14px] leading-snug text-t1">{brief.text}</p>
+          </section>
+        )}
+        <section className="glass px-3.5 py-3">
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="eyebrow">Your steps</span>
+            <span className="mono text-[10px] text-t3">{approved ? `plan v${approved.version} · ${approved.status}` : 'no approved plan yet'}</span>
+          </div>
+          {mine.length === 0 && <p className="py-3 text-[12px] text-t3">Nothing assigned to you{approved ? '' : ' until the manager approves'}.</p>}
+          <ol>
+            {mine.map((s) => {
+              const a = world.actions[s.id]
+              const st = a?.status
+              return (
+                <li key={s.id} className="row flex items-start gap-2.5 py-2.5">
+                  <span className={`mono mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${st === 'done' ? 'bg-haven-safe/20 text-haven-safe' : st === 'assigned' ? 'bg-haven-power/25 text-haven-power haven-pulse' : 'border border-white/15 text-t3'}`}>
+                    {st === 'done' ? '✓' : st === 'assigned' ? '●' : s.order}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] leading-snug text-t1">{s.title}</div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-t2">{s.reason}</div>
+                    {a?.detail && <div className="mono mt-1 text-[10px] text-t3">{a.detail}</div>}
+                    {st === 'assigned' && (
+                      <div className="mt-2 flex gap-2">
+                        <button className="btn-primary btn-sm" disabled={busy === s.id || world.mode === 'replay'} onClick={() => ack(s.id, 'done')}>
+                          Done
+                        </button>
+                        <button className="btn-secondary btn-sm" disabled={busy === s.id || world.mode === 'replay'} onClick={() => ack(s.id, 'failed')}>
+                          Could not
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+          {error && <p className="mt-2 text-[11px] text-haven-danger">{error}</p>}
+        </section>
+        <p className="px-1 text-[10px] text-t3">Open this phone as someone else: ?as=ra_3, ?as=staff, ?as=facilities, ?as=plumber. Steps nobody acknowledges close at their deadline, labelled as auto-confirmed.</p>
+      </main>
     </>
   )
 }

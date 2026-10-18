@@ -375,6 +375,8 @@ body::before {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
+.pill-purple { border-color: rgba(191, 90, 242, 0.5); color: #d9a6ff; background: rgba(191, 90, 242, 0.12); }
+
 /* ---- Buds: the on-screen companion ------------------------------------------------------------- */
 .buds-orb {
   position: fixed; right: 22px; bottom: 22px; z-index: 70;

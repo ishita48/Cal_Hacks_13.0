@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { useBuilding } from '../state/building'
-import type { FetchAgent, FetchStatus, Stance, StanceKind, WorldState } from '../state/types'
+import type { FetchAgent, FetchStatus, NegotiationStatus, Stance, StanceKind, WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
@@ -61,6 +61,28 @@ export function AgentConsole({ world }: Props) {
   const fetchAgents = new Map<string, FetchAgent>()
   for (const a of fetchStatus?.agents ?? []) fetchAgents.set(a.id, a)
 
+  // Who is still reasoning (a model in the loop) for the current situation; the rule function speaks meanwhile.
+  const [negotiation, setNegotiation] = useState<NegotiationStatus | null>(null)
+  useEffect(() => {
+    let alive = true
+    let tries = 0
+    const poll = () => {
+      api
+        .negotiation()
+        .then((n) => {
+          if (!alive) return
+          setNegotiation(n)
+          if (n.mode === 'claude' && n.pending.length > 0 && tries++ < 40) setTimeout(poll, 800)
+        })
+        .catch(() => {})
+    }
+    poll()
+    return () => {
+      alive = false
+    }
+  }, [world.plan.version, world.plan.situation])
+  const thinking = new Set((negotiation?.pending ?? []).map((p) => p.split('#')[0]))
+
   const agentIds = Object.keys(world.agents)
   const storyIds = STORY.map((id) => `resident:${id}`).filter((id) => id in world.agents)
   const rest = agentIds.filter((id) => !SPECIALISTS.includes(id) && !storyIds.includes(id))
@@ -99,6 +121,7 @@ export function AgentConsole({ world }: Props) {
       onToggle={(on) => toggle(id, on)}
       hosted={fetchStatus?.running ? fetchAgents.get(id) : undefined}
       hostedOn={fetchStatus?.hosted}
+      thinking={thinking.has(id)}
     />
   )
 
@@ -107,6 +130,12 @@ export function AgentConsole({ world }: Props) {
       <div className="flex items-baseline justify-between">
         <span className="eyebrow">Agents · who speaks in the negotiation</span>
         <span className="mono text-[10px] text-t3">
+          {negotiation && (
+            <span className={`mr-2 ${negotiation.mode === 'claude' ? 'text-haven-purple' : 'text-t3'}`} title={negotiation.mode === 'claude' ? 'Agents reason with Claude; every stance is a logged input event' : 'No model key: the rule functions speak (set ANTHROPIC_API_KEY)'}>
+              {negotiation.mode === 'claude' ? `claude · ${negotiation.answered} spoke` : 'rules'}
+              {negotiation.pending.length > 0 ? ` · ${negotiation.pending.length} thinking` : ''}
+            </span>
+          )}
           {fetchStatus?.running && (
             <span className="mr-2 text-haven-blue" title={`HAVEN's table on Fetch.ai: ${fetchStatus.table ?? ''}`}>
               fetch.ai {fetchStatus.hosted} · {fetchStatus.agreeing}/{fetchStatus.received} confirmed
@@ -144,6 +173,7 @@ function AgentCard({
   onToggle,
   hosted,
   hostedOn,
+  thinking,
 }: {
   id: string
   index: number
@@ -157,6 +187,7 @@ function AgentCard({
   onToggle: (on: boolean) => void
   hosted?: FetchAgent
   hostedOn?: 'local' | 'agentverse'
+  thinking?: boolean
 }) {
   // Shake and glow the card the first time a veto appears on it.
   const prevStance = useRef<StanceKind | null>(null)
@@ -220,6 +251,12 @@ function AgentCard({
               {stance.stance}
             </span>
             <span className="text-[11px] leading-snug text-t1">{stance.reason}</span>
+          </div>
+          <div className="mono mt-1 flex items-center gap-1.5 text-[9px] text-t3">
+            <span className={`pill ${stance.source && stance.source !== 'rules' ? 'pill-purple' : ''}`} title={stance.source === 'fetch:claude' ? 'Reasoned with Claude inside this resident\'s Fetch.ai agent; signed; logged as an input event' : stance.source === 'claude' ? 'Reasoned with Claude; logged as an input event' : 'The deterministic rule function (no model, or the model has not answered yet)'}>
+              {stance.source === 'fetch:claude' ? 'claude via fetch.ai' : stance.source === 'claude' ? 'claude' : 'rules'}
+            </span>
+            {thinking && <span className="text-haven-purple haven-pulse">reasoning…</span>}
           </div>
           {stance.constraint && (
             <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-t3">

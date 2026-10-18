@@ -59,6 +59,17 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     `elevenlabs.py` (Phase 8): first voice for `POST /api/speak` (then Cartesia, then the browser; the response
     carries `X-Voice-Provider`), plus `GET /api/voice/agent` for a Conversational AI session grounded in the world.
     `sponsors.py`: `GET /api/sponsors` round-trip proof per sponsor (memoised 30 s, `?fresh=true`).
+  - `haven/agents/negotiation.py` (Phase 9): the negotiation for real. `AgentStance` is an input event
+    (agent, situation key, round, stance, reason, constraint code, step ids, source); `state.spoken` keeps them
+    per `situation#round`; `planner._evaluate` uses a spoken stance over the rule function, so a model's answer
+    shapes round 2 (`_revised_proposal` builds escorts only for agents that objected) and replay re-derives the
+    plan with no model. `planner.situation_key(sit)` hashes every fact agents reason from. `Negotiator` is a
+    plan listener: when the key changes it asks each enabled agent per round (Claude, `stance_llm`, validated by
+    `validate` against the codes its role may use, `AGENT_TIMEOUT_S`), residents through `Society.ask_resident`
+    (the uAgent calls the model and signs a `StanceMessage`, source `fetch:claude`), specialists in-process; the
+    checker is never asked. Without a key (`configured()` false) nothing is asked and `source == "rules"`.
+    `GET /api/negotiation` reports mode, pending and spoken. `POST /api/action` is a responder's acknowledgement
+    (actor must be on the step); `due_actions` auto-confirms at the deadline with an honest label.
   - `haven/agents/buds.py` (Phase 8): the on-screen companion. `answer()` is a deterministic intent router over
     the state (where is X, why the hold, forecast, left behind, counts, messages, plumber, agents) returning
     `Reply{speech, focus[], actions[]}`; `answer_llm()` is the Claude fallback that may only point at `pointable`

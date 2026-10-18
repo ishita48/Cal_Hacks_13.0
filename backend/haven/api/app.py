@@ -13,7 +13,8 @@ from ..integrations.sponsors import SponsorHealth
 from ..integrations.tiger import TigerSink
 
 from ..world.engine import ReplayActiveError, WorldEngine
-from ..world.events import AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading
+from ..agents.negotiation import Negotiator
+from ..world.events import ActionEvent, AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading
 from ..world.state import agent_label
 from ..world.store import EventStore
 
@@ -25,6 +26,10 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     tiger = TigerSink()
     society = fetch.Society(engine.ctx)          # the residents' agents on Fetch.ai (local or Agentverse)
     engine.plan_listeners.append(society.offer)
+    negotiator = Negotiator(engine.ctx, engine.submit, lambda: engine.state)   # agents reason with Claude when keyed
+    negotiator.ask_resident = society.ask_resident        # residents speak through their Fetch.ai identity
+    society.on_model_stance = negotiator.accept_from_network
+    engine.plan_listeners.append(negotiator.on_plan)
     sponsors = SponsorHealth(engine, society, tiger)
 
     @asynccontextmanager
@@ -185,9 +190,41 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
             "llm": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
             "sensor_token": bool(sensor_token),
             "fetch": society.running,
+            "negotiation": negotiator.enabled,
             "agentverse": fetch.agentverse() and society.running,
             **actions.providers(),
         }
+
+    @app.get("/api/negotiation")
+    async def negotiation_status():
+        """Who has spoken for the current situation, who is still thinking, and whether a model is in the loop."""
+        return negotiator.status(engine.state)
+
+    class ActionBody(BaseModel):
+        step_id: str
+        status: str = "done"
+        actor: str
+        detail: str = ""
+
+    @app.post("/api/action")
+    async def post_action(body: ActionBody):
+        """A responder acknowledges a step from their phone: a real human in the loop, logged as an input."""
+        plan = engine.state.approved_plan
+        if plan is None:
+            raise HTTPException(409, "no approved plan")
+        step = next((s for s in plan.steps if s.id == body.step_id), None)
+        if step is None:
+            raise HTTPException(404, "unknown step")
+        actors = [a.strip() for a in step.actor.split(",")]
+        if body.actor not in actors and body.actor not in ("staff", "manager", "facilities"):
+            raise HTTPException(403, f"{body.actor} is not on this step ({step.actor})")
+        if body.status not in ("done", "failed"):
+            raise HTTPException(400, "status must be done or failed")
+        cur = engine.state.actions.get(step.id)
+        if cur is not None and cur.status == "done":
+            raise HTTPException(409, "already done")
+        detail = body.detail or f"{body.actor} confirmed from the phone"
+        return await _submit(ActionEvent(step_id=step.id, status=body.status, actor=body.actor, detail=detail))
 
     @app.get("/api/fetch")
     async def fetch_status():

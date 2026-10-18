@@ -126,6 +126,17 @@ export interface Stance {
   constraint: Constraint | null
   step_ids: string[]
   resident: string | null
+  source?: 'rules' | 'claude' | 'fetch:claude' | string
+}
+
+export interface NegotiationStatus {
+  mode: 'claude' | 'rules'
+  configured: boolean
+  situation: string
+  pending: string[]
+  spoken: Record<string, Record<string, { stance: StanceKind; source: string }>>
+  answered: number
+  failed: number
 }
 
 export interface PlanStep {
@@ -189,6 +200,7 @@ export interface Plan {
   messages: Message[]
   checks: Check[]
   signature: number
+  situation?: string
 }
 
 export interface ActionState {
@@ -242,6 +254,7 @@ export interface Integrations {
   llm: boolean
   sensor_token: boolean
   fetch: boolean
+  negotiation: boolean
   agentverse: boolean
   twilio: boolean
   linear: boolean

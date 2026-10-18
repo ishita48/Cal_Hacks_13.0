@@ -45,6 +45,24 @@ class ActionEvent(BaseModel):
     actor: str = "haven"
 
 
+class AgentStance(BaseModel):
+    """An agent spoke: its stance on one round of one situation. Produced by a model (Claude, possibly
+    through that agent's Fetch.ai identity) or by the rule functions; either way it is logged as an input
+    so the plan it shaped re-derives exactly on replay, with no model in the loop."""
+
+    type: Literal["agent_stance"] = "agent_stance"
+    agent: str                    # "resident:maya", "safety", ...
+    situation: str                # planner.situation_key(...) the stance was given for
+    round: int                    # 1 = the naive proposal, 2 = the revised one
+    stance: Literal["propose", "support", "critique", "veto"]
+    reason: str
+    constraint_type: Literal["hard", "soft"] | None = None
+    constraint_rule: str | None = None
+    constraint_code: str | None = None
+    step_ids: list[str] = Field(default_factory=list)
+    source: str = "claude"        # claude | fetch:claude | rules
+
+
 class AgentToggle(BaseModel):
     """Switch an agent on or off in the negotiation (the Maya moment is this event for 'resident:maya')."""
 
@@ -72,7 +90,7 @@ class PlanDecision(BaseModel):
 
 
 InputEvent = Annotated[
-    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent],
+    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent, AgentStance],
     Field(discriminator="type"),
 ]
 

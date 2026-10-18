@@ -28,6 +28,7 @@ class Stance(BaseModel):
     constraint: Constraint | None = None
     step_ids: list[str] = Field(default_factory=list)   # steps this stance is about
     resident: str | None = None     # resident id for resident agents
+    source: str = "rules"           # rules | claude | fetch:claude (a logged AgentStance event)
 
 
 class PlanStep(BaseModel):
@@ -95,3 +96,4 @@ class Plan(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     checks: list[Check] = Field(default_factory=list)       # the adversarial checker's verdicts
     signature: int = 0              # content hash; version bumps only when this changes
+    situation: str = ""             # key of the facts the stances were given for (planner.situation_key)

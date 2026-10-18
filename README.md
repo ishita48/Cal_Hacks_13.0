@@ -13,11 +13,27 @@ replays exactly.
 ```bash
 cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
-cd backend  && uv run pytest -q                  # 55 tests
+cd backend  && uv run pytest -q                  # 60 tests
 ```
 
 Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live
 (bright) and which are simulated (dim). Copy `backend/.env.example` to `backend/.env` and fill in what you have.
+
+## What is real, what is simulated
+
+Judges ask. Here is the honest list.
+
+| Part | Real | Simulated / synthetic |
+|---|---|---|
+| The sensor | ESP32 firmware posts real readings (`firmware/`); the **Simulate leak** button sends the same event | |
+| The building and people | | Blackwell Hall's spec and the 250-person roster are synthetic (no facilities data agreement): the rehearsal mode the product ships with |
+| Physics and cascade | Deterministic hydraulics and graph traversal (`haven/world`), replayable from the event log | A simplified model: volume per space, weir flow through doors, equipment floods at a height |
+| The negotiation | With `ANTHROPIC_API_KEY`, every enabled agent reasons with Claude over the facts and its stance is logged as an `agent_stance` input; the revised plan is built from the objections, so an agent that fails to object leaves its person in `left_behind`. Residents reason inside their own Fetch.ai uAgent and sign the stance. Replay needs no model | Without a key, deterministic rule functions speak (same shape, same codes). The checker is always rule-based and cannot be switched off |
+| The human gate | Approve/reject on the phone or dashboard; Buds only proposes | |
+| Responders | RAs, desk staff, facilities and the plumber acknowledge their steps from their own phone view (`/phone?as=ra_4`), logged as inputs | A step nobody acknowledges is closed by the clock at its deadline and labelled "auto-confirmed (no acknowledgement)" |
+| Outward actions | Plumber call and demo text (Twilio), ticket (Linear) with keys | Labelled "simulated" without keys |
+| Voice | ElevenLabs, then Cartesia, with keys | The browser's own speech synthesis otherwise |
+| Sponsor status | `GET /api/sponsors` is a live round trip per service | |
 
 ## Buds, the story page and the live stack
 

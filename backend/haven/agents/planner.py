@@ -75,10 +75,11 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
                     enabled_agents=enabled, rules=list(state.rules))
 
     sit = _situation(ctx, state)
+    key = situation_key(sit)
     r1_steps = _naive_proposal(ctx, sit)
-    r1_stances = _evaluate(ctx, sit, r1_steps)
+    r1_stances = _evaluate(ctx, sit, r1_steps, state.spoken.get(f"{key}#1", {}))
     r2_steps = _revised_proposal(ctx, sit, r1_stances)
-    r2_stances = _evaluate(ctx, sit, r2_steps)
+    r2_stances = _evaluate(ctx, sit, r2_steps, state.spoken.get(f"{key}#2", {}))
     left_behind = _uncovered(ctx, sit, r2_steps)
     checks = _check(ctx, sit, r2_steps, left_behind)
     if "checker" in sit.enabled:
@@ -105,7 +106,24 @@ def compute_plan(ctx: WorldContext, state: WorldState) -> Plan:
     return Plan(version=version, computed_step=state.step, status=status, rounds=rounds, steps=r2_steps,
                 stances=r2_stances, left_behind=left_behind, metrics=metrics, enabled_agents=enabled,
                 rules=list(state.rules), headline=headline, signature=signature, messages=messages,
-                checks=checks)
+                checks=checks, situation=key)
+
+
+def situation_key(sit: Situation) -> str:
+    """A short hash of every fact the agents reason from. Stances are given for a key; when the facts move
+    (water, a rule, a toggle, people relocated), the key moves and the agents are asked again."""
+    parts = [
+        ",".join(sit.dark_planned), str(sit.lifts_up),
+        f"{sit.eta_cut_s:.0f}" if sit.eta_cut_s is not None else "-",
+        f"{sit.valve_closed_at_s:.0f}" if sit.valve_closed_at_s is not None else "-",
+        ";".join(f"{k}:{'+'.join(v)}" for k, v in sorted(sit.flagged.items())),
+        ",".join(sorted(sit.rules)), ",".join(sorted(sit.enabled)), ",".join(sorted(sit.moved)),
+        f"{sit.move_deadline_s:.0f}" if sit.move_deadline_s is not None else "-",
+    ]
+    h = 0
+    for ch in "|".join(parts):
+        h = (h * 131 + ord(ch)) % (1 << 61)
+    return f"{h:015x}"
 
 
 # ---- situation -----------------------------------------------------------------------------
@@ -452,14 +470,30 @@ def _revised_proposal(ctx: WorldContext, sit: Situation, objections: list[Stance
 # ---- agents --------------------------------------------------------------------------------
 
 
-def _evaluate(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[Stance]:
-    out: list[Stance] = []
+def _evaluate(ctx: WorldContext, sit: Situation, steps: list[PlanStep], spoken: dict | None = None) -> list[Stance]:
+    """Every enabled agent's stance on `steps`: what it said (a logged AgentStance for this situation and
+    round) when it has spoken, the rule function otherwise. The checker never goes through here."""
+    spoken = spoken or {}
+    ids = {st.id for st in steps}
+
+    def said(agent: str, label: str, resident: str | None, fallback: Stance | None) -> Stance | None:
+        sp = spoken.get(agent)
+        if sp is None:
+            return fallback
+        c = None
+        if sp.constraint_code or sp.constraint_rule:
+            c = Constraint(type=sp.constraint_type or "hard", rule=sp.constraint_rule or sp.constraint_code or "",
+                           code=sp.constraint_code or "", source=agent)
+        return Stance(agent=agent, label=label, stance=sp.stance, reason=sp.reason, constraint=c,
+                      step_ids=[x for x in sp.step_ids if x in ids], resident=resident, source=sp.source)
+
+    out: list[Stance | None] = []
     if "safety" in sit.enabled:
-        out.append(_safety(sit, steps))
+        out.append(said("safety", "Safety agent", None, _safety(sit, steps)))
     if "housing" in sit.enabled:
-        out.append(_housing(sit, steps))
+        out.append(said("housing", "Housing agent", None, _housing(sit, steps)))
     if "capacity" in sit.enabled:
-        out.append(_capacity(sit, steps))
+        out.append(said("capacity", "Capacity agent", None, _capacity(sit, steps)))
     by_id = ctx.roster.by_id()
     order = {rid: i for i, rid in enumerate(STORY_ORDER)}
     agents = sorted((a for a in sit.enabled if a.startswith("resident:")),
@@ -468,10 +502,8 @@ def _evaluate(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> list[
         r = by_id.get(a.split(":", 1)[1])
         if r is None:
             continue
-        st = _resident(ctx, sit, r, steps)
-        if st is not None:
-            out.append(st)
-    return out
+        out.append(said(a, f"{r.name.split()[0]}'s agent", r.id, _resident(ctx, sit, r, steps)))
+    return [x for x in out if x is not None]
 
 
 def _find(steps: list[PlanStep], kind: str, **attrs) -> PlanStep | None:

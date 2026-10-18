@@ -19,7 +19,8 @@ from ..agents.planner import compute_plan
 from ..building.graph import POWER_RELS, powered_levels
 from .cascade import Forecast, Impact, assess, describe, forecast
 from .context import WorldContext
-from .events import ActionEvent, AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision, SensorReading
+from .events import (ActionEvent, AgentStance, AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision,
+                     SensorReading)
 from .physics import Happening, Hydraulics, step
 
 # Fixed simulation step, in simulated seconds.
@@ -103,6 +104,19 @@ class ActorState(BaseModel):
     since_step: int = 0
 
 
+class SpokenStance(BaseModel):
+    """What one agent said about one round of one situation (from a logged AgentStance event)."""
+
+    stance: Literal["propose", "support", "critique", "veto"]
+    reason: str
+    constraint_type: Literal["hard", "soft"] | None = None
+    constraint_rule: str | None = None
+    constraint_code: str | None = None
+    step_ids: list[str] = Field(default_factory=list)
+    source: str = "claude"
+    step: int = 0
+
+
 class WorldState(BaseModel):
     run_id: str
     scenario: str
@@ -129,6 +143,7 @@ class WorldState(BaseModel):
     actions: dict[str, ActionState] = Field(default_factory=dict)    # step id -> progress
     moved: dict[str, str] = Field(default_factory=dict)              # resident id -> space they are in now
     actors: dict[str, ActorState] = Field(default_factory=dict)      # responder id -> where they are (derived)
+    spoken: dict[str, dict[str, SpokenStance]] = Field(default_factory=dict)  # "situation#round" -> agent -> stance
 
     # -- derived views (recomputed by the reducer, never logged) --
     equipment: dict[str, EquipmentState] = Field(default_factory=dict)
@@ -186,6 +201,9 @@ def apply_input(state: WorldState, event: InputEvent, ctx: WorldContext) -> None
         physical = False
     elif isinstance(event, ActionEvent):
         _apply_action(state, event, ctx)
+        physical = False
+    elif isinstance(event, AgentStance):
+        _apply_stance(state, event, ctx)
         physical = False
     if changed:          # a repeated wet/dry reading changes nothing physical: skip everything
         _rederive(state, ctx, [], physical=physical)
@@ -292,6 +310,23 @@ def _apply_toggle(state: WorldState, ev: AgentToggle, ctx: WorldContext) -> None
     label = agent_label(ctx, ev.agent)
     state.record("agent_toggle", f"{label} switched {'on' if ev.enabled else 'OFF'}",
                  "info" if ev.enabled else "warning", agent=ev.agent, enabled=ev.enabled)
+
+
+def _apply_stance(state: WorldState, ev: AgentStance, ctx: WorldContext) -> None:
+    if ev.agent not in state.agents:
+        state.record("command_rejected", f"Stance from unknown agent {ev.agent}", "warning")
+        return
+    key = f"{ev.situation}#{ev.round}"
+    state.spoken.setdefault(key, {})[ev.agent] = SpokenStance(
+        stance=ev.stance, reason=ev.reason, constraint_type=ev.constraint_type, constraint_rule=ev.constraint_rule,
+        constraint_code=ev.constraint_code, step_ids=list(ev.step_ids), source=ev.source, step=state.step)
+    for old_key in sorted(state.spoken)[:-12]:       # keep what was said bounded: the last situations only
+        state.spoken.pop(old_key, None)
+    label = agent_label(ctx, ev.agent)
+    via = " via Fetch.ai" if ev.source.startswith("fetch") else ""
+    state.record("agent_spoke", f"{label} ({ev.source.split(':')[-1]}{via}), round {ev.round}: {ev.stance}: {ev.reason}",
+                 "warning" if ev.stance == "veto" else "info", agent=ev.agent, stance=ev.stance, round=ev.round,
+                 source=ev.source)
 
 
 def _apply_decision(state: WorldState, ev: PlanDecision) -> None:

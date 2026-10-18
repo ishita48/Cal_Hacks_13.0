@@ -178,9 +178,11 @@ class WorldEngine:
                 else:
                     out.append(ActionEvent(step_id=step.id, status="assigned", detail=f"{step.actor} dispatched"))
             elif cur is not None and cur.status == "assigned" and step.deadline_s is not None and step.deadline_s <= elapsed:
-                out.append(ActionEvent(step_id=step.id, status="done", detail=f"{step.actor} confirmed"))
+                out.append(ActionEvent(step_id=step.id, status="done", actor="haven:auto",
+                                       detail=f"auto-confirmed at the deadline (no acknowledgement from {step.actor})"))
             elif cur is not None and cur.status == "assigned" and step.deadline_s is None and step.at_s + 60 <= elapsed:
-                out.append(ActionEvent(step_id=step.id, status="done", detail=f"{step.actor} confirmed"))
+                out.append(ActionEvent(step_id=step.id, status="done", actor="haven:auto",
+                                       detail=f"auto-confirmed (no acknowledgement from {step.actor})"))
         return out
 
     async def _execute_due(self) -> None:
