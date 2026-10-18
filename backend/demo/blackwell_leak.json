@@ -1,7 +1,7 @@
 {
  "scenario": "blackwell_basement_leak",
  "label": "demo",
- "recorded_from": "20261017-211539-e500b9",
+ "recorded_from": "20261017-214115-c63b70",
  "events": [
   {
    "step": 25,
@@ -151,6 +151,16 @@
    "event": {
     "type": "action",
     "step_id": "relocate_L2",
+    "status": "assigned",
+    "detail": "housing dispatched",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L1",
     "status": "assigned",
     "detail": "housing dispatched",
     "actor": "haven"
@@ -391,6 +401,16 @@
    "event": {
     "type": "action",
     "step_id": "relocate_L2",
+    "status": "done",
+    "detail": "housing confirmed",
+    "actor": "haven"
+   }
+  },
+  {
+   "step": 6591,
+   "event": {
+    "type": "action",
+    "step_id": "relocate_L1",
     "status": "done",
     "detail": "housing confirmed",
     "actor": "haven"
