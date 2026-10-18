@@ -16753,6 +16753,18 @@
    "axis": "x",
    "kind": "door",
    "step_free": true
+  },
+  {
+   "id": "B1:mech_double_door",
+   "level": "B1",
+   "a": "B1-mech",
+   "b": "B1-cor_plant",
+   "x": 18.0,
+   "y": 22.0,
+   "width": 1.8,
+   "axis": "x",
+   "kind": "door",
+   "step_free": true
   }
  ],
  "verticals": [
@@ -16878,7 +16890,7 @@
    "x": 18.0,
    "y": 34.5,
    "space": "B1-elec",
-   "flood_height": 0.1,
+   "flood_height": 0.3,
    "props": {}
   },
   {
@@ -16889,7 +16901,7 @@
    "x": 16.5,
    "y": 34.5,
    "space": "B1-elec",
-   "flood_height": 0.1,
+   "flood_height": 0.3,
    "props": {}
   },
   {
@@ -16911,7 +16923,7 @@
    "x": 22.5,
    "y": 34.5,
    "space": "B1-elec",
-   "flood_height": 0.1,
+   "flood_height": 0.3,
    "props": {}
   },
   {
@@ -16922,7 +16934,7 @@
    "x": 25.5,
    "y": 34.5,
    "space": "B1-elec",
-   "flood_height": 0.1,
+   "flood_height": 0.3,
    "props": {}
   },
   {
@@ -16944,7 +16956,7 @@
    "x": 15.5,
    "y": 25.2,
    "space": "B1-elec",
-   "flood_height": 0.1,
+   "flood_height": 0.45,
    "props": {}
   },
   {
@@ -17224,7 +17236,7 @@
    "space": "B1-mech",
    "flood_height": null,
    "props": {
-    "burst_flow_lps": 6.5
+    "burst_flow_lps": 150.0
    }
   },
   {
@@ -17524,6 +17536,7 @@
  ],
  "notes": [
   "Massing from aerial imagery and public project data; interior and services are a plausible reconstruction, not facilities drawings.",
-  "Lifts are on standby power via ATS-EQ, but ATS-EQ sits in the same basement electrical room as the normal-power switchboard."
+  "Lifts are on standby power via ATS-EQ, but ATS-EQ sits in the same basement electrical room as the normal-power switchboard.",
+  "A full-bore break of the 4-inch riser at ~60 psi releases on the order of 100+ L/s (orifice flow, Cd ~0.6); the mechanical room floor drain and sump cannot keep up."
  ]
 }
