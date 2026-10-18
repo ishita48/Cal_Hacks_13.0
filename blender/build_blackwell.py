@@ -68,7 +68,7 @@ GLASS_OUT, GLASS_IN = -0.13, 0.15             # pane 13 cm back from the face (a
 FRAME_OUT, FRAME_T = -0.10, 0.08               # frame sits just in front of the pane
 FIELD_OUT = 0.035
 REVEAL_DEPTH = EXT_WALL + 0.3                  # how far the cutter reaches through the ring
-SITE_PAD = 36.0
+SITE_PAD = 20.0            # curb line of the building to the far face of the facing block
 
 CURTAIN_KINDS = {"lounge", "study", "kitchen", "amenity", "lobby", "retail", "office"}
 BLANK_KINDS = {"corridor", "lift", "riser", "service", "storage", "mechanical", "electrical",
@@ -1943,12 +1943,14 @@ class Builder:
         add_box(bm, b.x1 + SITE_PAD - walk, b.x1 + SITE_PAD, b.y0 - SITE_PAD, b.y1 + SITE_PAD, z - 0.2, z, 0)
         mesh_object("site_sidewalk", bm, [m["sidewalk"]], self.col_site)
         bm = bmesh.new()
+        road_far = SITE_PAD - 4.0          # far curb of each street
         for k in range(8):
-            add_box(bm, b.x0 - 2.5 + k * 1.2, b.x0 - 2.5 + k * 1.2 + 0.6, b.y0 - 16, b.y0 - 5, z - 0.199, z - 0.19, 0)
-            add_box(bm, b.x0 - 16, b.x0 - 5, b.y0 - 2.5 + k * 1.2, b.y0 - 2.5 + k * 1.2 + 0.6, z - 0.199, z - 0.19, 0)
-        for k in range(0, 150, 6):
-            add_box(bm, b.x0 - 12.1, b.x0 - 11.9, b.y0 - SITE_PAD + k, b.y0 - SITE_PAD + k + 3, z - 0.199, z - 0.19, 0)
-            add_box(bm, b.x0 - SITE_PAD + k, b.x0 - SITE_PAD + k + 3, b.y0 - 12.1, b.y0 - 11.9, z - 0.199, z - 0.19, 0)
+            add_box(bm, b.x0 - 2.5 + k * 1.2, b.x0 - 2.5 + k * 1.2 + 0.6, b.y0 - road_far + 1, b.y0 - 5, z - 0.199, z - 0.19, 0)
+            add_box(bm, b.x0 - road_far + 1, b.x0 - 5, b.y0 - 2.5 + k * 1.2, b.y0 - 2.5 + k * 1.2 + 0.6, z - 0.199, z - 0.19, 0)
+        mid = (4.0 + road_far) / 2
+        for k in range(0, 120, 6):
+            add_box(bm, b.x0 - mid - 0.1, b.x0 - mid + 0.1, b.y0 - SITE_PAD + k, b.y0 - SITE_PAD + k + 3, z - 0.199, z - 0.19, 0)
+            add_box(bm, b.x0 - SITE_PAD + k, b.x0 - SITE_PAD + k + 3, b.y0 - mid - 0.1, b.y0 - mid + 0.1, z - 0.199, z - 0.19, 0)
         mesh_object("site_markings", bm, [m["laminate"]], self.col_site)
         self.build_neighbourhood(b, z)
         bm = bmesh.new()
@@ -1972,16 +1974,17 @@ class Builder:
         import random
         rnd = random.Random(7)
         stucco = [m["stucco_cream"], m["stucco_sage"], m["stucco_terracotta"], m["stucco_grey"], m["brick"]]
+        e, w, so = b.x1 + SITE_PAD, b.x0 - SITE_PAD, b.y0 - SITE_PAD
         blocks = [  # (x0, y0, x1, y1, storeys, kind)
-            (b.x1 + 14, 2, b.x1 + 36, 30, 3, "apartments"),
-            (b.x1 + 14, 34, b.x1 + 30, 56, 4, "apartments"),
-            (b.x1 + 14, 60, b.x1 + 34, 82, 2, "houses"),
-            (-34, 2, -14, 24, 4, "apartments"),
-            (-34, 28, -14, 46, 2, "houses"),
-            (-34, 50, -14, 82, 3, "apartments"),
-            (-30, -36, 2, -14, 3, "apartments"),
-            (8, -36, 40, -14, 2, "shops"),
-            (46, -36, 70, -14, 3, "apartments"),
+            (e, 2, e + 22, 30, 3, "apartments"),
+            (e, 34, e + 18, 56, 4, "apartments"),
+            (e, 60, e + 22, 82, 2, "houses"),
+            (w - 22, 2, w, 24, 4, "apartments"),
+            (w - 22, 28, w, 46, 2, "houses"),
+            (w - 22, 50, w, 82, 3, "apartments"),
+            (w - 22, so - 24, w, so, 3, "apartments"),
+            (w + 4, so - 24, 40, so, 2, "shops"),
+            (46, so - 24, 70, so, 3, "apartments"),
         ]
         walls = bmesh.new()      # per-material faces -> material index = stucco choice
         glass = bmesh.new()
@@ -2058,13 +2061,14 @@ class Builder:
         mesh_object("site_neighbour_roofs", roofs, [m["roof_tile"], m["stucco_cream"], m["roof"]], self.col_site)
         # Campus edge north of Bancroft: lawn, path, big trees, a low campus wall.
         bm = bmesh.new()
-        add_box(bm, -34, 70, b.y1 + 14, b.y1 + 60, z - 0.05, z + 0.1, 0)
-        add_box(bm, -34, 70, b.y1 + 14, b.y1 + 14.6, z + 0.1, z + 0.6, 1)
-        add_box(bm, 14, 18, b.y1 + 14, b.y1 + 60, z + 0.1, z + 0.12, 2)
+        n0 = b.y1 + SITE_PAD
+        add_box(bm, b.x0 - 42, 70, n0, n0 + 60, z - 0.05, z + 0.1, 0)
+        add_box(bm, b.x0 - 42, 70, n0, n0 + 0.6, z + 0.1, z + 0.6, 1)
+        add_box(bm, 14, 18, n0, n0 + 60, z + 0.1, z + 0.12, 2)
         mesh_object("site_campus", bm, [m["lawn"], m["concrete"], m["paving"]], self.col_site)
         bm = bmesh.new()
-        for (x, y, hgt, rad) in ((-20, b.y1 + 26, 14, 5.5), (0, b.y1 + 34, 16, 6.5), (26, b.y1 + 24, 13, 5.0),
-                                 (44, b.y1 + 36, 17, 7.0), (60, b.y1 + 22, 12, 4.8), (10, b.y1 + 50, 15, 6.0)):
+        for (x, y, hgt, rad) in ((-20, n0 + 10, 14, 5.5), (0, n0 + 18, 16, 6.5), (26, n0 + 8, 13, 5.0),
+                                 (44, n0 + 20, 17, 7.0), (60, n0 + 6, 12, 4.8), (10, n0 + 34, 15, 6.0)):
             self._tree(bm, x, y, z + 0.1, height=hgt, radius=rad)
         mesh_object("site_campus_trees", bm, [m["trunk"], m["canopy"]], self.col_site)
         # Parked cars along the curbs, utility poles with wires on the far side of Dana, a bus stop.
@@ -2075,15 +2079,15 @@ class Builder:
             if rnd.random() < 0.7:
                 self._car(bm, b.x0 - 6.2, y, "y", k % len(colours)); k += 1
             if rnd.random() < 0.6:
-                self._car(bm, b.x0 - 30.0, y + 3, "y", k % len(colours)); k += 1
+                self._car(bm, b.x0 - SITE_PAD + 6.2, y + 3, "y", k % len(colours)); k += 1
         for x in range(8, int(b.x1) - 6, 7):
             if rnd.random() < 0.7:
                 self._car(bm, x, b.y0 - 6.2, "x", k % len(colours)); k += 1
             if rnd.random() < 0.6:
-                self._car(bm, x + 3, b.y0 - 30.0, "x", k % len(colours)); k += 1
+                self._car(bm, x + 3, b.y0 - SITE_PAD + 6.2, "x", k % len(colours)); k += 1
         mesh_object("site_cars", bm, colours + [m["glass"], m["dark"]], self.col_site)
         bm = bmesh.new()
-        px = b.x0 - 33.0
+        px = b.x0 - SITE_PAD + 2.0
         poles = [(px, y) for y in range(-30, int(b.y1) + 30, 30)]
         for (x, y) in poles:
             add_cyl(bm, x, y, z, z + 10.0, 0.14, 0, 8)
@@ -2178,7 +2182,7 @@ class Builder:
             self.col_site.objects.link(ob)
         # Traffic signals on the near corners of the intersection, bike racks, benches, bins.
         bm = bmesh.new()
-        for (x, y) in ((b.x0 - 6.0, b.y0 - 6.0), (b.x0 - 6.0, b.y0 - 30.0), (b.x0 - 30.0, b.y0 - 6.0)):
+        for (x, y) in ((b.x0 - 6.0, b.y0 - 6.0), (b.x0 - 6.0, b.y0 - SITE_PAD + 2.5), (b.x0 - SITE_PAD + 2.5, b.y0 - 6.0)):
             add_cyl(bm, x, y, z, z + 5.5, 0.09, 0, 8)
             add_box(bm, x - 0.3, x + 0.3, y - 0.3, y + 0.3, z + 2.6, z + 3.5, 1)
             add_box(bm, x, x + 4.0, y - 0.08, y + 0.08, z + 5.3, z + 5.45, 0)
@@ -2229,8 +2233,8 @@ class Builder:
             cam.rotation_euler = (Vector(target) - cam.location).to_track_quat("-Z", "Y").to_euler()
             return cam
 
-        hero = camera("HeroCam", (b.x0 - 48, b.y0 - 54, 30), ((b.x0 + b.x1) / 2 - 4, (b.y0 + b.y1) / 2 - 10, self.roof_z * 0.45), 32)
-        camera("StreetCam", (b.x0 - 15, b.y0 - 19, 2.4), (b.x0 + 9, b.y0 + 12, 9.5), 20)
+        hero = camera("HeroCam", (b.x0 - 34, b.y0 - 40, 36), ((b.x0 + b.x1) / 2 - 2, (b.y0 + b.y1) / 2 - 8, self.roof_z * 0.4), 30)
+        camera("StreetCam", (b.x0 - 11, b.y0 - 14, 2.4), (b.x0 + 9, b.y0 + 12, 9.5), 20)
         camera("CutawayCam", (b.x0 - 58, b.y0 - 36, 78), ((b.x0 + b.x1) / 2 - 2, (b.y0 + b.y1) / 2 - 2, 6), 35)
         camera("PlantCam", (b.x0 - 4, b.y0 - 10, 11), (b.x0 + 20, b.y0 + 20, -3.5), 28)
         # A flat world for below-grade cutaways (the sky is black under the horizon).
