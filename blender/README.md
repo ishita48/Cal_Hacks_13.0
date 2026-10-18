@@ -30,6 +30,28 @@ All materials are procedural (panel joints with rain streaks, timber boards, con
 so nothing needs downloading. To go further, tick Poly Haven in the MCP for Blender sidebar in Blender
 (press N in the 3D viewport); `import_asset` can then swap in scanned PBR textures and an HDRI.
 
+## Walking around in Blender
+
+`haven_walk.py` adds a **HAVEN** tab to the 3D viewport sidebar (press N). The build script loads it and
+stores it in the .blend. The tab has:
+
+- **Walk** buttons: street corner, along Durant, lobby, courtyard, floor 4 (lift lobby, Maya's wing,
+  lounge), podium garden, basement electrical and mechanical rooms, roof. Each puts you at eye level and
+  starts Blender's walk navigation: mouse to look, W/A/S/D to move, Q/E up and down, Shift to run,
+  Esc to stop, left-click to keep the view. Shift+` starts walk mode from wherever you are.
+- **Cut away floors above** a level (B1 … L7, roof) in the viewport.
+- **Cameras**: HeroCam, StreetCam, CutawayCam, PlantCam. F12 renders the active one.
+
+If the tab is missing after reopening the file (Blender's "Auto Run Python Scripts" is off), open
+`haven_walk.py` in the Scripting workspace and press Run Script.
+
+## The surrounding blocks
+
+The site is a plausible Berkeley block, not a survey: stucco and brick apartment blocks with punched
+windows and parapets, gabled houses with porches, shopfronts with awnings along the south side of Durant,
+the campus edge north of Bancroft with lawn and mature trees, the green Bancroft bike lane, parked cars,
+utility poles and wires on the far side of Dana, a bus shelter and hydrant, signals, bike racks, benches.
+
 ## Running
 
 Export the spec first: `cd backend && PYTHONPATH=. uv run python tools/export_building.py`.

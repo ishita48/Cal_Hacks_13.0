@@ -18,7 +18,7 @@ EYE = 1.65
 
 # name, eye position (metres, spec coordinates), yaw in degrees (0 = looking +Y/north, 90 = east)
 WALK_SPOTS = [
-    ("Street: Dana x Durant corner", (-7.0, -9.0, EYE), 35.0),
+    ("Street: Dana x Durant corner", (-10.0, -12.0, EYE), 35.0),
     ("Street: along Durant Ave", (24.0, -6.0, EYE), -20.0),
     ("Lobby (front desk)", (10.0, 2.5, EYE), 0.0),
     ("Courtyard (ground floor)", (23.0, 52.0, EYE + 0.25), 0.0),
