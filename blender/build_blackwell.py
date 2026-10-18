@@ -219,6 +219,36 @@ def add_cyl(bm, x, y, z0, z1, radius, mi=0, segments=16):
             f.material_index = mi
 
 
+def add_disc(bm, x, y, z, radius, thickness, axis, mi=0, segments=20):
+    """A thin disc whose normal points along `axis` ('x', 'y' or 'z')."""
+    from mathutils import Matrix
+    res = bmesh.ops.create_cone(bm, cap_ends=True, segments=segments, radius1=radius, radius2=radius, depth=thickness)
+    rot = Matrix.Rotation(math.radians(90), 4, "Y" if axis == "x" else "X") if axis != "z" else Matrix.Identity(4)
+    for v in res["verts"]:
+        v.co = rot @ v.co + Vector((x, y, z))
+    new_verts = set(res["verts"])
+    for f in bm.faces:
+        if any(v in new_verts for v in f.verts):
+            f.material_index = mi
+
+
+def add_bar(bm, p0, p1, radius, mi=0, segments=8):
+    """A cylinder from p0 to p1 (handrails, pipes, conduit)."""
+    a, b = Vector(p0), Vector(p1)
+    d = b - a
+    if d.length < 1e-4:
+        return
+    res = bmesh.ops.create_cone(bm, cap_ends=True, segments=segments, radius1=radius, radius2=radius, depth=d.length)
+    rot = d.normalized().to_track_quat("Z", "Y").to_matrix()
+    mid = (a + b) / 2
+    for v in res["verts"]:
+        v.co = mid + rot @ v.co
+    new_verts = set(res["verts"])
+    for f in bm.faces:
+        if any(v in new_verts for v in f.verts):
+            f.material_index = mi
+
+
 def add_prism(bm, cells, z0, z1, mi=0):
     """Extrude a Cells region into a clean solid (coplanar cell faces dissolved)."""
     vcache = {}
@@ -592,13 +622,22 @@ def make_materials():
         "pipe": mat_plain("pipe", (0.45, 0.47, 0.50), roughness=0.4, metallic=0.8),
         "pipe_blue": mat_plain("pipe blue", (0.15, 0.35, 0.65), roughness=0.5),
         "led": mat_plain("led", (0.2, 1.0, 0.3), roughness=0.3, emission=(0.2, 1.0, 0.3)),
+        "white": mat_plain("white", (0.90, 0.90, 0.90), roughness=0.55),
+        "cork": mat_plain("cork", (0.55, 0.38, 0.20), roughness=0.9, grain=0.3),
+        "rug": mat_carpet("rug", (0.30, 0.28, 0.30)),
+        "lightpanel": mat_plain("light panel", (1.0, 0.97, 0.9), roughness=0.4, emission=(1.0, 0.95, 0.85)),
+        "amber": mat_plain("amber light", (1.0, 0.72, 0.18), roughness=0.4, emission=(1.0, 0.68, 0.12)),
+        "slat": mat_wood("ceiling slats", (0.40, 0.24, 0.10), (0.72, 0.50, 0.26), board_w=0.06, vertical=False),
+        "mirror": mat_plain("mirror", (0.92, 0.93, 0.95), roughness=0.02, metallic=1.0),
+        "felt": mat_plain("pool felt", (0.05, 0.18, 0.48), roughness=1.0, grain=0.15),
     }
 
 
 # ---- the build ------------------------------------------------------------------------------
 
 FURN_MATS = ["laminate", "navy", "dark", "purple", "desk_wood", "steel", "red", "frosted", "concrete",
-             "blue", "lime", "paint", "tile"]
+             "blue", "lime", "paint", "tile", "white", "cork", "rug", "lightpanel", "amber", "slat", "mirror",
+             "felt", "canopy", "led", "pipe_blue"]
 FM = {k: i for i, k in enumerate(FURN_MATS)}
 
 
@@ -942,7 +981,6 @@ class Builder:
     def build_interiors(self):
         m = self.mats
         floor_mats = ["plank", "carpet", "tile", "stone", "rubber", "concrete", "steel"]
-        fmi = {k: i for i, k in enumerate(floor_mats)}
         for lv in self.ordered:
             region = self.massing[lv["id"]]
             z_fin = lv["elevation"] + SLAB
@@ -956,16 +994,26 @@ class Builder:
                 add_box(bm, r.x0, r.x1, r.y0, r.y1, z_fin, z_fin + 0.02, 0)
                 mesh_object(f"floor_{s['id']}", bm, [m[finish]], self.col_interior,
                             self._props(lv, space_id=s["id"], kind=s["kind"]))
+            walls, glazed = self.partitions(lv, spaces, region)
             bm = bmesh.new()
-            for axis, fixed, lo, hi in self.partitions(lv, spaces, region):
+            for axis, fixed, lo, hi in walls:
                 if axis == "x":
                     add_box(bm, lo, hi, fixed - INT_WALL / 2, fixed + INT_WALL / 2, z_fin, z_top, 0)
                 else:
                     add_box(bm, fixed - INT_WALL / 2, fixed + INT_WALL / 2, lo, hi, z_fin, z_top, 0)
             mesh_object(f"walls_{lv['id']}", bm, [m["paint"]], self.col_interior, self._props(lv))
+            # Glazed partitions (study rooms and lounges open to the corridor behind glass).
+            bm = bmesh.new()
+            for axis, fixed, lo, hi in glazed:
+                self._glass_wall(bm, axis, fixed, lo, hi, z_fin, z_top)
+            if bm.faces:
+                mesh_object(f"glazing_{lv['id']}", bm, [m["glass"], m["frame"]], self.col_interior, self._props(lv))
+            else:
+                bm.free()
             bm = bmesh.new()
             for s in spaces:
                 self.furnish(bm, s, lv, region, z_fin + 0.02, z_top)
+            self.doors_and_signs(bm, lv, z_fin + 0.02)
             if bm.faces:
                 mesh_object(f"furniture_{lv['id']}", bm, [m[k] for k in FURN_MATS], self.col_interior, self._props(lv))
             else:
@@ -973,9 +1021,15 @@ class Builder:
         self.build_courtyards()
         self.build_plant()
 
+    GLAZED_TO_CORRIDOR = {"study", "lounge", "kitchen"}
+
     def partitions(self, lv, spaces, region):
-        """Interior wall runs on each wall line: union of space edges minus exterior runs and doors."""
+        """Interior wall runs per wall line: union of space edges minus exterior runs, doors and glazing.
+
+        Returns (walls, glazed): both lists of (axis, fixed, lo, hi)."""
         lines = {}
+        glazed = {}
+        corridors = [R.of(s["rect"]) for s in spaces if s["kind"] in ("corridor", "lobby")]
         for s in spaces:
             r = R.of(s["rect"])
             for axis, fixed, lo, hi, sign in (("x", r.y0, r.x0, r.x1, -1), ("x", r.y1, r.x0, r.x1, +1),
@@ -984,7 +1038,16 @@ class Builder:
                 px, py = (mid, fixed + sign * 0.15) if axis == "x" else (fixed + sign * 0.15, mid)
                 if not region.inside(px, py):
                     continue  # exterior: the ring covers it
-                lines.setdefault((axis, round(fixed, 3)), []).append((lo, hi))
+                key = (axis, round(fixed, 3))
+                if s["kind"] in self.GLAZED_TO_CORRIDOR and any(c.contains(px, py) for c in corridors):
+                    # Only the stretch actually shared with the corridor is glass.
+                    for c in corridors:
+                        if not c.contains(px, py):
+                            continue
+                        a, b = (max(lo, c.x0), min(hi, c.x1)) if axis == "x" else (max(lo, c.y0), min(hi, c.y1))
+                        if b - a > 0.5:
+                            glazed.setdefault(key, []).append((a, b))
+                lines.setdefault(key, []).append((lo, hi))
         gaps = {}
         for o in self.spec["openings"]:
             if o["level"] != lv["id"] or o["b"] == "outside":
@@ -992,28 +1055,36 @@ class Builder:
             fixed = o["y"] if o["axis"] == "x" else o["x"]
             c = o["x"] if o["axis"] == "x" else o["y"]
             gaps.setdefault((o["axis"], round(fixed, 3)), []).append((c - o["width"] / 2, c + o["width"] / 2))
-        out = []
+
+        def cut(pieces, cuts):
+            for (g0, g1) in cuts:
+                nxt = []
+                for (a, b) in pieces:
+                    if g1 <= a or g0 >= b:
+                        nxt.append((a, b))
+                    else:
+                        if g0 > a:
+                            nxt.append((a, g0))
+                        if g1 < b:
+                            nxt.append((g1, b))
+                pieces = nxt
+            return pieces
+
+        walls, panes = [], []
         for key, ivs in lines.items():
             axis, fixed = key
+            glass_runs = _merge_intervals(glazed.get(key, []))
             for (lo, hi) in _merge_intervals(ivs):
-                pieces = [(lo, hi)]
-                for (g0, g1) in gaps.get(key, []):
-                    nxt = []
-                    for (a, b) in pieces:
-                        if g1 <= a or g0 >= b:
-                            nxt.append((a, b))
-                        else:
-                            if g0 > a:
-                                nxt.append((a, g0))
-                            if g1 < b:
-                                nxt.append((g1, b))
-                    pieces = nxt
-                for (a, b) in pieces:
+                for (a, b) in cut([(lo, hi)], gaps.get(key, []) + glass_runs):
                     a2 = a + 0.2 if self._on_exterior(axis, fixed, a, region) else a
                     b2 = b - 0.2 if self._on_exterior(axis, fixed, b, region) else b
                     if b2 - a2 > 0.05:
-                        out.append((axis, fixed, a2, b2))
-        return out
+                        walls.append((axis, fixed, a2, b2))
+            for (a, b) in glass_runs:
+                for (a2, b2) in cut([(a, b)], gaps.get(key, [])):
+                    if b2 - a2 > 0.3:
+                        panes.append((axis, fixed, a2, b2))
+        return walls, panes
 
     @staticmethod
     def _on_exterior(axis, fixed, end, region):
@@ -1023,49 +1094,194 @@ class Builder:
                 return True
         return False
 
+    def _glass_wall(self, bm, axis, fixed, lo, hi, z0, z1, bay=1.2):
+        t = INT_WALL / 2
+
+        def box(a0, a1, n0, n1, za, zb, mi):
+            if axis == "x":
+                add_box(bm, a0, a1, fixed + n0, fixed + n1, za, zb, mi)
+            else:
+                add_box(bm, fixed + n0, fixed + n1, a0, a1, za, zb, mi)
+
+        box(lo, hi, -0.006, 0.006, z0 + 0.1, z1 - 0.1, 0)                 # pane
+        box(lo, hi, -t, t, z0, z0 + 0.1, 1)                                # bottom rail
+        box(lo, hi, -t, t, z1 - 0.1, z1, 1)                                # head
+        n = max(1, int(round((hi - lo) / bay)))
+        for k in range(n + 1):
+            a = lo + (hi - lo) * k / n
+            box(a - 0.025, a + 0.025, -t, t, z0, z1, 1)                    # mullions
+
+    # -- furniture by room kind ----------------------------------------------------------
+
     def furnish(self, bm, s, lv, region, z, z_top):
         kind = s["kind"]
         r = R.of(s["rect"])
+        name = s["name"].lower()
         if kind == "room":
-            self._furnish_room(bm, s, r, region, z)
+            self._furnish_room(bm, s, r, region, z, z_top)
         elif kind == "bathroom":
-            self._stalls(bm, r, z)
-        elif kind in ("lounge", "study", "office"):
-            self._lounge(bm, r, z, sofas=(kind == "lounge"), colour=FM["blue"] if kind != "office" else FM["dark"], region=region)
+            self._bathroom(bm, r, z, z_top, region)
+        elif kind == "lounge":
+            self._lounge(bm, r, z, z_top, region, sofas=True)
+        elif kind == "study":
+            self._study(bm, r, z, z_top, region)
+        elif kind == "office":
+            self._office(bm, r, z, z_top)
         elif kind == "kitchen":
-            self._kitchen(bm, r, z)
+            self._kitchen(bm, r, z, z_top, region)
         elif kind == "laundry":
-            self._washers(bm, r, z)
+            self._laundry(bm, r, z, z_top, region)
         elif kind == "lobby":
-            add_box(bm, r.x0 + 2.0, r.x0 + 6.0, r.y0 + 3.0, r.y0 + 3.9, z, z + 1.1, FM["desk_wood"])
-            self._sofa(bm, r.x0 + 8.0, r.y0 + 2.0, "x", z, FM["red"])
-            self._sofa(bm, r.x0 + 8.0, r.y0 + 5.5, "x", z, FM["red"])
-            add_box(bm, r.x0 + 0.4, r.x0 + 0.46, r.y0 + 2.0, r.y0 + 8.0, z, z + 3.0, FM["desk_wood"])
+            self._lobby(bm, r, z, z_top)
         elif kind == "retail":
-            for k in range(int(r.w // 3.0)):
-                x = r.x0 + 1.5 + k * 3.0
-                add_box(bm, x, x + 1.0, r.y0 + 1.5, r.y1 - 1.5, z, z + 1.6, FM["laminate"])
+            self._retail(bm, r, z, z_top)
         elif kind == "amenity":
-            self._amenity(bm, s, r, z, region)
+            self._amenity(bm, s, r, z, z_top, region)
         elif kind == "stair":
             self._stair(bm, r, z, z_top)
         elif kind == "lift":
             add_box(bm, r.x0 + 0.3, r.x1 - 0.3, r.y0 + 0.3, r.y1 - 0.3, z, z + 2.4, FM["steel"])
-        elif kind in ("storage", "service"):
-            add_box(bm, r.x0 + 0.1, r.x0 + 0.6, r.y0 + 0.3, r.y1 - 0.3, z, z + 2.0, FM["steel"])
-            if r.w > 3:
-                add_box(bm, r.x1 - 0.6, r.x1 - 0.1, r.y0 + 0.3, r.y1 - 0.3, z, z + 2.0, FM["steel"])
+            self._ceiling_panel(bm, r.cx, r.cy, z + 2.38, 0.6, 0.6)
+        elif kind == "service":
+            if "mail" in name:
+                self._mailboxes(bm, r, z)
+            else:
+                self._shelving(bm, r, z)
+        elif kind == "storage":
+            if "bike" in name:
+                self._bike_racks(bm, r, z)
+            else:
+                self._shelving(bm, r, z)
         elif kind == "mechanical":
-            add_cyl(bm, r.x0 + 0.5, r.cy, z, z_top - 0.4, 0.08, FM["steel"])
-            add_box(bm, r.x0 + 0.2, r.x1 - 0.2, r.cy - 0.1, r.cy + 0.1, z_top - 0.5, z_top - 0.3, FM["steel"])
+            self._plant_room(bm, r, z, z_top, pipes=True)
+        elif kind in ("electrical", "generator"):
+            self._plant_room(bm, r, z, z_top, pipes=False)
+        elif kind == "corridor":
+            self._corridor(bm, r, z, z_top, lv)
+        if kind in ("room", "office", "bathroom", "laundry", "storage", "service", "mechanical", "electrical",
+                    "generator", "stair"):
+            self._ceiling_panel(bm, r.cx, r.cy, z_top - 0.03, min(1.2, r.w * 0.4), min(0.3, r.h * 0.3))
 
-    def _furnish_room(self, bm, s, r, region, z):
+    # small shared parts
+    def _ceiling_panel(self, bm, x, y, z, w, d):
+        add_box(bm, x - w / 2, x + w / 2, y - d / 2, y + d / 2, z - 0.02, z, FM["lightpanel"])
+
+    def _chair(self, bm, x, y, z, facing="+y", mi=FM["dark"]):
+        s = 0.22
+        add_box(bm, x - s, x + s, y - s, y + s, z + 0.42, z + 0.46, mi)
+        for dx, dy in ((-s + 0.03, -s + 0.03), (s - 0.03, -s + 0.03), (-s + 0.03, s - 0.03), (s - 0.03, s - 0.03)):
+            add_box(bm, x + dx - 0.015, x + dx + 0.015, y + dy - 0.015, y + dy + 0.015, z, z + 0.42, FM["steel"])
+        if facing == "+y":
+            add_box(bm, x - s, x + s, y - s, y - s + 0.04, z + 0.46, z + 0.92, mi)
+        elif facing == "-y":
+            add_box(bm, x - s, x + s, y + s - 0.04, y + s, z + 0.46, z + 0.92, mi)
+        elif facing == "+x":
+            add_box(bm, x - s, x - s + 0.04, y - s, y + s, z + 0.46, z + 0.92, mi)
+        else:
+            add_box(bm, x + s - 0.04, x + s, y - s, y + s, z + 0.46, z + 0.92, mi)
+
+    def _sofa(self, bm, x, y, axis, z, mi, length=2.0):
+        d = 0.9
+        if axis == "x":
+            add_box(bm, x, x + length, y, y + d, z + 0.1, z + 0.42, mi)                 # seat
+            add_box(bm, x, x + length, y, y + 0.28, z + 0.42, z + 0.88, mi)             # back
+            add_box(bm, x, x + 0.2, y, y + d, z + 0.42, z + 0.62, mi)                   # arms
+            add_box(bm, x + length - 0.2, x + length, y, y + d, z + 0.42, z + 0.62, mi)
+            add_box(bm, x + 0.05, x + length - 0.05, y + 0.3, y + d - 0.05, z + 0.42, z + 0.5, mi)  # cushions
+            add_box(bm, x + 0.05, x + length - 0.05, y + 0.05, y + d - 0.05, z, z + 0.1, FM["dark"])
+        else:
+            add_box(bm, x, x + d, y, y + length, z + 0.1, z + 0.42, mi)
+            add_box(bm, x, x + 0.28, y, y + length, z + 0.42, z + 0.88, mi)
+            add_box(bm, x, x + d, y, y + 0.2, z + 0.42, z + 0.62, mi)
+            add_box(bm, x, x + d, y + length - 0.2, y + length, z + 0.42, z + 0.62, mi)
+            add_box(bm, x + 0.3, x + d - 0.05, y + 0.05, y + length - 0.05, z + 0.42, z + 0.5, mi)
+            add_box(bm, x + 0.05, x + d - 0.05, y + 0.05, y + length - 0.05, z, z + 0.1, FM["dark"])
+
+    def _table(self, bm, x, y, z, radius=0.45, mi=FM["desk_wood"], chairs=4):
+        add_cyl(bm, x, y, z, z + 0.72, 0.04, FM["steel"], 8)
+        add_cyl(bm, x, y, z, z + 0.03, 0.3, FM["steel"], 12)
+        add_cyl(bm, x, y, z + 0.72, z + 0.75, radius, mi, 20)
+        if chairs:
+            for (dx, dy, f) in ((0.75, 0, "-x"), (-0.75, 0, "+x"), (0, 0.75, "-y"), (0, -0.75, "+y"))[:chairs]:
+                self._chair(bm, x + dx, y + dy, z, f)
+
+    def _long_table(self, bm, x0, x1, y0, y1, z, mi=FM["laminate"], chairs=True):
+        add_box(bm, x0, x1, y0, y1, z + 0.72, z + 0.76, mi)
+        for (x, y) in ((x0 + 0.05, y0 + 0.05), (x1 - 0.05, y0 + 0.05), (x0 + 0.05, y1 - 0.05), (x1 - 0.05, y1 - 0.05)):
+            add_box(bm, x - 0.03, x + 0.03, y - 0.03, y + 0.03, z, z + 0.72, FM["steel"])
+        if chairs:
+            n = max(1, int((x1 - x0) // 0.8))
+            for k in range(n):
+                cx = x0 + (x1 - x0) * (k + 0.5) / n
+                self._chair(bm, cx, y0 - 0.4, z, "+y")
+                self._chair(bm, cx, y1 + 0.4, z, "-y")
+
+    def _pendant(self, bm, x, y, z_top, drop=0.9):
+        add_cyl(bm, x, y, z_top - drop, z_top, 0.008, FM["dark"], 6)
+        add_cyl(bm, x, y, z_top - drop - 0.25, z_top - drop, 0.16, FM["amber"], 14)
+
+    def _slat_ceiling(self, bm, r, z_top, inset=0.3, pitch=0.22):
+        """Timber slat ceiling (as in the lounges and lobby): strips under the slab above."""
+        n = int((r.w - 2 * inset) // pitch)
+        for k in range(n):
+            x = r.x0 + inset + k * pitch
+            add_box(bm, x, x + 0.06, r.y0 + inset, r.y1 - inset, z_top - 0.12, z_top - 0.02, FM["slat"])
+
+    def _plant_pot(self, bm, x, y, z, h=1.1):
+        add_cyl(bm, x, y, z, z + 0.4, 0.22, FM["concrete"], 12)
+        add_cyl(bm, x, y, z + 0.4, z + 0.45, 0.04, FM["canopy"], 6)
+        res = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.38)
+        for v in res["verts"]:
+            v.co = Vector((x, y, z + 0.4 + h * 0.45)) + Vector((v.co.x, v.co.y, v.co.z * 1.3))
+        for f in bm.faces:
+            if any(v in set(res["verts"]) for v in f.verts):
+                f.material_index = FM["canopy"]
+                f.smooth = True
+
+    def _shelving(self, bm, r, z):
+        along_y = r.h >= r.w
+        if along_y:
+            for x in (r.x0 + 0.1, r.x1 - 0.6):
+                for k in range(5):
+                    add_box(bm, x, x + 0.5, r.y0 + 0.2, r.y1 - 0.2, z + 0.1 + k * 0.45, z + 0.13 + k * 0.45, FM["steel"])
+                add_box(bm, x, x + 0.02, r.y0 + 0.2, r.y1 - 0.2, z, z + 2.0, FM["steel"])
+                add_box(bm, x + 0.48, x + 0.5, r.y0 + 0.2, r.y1 - 0.2, z, z + 2.0, FM["steel"])
+        else:
+            for y in (r.y0 + 0.1, r.y1 - 0.6):
+                for k in range(5):
+                    add_box(bm, r.x0 + 0.2, r.x1 - 0.2, y, y + 0.5, z + 0.1 + k * 0.45, z + 0.13 + k * 0.45, FM["steel"])
+        # a few bins on the shelves
+        for k in range(3):
+            add_box(bm, r.x0 + 0.15 + k * 0.5, r.x0 + 0.55 + k * 0.5, r.y0 + 0.3, r.y0 + 0.7, z + 0.13, z + 0.45, FM["blue"])
+
+    def _mailboxes(self, bm, r, z):
+        cols = int((r.h - 0.4) // 0.3)
+        for i in range(cols):
+            for j in range(6):
+                y = r.y0 + 0.2 + i * 0.3
+                add_box(bm, r.x1 - 0.4, r.x1 - 0.05, y, y + 0.28, z + 0.5 + j * 0.3, z + 0.78 + j * 0.3, FM["steel"])
+                add_box(bm, r.x1 - 0.41, r.x1 - 0.4, y + 0.02, y + 0.26, z + 0.52 + j * 0.3, z + 0.76 + j * 0.3, FM["dark"])
+        add_box(bm, r.x0 + 0.3, r.x0 + 1.5, r.cy - 0.4, r.cy + 0.4, z + 0.85, z + 0.9, FM["laminate"])
+
+    def _bike_racks(self, bm, r, z):
+        for k in range(int(r.h // 0.7)):
+            y = r.y0 + 0.4 + k * 0.7
+            add_box(bm, r.x0 + 0.3, r.x0 + 2.0, y, y + 0.05, z, z + 0.9, FM["steel"])
+            # a parked bike: two wheels and a frame
+            if k % 2 == 0:
+                add_disc(bm, r.x0 + 0.7, y + 0.3, z + 0.34, 0.34, 0.03, "y", FM["dark"])
+                add_disc(bm, r.x0 + 1.7, y + 0.3, z + 0.34, 0.34, 0.03, "y", FM["dark"])
+                add_bar(bm, (r.x0 + 0.7, y + 0.3, z + 0.34), (r.x0 + 1.25, y + 0.3, z + 0.85), 0.015, FM["blue"])
+                add_bar(bm, (r.x0 + 1.7, y + 0.3, z + 0.34), (r.x0 + 1.25, y + 0.3, z + 0.85), 0.015, FM["blue"])
+
+    # -- rooms --------------------------------------------------------------------------
+
+    def _furnish_room(self, bm, s, r, region, z, z_top):
         along_y = r.h >= r.w
         u0, u1 = (r.y0, r.y1) if along_y else (r.x0, r.x1)
         v0, v1 = (r.x0, r.x1) if along_y else (r.y0, r.y1)
         probe_hi = (r.cx, u1 + 0.15) if along_y else (u1 + 0.15, r.cy)
         win_hi = not region.inside(*probe_hi)
-        vc = (v0 + v1) / 2
 
         def box(ua, ub, va, vb, za, zb, mi):
             if not win_hi:
@@ -1075,108 +1291,357 @@ class Builder:
             else:
                 add_box(bm, ua, ub, va, vb, za, zb, mi)
 
+        def pt(u, v):
+            if not win_hi:
+                u = u0 + (u1 - u)
+            return (v, u) if along_y else (u, v)
+
         beds = max(1, min(2, s["capacity"]))
         sides = [(v0 + 0.12, v0 + 1.07, True)] + ([(v1 - 1.07, v1 - 0.12, False)] if beds == 2 else [])
         for (va, vb, left) in sides:
-            box(u1 - 2.15, u1 - 0.15, va, vb, z, z + 0.42, FM["laminate"])
-            box(u1 - 2.1, u1 - 0.2, va + 0.03, vb - 0.03, z + 0.42, z + 0.62, FM["navy"])
+            # Bed: frame with two under-bed drawers, mattress, navy duvet, pillow, headboard at the window end.
+            box(u1 - 2.15, u1 - 0.15, va, vb, z + 0.25, z + 0.45, FM["laminate"])
+            box(u1 - 2.1, u1 - 1.2, va + 0.02, vb - 0.02, z, z + 0.25, FM["laminate"])
+            box(u1 - 1.1, u1 - 0.2, va + 0.02, vb - 0.02, z, z + 0.25, FM["laminate"])
+            box(u1 - 2.1, u1 - 0.2, va + 0.03, vb - 0.03, z + 0.45, z + 0.63, FM["white"])
+            box(u1 - 1.65, u1 - 0.22, va + 0.05, vb - 0.05, z + 0.6, z + 0.7, FM["navy"])
+            box(u1 - 0.65, u1 - 0.25, va + 0.12, vb - 0.12, z + 0.63, z + 0.75, FM["white"])
+            box(u1 - 0.2, u1 - 0.15, va, vb, z + 0.45, z + 1.0, FM["laminate"])
+            # Desk with a hutch shelf, lamp, and a task chair.
             da, db = (va, va + 0.6) if left else (vb - 0.6, vb)
-            box(u1 - 3.7, u1 - 2.4, da, db, z, z + 0.76, FM["laminate"])
-            cu = u1 - 3.05
-            cv = va + 0.95 if left else vb - 0.95
-            box(cu - 0.22, cu + 0.22, cv - 0.22, cv + 0.22, z + 0.42, z + 0.47, FM["dark"])
-            back = (cv - 0.22, cv - 0.17) if left else (cv + 0.17, cv + 0.22)
-            box(cu - 0.22, cu + 0.22, back[0], back[1], z + 0.47, z + 0.9, FM["dark"])
+            box(u1 - 3.7, u1 - 2.4, da, db, z + 0.72, z + 0.76, FM["laminate"])
+            box(u1 - 3.7, u1 - 3.65, da, db, z, z + 0.72, FM["laminate"])
+            box(u1 - 2.45, u1 - 2.4, da, db, z, z + 0.72, FM["laminate"])
+            box(u1 - 3.7, u1 - 2.4, da if left else db - 0.25, da + 0.25 if left else db, z + 1.15, z + 1.19, FM["laminate"])
+            box(u1 - 3.7, u1 - 2.4, da if left else db - 0.02, da + 0.02 if left else db, z + 0.76, z + 1.19, FM["laminate"])
+            lx, ly = pt(u1 - 2.65, da + 0.15 if left else db - 0.15)
+            add_cyl(bm, lx, ly, z + 0.76, z + 1.1, 0.012, FM["dark"], 6)
+            add_cyl(bm, lx, ly, z + 1.1, z + 1.16, 0.08, FM["dark"], 10)
+            cx, cy = pt(u1 - 3.05, va + 0.95 if left else vb - 0.95)
+            facing = ("-x" if left else "+x") if along_y else ("-y" if left else "+y")
+            self._chair(bm, cx, cy, z, facing)
+            # Wardrobe by the door with a door seam and handle.
             box(u0 + 0.12, u0 + 0.72, va, vb, z, z + 2.0, FM["laminate"])
-        del vc
+            box(u0 + 0.72, u0 + 0.725, va + 0.05, vb - 0.05, z + 0.3, z + 1.9, FM["dark"])
+            box(u0 + 0.72, u0 + 0.75, (va + vb) / 2 - 0.05, (va + vb) / 2 + 0.05, z + 1.0, z + 1.15, FM["steel"])
+            # Shelf over the desk with a few books.
+            for k in range(4):
+                box(u1 - 3.6 + k * 0.18, u1 - 3.48 + k * 0.18, da if left else db - 0.22, da + 0.22 if left else db,
+                    z + 1.19, z + 1.42, [FM["blue"], FM["red"], FM["navy"], FM["lime"]][k])
+        # Pin board on the wall between the desks and a floor rug between the beds.
+        box(u1 - 3.4, u1 - 2.4, v0 + 0.015 if beds == 2 else v1 - 0.03, v0 + 0.03 if beds == 2 else v1 - 0.015,
+            z + 1.2, z + 1.8, FM["cork"])
+        box(u1 - 3.8, u1 - 0.5, v0 + 1.25, v1 - 1.25 if beds == 2 else v1 - 0.3, z, z + 0.012, FM["rug"])
+        # Roller blind box and a partly-drawn blind on the window wall.
+        box(u1 - 0.2, u1 - 0.12, v0 + 0.3, v1 - 0.3, z + 2.55, z + 2.7, FM["white"])
+        import random
+        drop = random.Random(int(r.x0 * 7 + r.y0 * 13)).uniform(0.15, 0.6)
+        box(u1 - 0.17, u1 - 0.15, v0 + 0.35, v1 - 0.35, z + 2.55 - drop * 2.0, z + 2.55, FM["white"])
 
-    def _stalls(self, bm, r, z):
+    def _bathroom(self, bm, r, z, z_top, region):
+        """Single-occupant bathroom pods off a wash-up area with a mirror wall, as in Blackwell."""
         along_y = r.h >= r.w
-        n = int(max(1, (r.h if along_y else r.w) // 1.4))
+        L = r.h if along_y else r.w
+        n = int(max(1, (L - 0.4) // 1.5))
         for k in range(n):
+            a = (r.y0 if along_y else r.x0) + 0.2 + k * 1.5
+            # Pod partitions + door + toilet or shower.
             if along_y:
-                y = r.y0 + 0.3 + k * 1.4
-                add_box(bm, r.x0 + 0.1, r.x0 + 1.5, y, y + 0.05, z, z + 2.1, FM["laminate"])
-                add_box(bm, r.x1 - 1.5, r.x1 - 0.1, y, y + 0.05, z, z + 2.1, FM["laminate"])
+                add_box(bm, r.x0 + 0.1, r.x0 + 2.0, a, a + 0.05, z, z + 2.3, FM["laminate"])
+                add_box(bm, r.x0 + 2.0, r.x0 + 2.05, a, a + 1.45, z, z + 2.3, FM["laminate"])
+                add_box(bm, r.x0 + 2.0, r.x0 + 2.04, a + 0.25, a + 1.1, z, z + 2.1, FM["desk_wood"])
+                add_box(bm, r.x0 + 2.04, r.x0 + 2.07, a + 0.95, a + 1.02, z + 1.0, z + 1.1, FM["steel"])
+                if k % 2 == 0:
+                    add_box(bm, r.x0 + 0.15, r.x0 + 0.5, a + 0.5, a + 1.0, z, z + 0.8, FM["white"])        # cistern
+                    add_cyl(bm, r.x0 + 0.75, a + 0.75, z, z + 0.42, 0.22, FM["white"], 14)                # bowl
+                else:
+                    add_box(bm, r.x0 + 0.15, r.x0 + 1.05, a + 0.1, a + 1.4, z, z + 0.04, FM["tile"])       # shower tray
+                    add_box(bm, r.x0 + 1.05, r.x0 + 1.07, a + 0.1, a + 1.4, z + 0.04, z + 2.0, FM["frosted"])
+                    add_cyl(bm, r.x0 + 0.5, a + 0.75, z + 2.0, z + 2.05, 0.1, FM["steel"], 10)
+                    add_cyl(bm, r.x0 + 0.5, a + 0.75, z + 1.95, z + 2.0, 0.02, FM["steel"], 6)
             else:
-                x = r.x0 + 0.3 + k * 1.4
-                add_box(bm, x, x + 0.05, r.y0 + 0.1, r.y0 + 1.5, z, z + 2.1, FM["laminate"])
-                add_box(bm, x, x + 0.05, r.y1 - 1.5, r.y1 - 0.1, z, z + 2.1, FM["laminate"])
+                add_box(bm, a, a + 0.05, r.y0 + 0.1, r.y0 + 2.0, z, z + 2.3, FM["laminate"])
+                add_box(bm, a, a + 1.45, r.y0 + 2.0, r.y0 + 2.05, z, z + 2.3, FM["laminate"])
+                add_box(bm, a + 0.25, a + 1.1, r.y0 + 2.0, r.y0 + 2.04, z, z + 2.1, FM["desk_wood"])
+                if k % 2 == 0:
+                    add_box(bm, a + 0.5, a + 1.0, r.y0 + 0.15, r.y0 + 0.5, z, z + 0.8, FM["white"])
+                    add_cyl(bm, a + 0.75, r.y0 + 0.75, z, z + 0.42, 0.22, FM["white"], 14)
+                else:
+                    add_box(bm, a + 0.1, a + 1.4, r.y0 + 0.15, r.y0 + 1.05, z, z + 0.04, FM["tile"])
+                    add_box(bm, a + 0.1, a + 1.4, r.y0 + 1.05, r.y0 + 1.07, z + 0.04, z + 2.0, FM["frosted"])
+                    add_cyl(bm, a + 0.75, r.y0 + 0.5, z + 2.0, z + 2.05, 0.1, FM["steel"], 10)
+        # Wash-up: counter with basins, mirror with vertical light strips.
         if along_y:
-            add_box(bm, r.cx - 0.3, r.cx + 0.3, r.y0 + 0.5, r.y1 - 0.5, z + 0.8, z + 0.9, FM["laminate"])
+            add_box(bm, r.x1 - 0.6, r.x1 - 0.05, r.y0 + 0.3, r.y1 - 0.3, z + 0.82, z + 0.88, FM["laminate"])
+            add_box(bm, r.x1 - 0.6, r.x1 - 0.55, r.y0 + 0.3, r.y1 - 0.3, z + 0.1, z + 0.82, FM["laminate"])
+            add_box(bm, r.x1 - 0.07, r.x1 - 0.05, r.y0 + 0.4, r.y1 - 0.4, z + 1.0, z + 2.0, FM["mirror"])
+            for k in range(int((r.h - 0.6) // 1.2)):
+                y = r.y0 + 0.9 + k * 1.2
+                add_cyl(bm, r.x1 - 0.32, y, z + 0.88, z + 0.9, 0.18, FM["white"], 14)
+                add_cyl(bm, r.x1 - 0.12, y, z + 0.88, z + 1.15, 0.012, FM["steel"], 6)
+                add_box(bm, r.x1 - 0.08, r.x1 - 0.07, y + 0.45, y + 0.48, z + 1.05, z + 1.95, FM["lightpanel"])
         else:
-            add_box(bm, r.x0 + 0.5, r.x1 - 0.5, r.cy - 0.3, r.cy + 0.3, z + 0.8, z + 0.9, FM["laminate"])
+            add_box(bm, r.x0 + 0.3, r.x1 - 0.3, r.y1 - 0.6, r.y1 - 0.05, z + 0.82, z + 0.88, FM["laminate"])
+            add_box(bm, r.x0 + 0.3, r.x1 - 0.3, r.y1 - 0.6, r.y1 - 0.55, z + 0.1, z + 0.82, FM["laminate"])
+            add_box(bm, r.x0 + 0.4, r.x1 - 0.4, r.y1 - 0.07, r.y1 - 0.05, z + 1.0, z + 2.0, FM["mirror"])
+            for k in range(int((r.w - 0.6) // 1.2)):
+                x = r.x0 + 0.9 + k * 1.2
+                add_cyl(bm, x, r.y1 - 0.32, z + 0.88, z + 0.9, 0.18, FM["white"], 14)
+                add_cyl(bm, x, r.y1 - 0.12, z + 0.88, z + 1.15, 0.012, FM["steel"], 6)
+                add_box(bm, x + 0.45, x + 0.48, r.y1 - 0.08, r.y1 - 0.07, z + 1.05, z + 1.95, FM["lightpanel"])
 
-    def _sofa(self, bm, x, y, axis, z, mi):
-        if axis == "x":
-            add_box(bm, x, x + 2.0, y, y + 0.9, z, z + 0.45, mi)
-            add_box(bm, x, x + 2.0, y, y + 0.25, z + 0.45, z + 0.85, mi)
-        else:
-            add_box(bm, x, x + 0.9, y, y + 2.0, z, z + 0.45, mi)
-            add_box(bm, x, x + 0.25, y, y + 2.0, z + 0.45, z + 0.85, mi)
-
-    def _table(self, bm, x, y, z, radius=0.45, mi=FM["desk_wood"]):
-        add_cyl(bm, x, y, z, z + 0.72, 0.04, FM["steel"], 8)
-        add_cyl(bm, x, y, z + 0.72, z + 0.75, radius, mi, 16)
-        for (dx, dy) in ((0.7, 0), (-0.7, 0), (0, 0.7), (0, -0.7)):
-            add_box(bm, x + dx - 0.2, x + dx + 0.2, y + dy - 0.2, y + dy + 0.2, z + 0.42, z + 0.46, FM["dark"])
-
-    def _lounge(self, bm, r, z, sofas=True, colour=FM["blue"], region=None):
-        nx, ny = max(1, int(r.w // 2.6)), max(1, int(r.h // 2.6))
+    def _lounge(self, bm, r, z, z_top, region, sofas=True, colour=FM["blue"]):
+        nx, ny = max(1, int(r.w // 2.8)), max(1, int(r.h // 2.8))
         for i in range(nx):
             for j in range(ny):
-                x = r.x0 + 1.3 + i * (r.w - 2.6) / (nx - 1) if nx > 1 else r.cx
-                y = r.y0 + 1.3 + j * (r.h - 2.6) / (ny - 1) if ny > 1 else r.cy
+                x = r.x0 + 1.4 + i * (r.w - 2.8) / (nx - 1) if nx > 1 else r.cx
+                y = r.y0 + 1.4 + j * (r.h - 2.8) / (ny - 1) if ny > 1 else r.cy
                 if sofas and (i + j) % 2 == 0:
                     self._sofa(bm, x - 1.0, y - 0.45, "x", z, colour if (i % 2 == 0) else FM["purple"])
+                    add_cyl(bm, x, y + 1.0, z + 0.38, z + 0.42, 0.4, FM["desk_wood"], 16)
+                    add_cyl(bm, x, y + 1.0, z, z + 0.38, 0.03, FM["steel"], 6)
                 else:
                     self._table(bm, x, y, z)
-        # Lime accent on a wall that faces another room, so it never shows through exterior glass.
-        sides = [("x", r.x0, -1), ("x", r.x1, +1), ("y", r.y0, -1), ("y", r.y1, +1)]
-        for axis, fixed, sign in sides:
+                self._pendant(bm, x, y, z_top)
+        self._accent_wall(bm, r, z, region)
+        self._tv(bm, r, z, region)
+        self._slat_ceiling(bm, r, z_top)
+        self._plant_pot(bm, r.x0 + 0.5, r.y0 + 0.5, z)
+        self._plant_pot(bm, r.x1 - 0.5, r.y1 - 0.5, z)
+
+    def _accent_wall(self, bm, r, z, region, mi=FM["lime"]):
+        """Painted accent on a wall that faces another room, so it never shows through exterior glass."""
+        for axis, fixed, sign in (("x", r.x0, -1), ("x", r.x1, +1), ("y", r.y0, -1), ("y", r.y1, +1)):
             px, py = (fixed + sign * 0.15, r.cy) if axis == "x" else (r.cx, fixed + sign * 0.15)
             if region is None or region.inside(px, py):
                 if axis == "x":
-                    add_box(bm, fixed - sign * 0.10, fixed - sign * 0.08, r.y0 + 0.5, r.y1 - 0.5, z, z + 2.2, FM["lime"])
+                    add_box(bm, fixed - sign * 0.10, fixed - sign * 0.08, r.y0 + 0.5, r.y1 - 0.5, z, z + 2.2, mi)
                 else:
-                    add_box(bm, r.x0 + 0.5, r.x1 - 0.5, fixed - sign * 0.10, fixed - sign * 0.08, z, z + 2.2, FM["lime"])
-                break
+                    add_box(bm, r.x0 + 0.5, r.x1 - 0.5, fixed - sign * 0.10, fixed - sign * 0.08, z, z + 2.2, mi)
+                return (axis, fixed, sign)
+        return None
 
-    def _kitchen(self, bm, r, z):
-        if r.w >= r.h:
-            add_box(bm, r.x0 + 0.1, r.x1 - 0.1, r.y1 - 0.72, r.y1 - 0.1, z, z + 0.9, FM["laminate"])
-            add_box(bm, r.x0 + 0.1, r.x1 - 0.1, r.y1 - 0.74, r.y1 - 0.1, z + 0.9, z + 0.93, FM["dark"])
-        else:
-            add_box(bm, r.x1 - 0.72, r.x1 - 0.1, r.y0 + 0.1, r.y1 - 0.1, z, z + 0.9, FM["laminate"])
-        self._table(bm, r.cx - 0.6, r.cy, z)
-        self._sofa(bm, r.x0 + 0.5, r.y0 + 0.4, "x", z, FM["purple"])
-
-    def _washers(self, bm, r, z):
-        along_y = r.h >= r.w
-        n = int(max(1, ((r.h if along_y else r.w) - 0.6) // 0.75))
-        for k in range(n):
-            if along_y:
-                y = r.y0 + 0.3 + k * 0.75
-                add_box(bm, r.x0 + 0.1, r.x0 + 0.8, y, y + 0.7, z, z + 1.0, FM["laminate"])
-                add_box(bm, r.x0 + 0.1, r.x0 + 0.8, y, y + 0.7, z + 1.0, z + 1.1, FM["dark"])
+    def _tv(self, bm, r, z, region):
+        for axis, fixed, sign in (("y", r.y1, +1), ("y", r.y0, -1), ("x", r.x1, +1), ("x", r.x0, -1)):
+            px, py = (fixed + sign * 0.15, r.cy) if axis == "x" else (r.cx, fixed + sign * 0.15)
+            if region is not None and not region.inside(px, py):
+                continue
+            if axis == "x":
+                add_box(bm, fixed - sign * 0.13, fixed - sign * 0.09, r.cy - 0.8, r.cy + 0.8, z + 1.2, z + 2.1, FM["dark"])
             else:
-                x = r.x0 + 0.3 + k * 0.75
-                add_box(bm, x, x + 0.7, r.y0 + 0.1, r.y0 + 0.8, z, z + 1.0, FM["laminate"])
+                add_box(bm, r.cx - 0.8, r.cx + 0.8, fixed - sign * 0.13, fixed - sign * 0.09, z + 1.2, z + 2.1, FM["dark"])
+            return
 
-    def _amenity(self, bm, s, r, z, region=None):
+    def _study(self, bm, r, z, z_top, region):
+        if r.w >= r.h:
+            self._long_table(bm, r.x0 + 1.0, r.x1 - 1.0, r.cy - 0.5, r.cy + 0.5, z)
+        else:
+            self._long_table(bm, r.cx - 0.5, r.cx + 0.5, r.y0 + 1.0, r.y1 - 1.0, z, chairs=False)
+            n = max(1, int((r.h - 2.0) // 0.8))
+            for k in range(n):
+                cy = r.y0 + 1.0 + (r.h - 2.0) * (k + 0.5) / n
+                self._chair(bm, r.cx - 0.9, cy, z, "+x")
+                self._chair(bm, r.cx + 0.9, cy, z, "-x")
+        self._accent_wall(bm, r, z, region, mi=FM["white"])   # whiteboard wall
+        for k in range(2):
+            self._pendant(bm, r.cx + (k - 0.5) * min(2.0, r.w * 0.4), r.cy, z_top, drop=0.7)
+        self._plant_pot(bm, r.x0 + 0.45, r.y1 - 0.45, z, h=0.9)
+
+    def _office(self, bm, r, z, z_top):
+        n = max(1, int(r.h // 2.4))
+        for k in range(n):
+            y = r.y0 + 1.2 + k * 2.4
+            add_box(bm, r.x0 + 0.3, r.x0 + 1.9, y - 0.4, y + 0.4, z + 0.72, z + 0.76, FM["laminate"])
+            add_box(bm, r.x0 + 0.3, r.x0 + 0.35, y - 0.4, y + 0.4, z, z + 0.72, FM["laminate"])
+            add_box(bm, r.x0 + 1.85, r.x0 + 1.9, y - 0.4, y + 0.4, z, z + 0.72, FM["laminate"])
+            add_box(bm, r.x0 + 0.9, r.x0 + 1.4, y - 0.15, y + 0.15, z + 0.76, z + 1.1, FM["dark"])   # monitor
+            self._chair(bm, r.x0 + 1.1, y + 0.9, z, "-y")
+        add_box(bm, r.x1 - 0.45, r.x1 - 0.1, r.y0 + 0.3, r.y1 - 0.3, z, z + 1.9, FM["laminate"])         # cabinets
+
+    def _kitchen(self, bm, r, z, z_top, region):
+        horiz = r.w >= r.h
+        # Counter run with sink, cooktop and upper cabinets along the inside wall; island with stools.
+        if horiz:
+            y0, y1 = r.y1 - 0.72, r.y1 - 0.1
+            add_box(bm, r.x0 + 0.1, r.x1 - 0.1, y0, y1, z, z + 0.88, FM["laminate"])
+            add_box(bm, r.x0 + 0.1, r.x1 - 0.1, y0 - 0.02, y1, z + 0.88, z + 0.92, FM["dark"])
+            add_box(bm, r.x0 + 0.1, r.x1 - 0.1, y1 - 0.38, y1, z + 1.5, z + 2.25, FM["laminate"])
+            add_box(bm, r.x0 + 1.0, r.x0 + 1.8, y0 + 0.12, y1 - 0.12, z + 0.90, z + 0.925, FM["steel"])   # sink
+            add_cyl(bm, r.x0 + 1.4, y1 - 0.15, z + 0.92, z + 1.2, 0.012, FM["steel"], 6)
+            add_box(bm, r.x0 + 2.6, r.x0 + 3.4, y0 + 0.08, y1 - 0.08, z + 0.92, z + 0.935, FM["dark"])      # cooktop
+            for (dx, dy) in ((0.2, 0.15), (0.6, 0.15), (0.2, 0.45), (0.6, 0.45)):
+                add_cyl(bm, r.x0 + 2.6 + dx, y0 + dy, z + 0.935, z + 0.945, 0.08, FM["steel"], 12)
+            ix0, ix1 = r.x0 + 1.0, min(r.x1 - 1.0, r.x0 + 3.6)
+            add_box(bm, ix0, ix1, r.cy - 0.45, r.cy + 0.45, z, z + 0.9, FM["desk_wood"])
+            add_box(bm, ix0 - 0.05, ix1 + 0.05, r.cy - 0.5, r.cy + 0.5, z + 0.9, z + 0.94, FM["white"])
+            for k in range(3):
+                x = ix0 + (ix1 - ix0) * (k + 0.5) / 3
+                add_cyl(bm, x, r.cy - 0.85, z, z + 0.7, 0.02, FM["steel"], 6)
+                add_cyl(bm, x, r.cy - 0.85, z + 0.7, z + 0.75, 0.17, FM["dark"], 12)
+                self._pendant(bm, x, r.cy, z_top, drop=1.0)
+            tx0 = ix1 + 0.8
+            if r.x1 - 0.8 - tx0 > 1.6:
+                self._long_table(bm, tx0, r.x1 - 0.8, r.cy - 0.45, r.cy + 0.45, z, mi=FM["desk_wood"])
+        else:
+            x0, x1 = r.x1 - 0.72, r.x1 - 0.1
+            add_box(bm, x0, x1, r.y0 + 0.1, r.y1 - 0.1, z, z + 0.88, FM["laminate"])
+            add_box(bm, x0 - 0.02, x1, r.y0 + 0.1, r.y1 - 0.1, z + 0.88, z + 0.92, FM["dark"])
+            add_box(bm, x1 - 0.38, x1, r.y0 + 0.1, r.y1 - 0.1, z + 1.5, z + 2.25, FM["laminate"])
+            self._table(bm, r.cx - 0.5, r.cy, z)
+        self._sofa(bm, r.x0 + 0.4, r.y0 + 0.3, "x", z, FM["purple"])
+        self._tv(bm, r, z, region)
+        self._slat_ceiling(bm, r, z_top)
+        self._plant_pot(bm, r.x0 + 0.5, r.y1 - 0.5, z)
+
+    def _laundry(self, bm, r, z, z_top, region):
+        along_y = r.h >= r.w
+        L = r.h if along_y else r.w
+        n = int(max(1, (L - 0.6) // 0.8))
+        for k in range(n):
+            a = (r.y0 if along_y else r.x0) + 0.3 + k * 0.8
+            if along_y:
+                add_box(bm, r.x0 + 0.1, r.x0 + 0.8, a, a + 0.7, z, z + 1.95, FM["white"])          # stacked pair
+                add_disc(bm, r.x0 + 0.8, a + 0.35, z + 0.55, 0.26, 0.02, "x", FM["dark"])
+                add_disc(bm, r.x0 + 0.8, a + 0.35, z + 1.45, 0.26, 0.02, "x", FM["dark"])
+                add_box(bm, r.x0 + 0.8, r.x0 + 0.82, a + 0.05, a + 0.65, z + 0.95, z + 1.05, FM["steel"])
+            else:
+                add_box(bm, a, a + 0.7, r.y0 + 0.1, r.y0 + 0.8, z, z + 1.95, FM["white"])
+                add_disc(bm, a + 0.35, r.y0 + 0.8, z + 0.55, 0.26, 0.02, "y", FM["dark"])
+                add_disc(bm, a + 0.35, r.y0 + 0.8, z + 1.45, 0.26, 0.02, "y", FM["dark"])
+        # Folding table, a chair and the blue graphic wall.
+        if along_y:
+            add_box(bm, r.x1 - 0.8, r.x1 - 0.2, r.y0 + 0.5, r.y1 - 0.5, z + 0.85, z + 0.9, FM["laminate"])
+            add_box(bm, r.x1 - 0.8, r.x1 - 0.75, r.y0 + 0.5, r.y1 - 0.5, z, z + 0.85, FM["laminate"])
+        else:
+            add_box(bm, r.x0 + 0.5, r.x1 - 0.5, r.y1 - 0.8, r.y1 - 0.2, z + 0.85, z + 0.9, FM["laminate"])
+        self._accent_wall(bm, r, z, region, mi=FM["blue"])
+        self._chair(bm, r.cx, r.cy, z, "+y")
+
+    def _lobby(self, bm, r, z, z_top):
+        # Front desk with timber front and white top, timber slat feature wall behind it, seating, planters.
+        add_box(bm, r.x0 + 2.0, r.x0 + 6.0, r.y0 + 3.0, r.y0 + 3.9, z, z + 1.05, FM["desk_wood"])
+        add_box(bm, r.x0 + 1.95, r.x0 + 6.05, r.y0 + 2.95, r.y0 + 3.95, z + 1.05, z + 1.1, FM["white"])
+        add_box(bm, r.x0 + 2.2, r.x0 + 5.8, r.y0 + 3.3, r.y0 + 3.9, z + 0.7, z + 0.74, FM["laminate"])
+        for k in range(int((r.y1 - r.y0 - 4.0) // 0.12)):
+            y = r.y0 + 2.0 + k * 0.12
+            add_box(bm, r.x0 + 0.13, r.x0 + 0.19, y, y + 0.06, z, z + 3.2, FM["slat"])
+        self._sofa(bm, r.x0 + 8.0, r.y0 + 2.0, "x", z, FM["red"], length=2.4)
+        self._sofa(bm, r.x0 + 8.0, r.y0 + 5.5, "x", z, FM["red"], length=2.4)
+        add_cyl(bm, r.x0 + 9.2, r.y0 + 4.2, z + 0.38, z + 0.42, 0.5, FM["desk_wood"], 18)
+        add_cyl(bm, r.x0 + 9.2, r.y0 + 4.2, z, z + 0.38, 0.04, FM["steel"], 6)
+        for (x, y) in ((r.x0 + 11.5, r.y0 + 2.0), (r.x0 + 11.5, r.y0 + 6.2)):
+            self._chair(bm, x, y, z, "-x", mi=FM["purple"])
+        self._plant_pot(bm, r.x0 + 1.0, r.y0 + 1.0, z, h=1.6)
+        self._plant_pot(bm, r.x0 + 12.5, r.y0 + 8.5, z, h=1.6)
+        self._slat_ceiling(bm, R(r.x0, r.y0, r.x0 + 7.0, r.y1), z_top, inset=0.4)
+        for (x, y) in ((r.x0 + 4.0, r.y0 + 6.0), (r.x0 + 9.0, r.y0 + 8.5)):
+            self._pendant(bm, x, y, z_top, drop=1.2)
+        # Lift lobby call plates and a notice board.
+        add_box(bm, r.x0 + 6.0, r.x0 + 7.2, r.y1 - 0.03, r.y1 - 0.01, z + 1.2, z + 2.0, FM["cork"])
+
+    def _retail(self, bm, r, z, z_top):
+        # A cafe: counter with espresso machine and stools, shelving, small tables by the glass.
+        add_box(bm, r.x0 + 1.0, r.x0 + 6.0, r.y1 - 2.2, r.y1 - 1.4, z, z + 0.95, FM["desk_wood"])
+        add_box(bm, r.x0 + 0.95, r.x0 + 6.05, r.y1 - 2.25, r.y1 - 1.35, z + 0.95, z + 1.0, FM["dark"])
+        add_box(bm, r.x0 + 2.0, r.x0 + 2.9, r.y1 - 2.1, r.y1 - 1.5, z + 1.0, z + 1.5, FM["steel"])
+        add_box(bm, r.x0 + 1.0, r.x0 + 6.0, r.y1 - 0.5, r.y1 - 0.1, z, z + 2.2, FM["laminate"])
+        for k in range(4):
+            add_box(bm, r.x0 + 1.1, r.x0 + 5.9, r.y1 - 0.5, r.y1 - 0.12, z + 0.5 + k * 0.45, z + 0.53 + k * 0.45, FM["desk_wood"])
+        for k in range(5):
+            x = r.x0 + 1.4 + k * 1.0
+            add_cyl(bm, x, r.y1 - 2.7, z, z + 0.7, 0.02, FM["steel"], 6)
+            add_cyl(bm, x, r.y1 - 2.7, z + 0.7, z + 0.75, 0.17, FM["dark"], 12)
+        nx = max(1, int((r.w - 2.0) // 2.6))
+        for i in range(nx):
+            self._table(bm, r.x0 + 1.5 + i * 2.6, r.y0 + 1.6, z, radius=0.35, chairs=2)
+            self._pendant(bm, r.x0 + 1.5 + i * 2.6, r.y0 + 1.6, z_top, drop=1.1)
+        self._slat_ceiling(bm, r, z_top)
+
+    def _amenity(self, bm, s, r, z, z_top, region):
         name = s["name"].lower()
         if "fitness" in name:
-            for i in range(int(r.w // 3.0)):
-                for j in range(int(r.h // 3.5)):
+            for i in range(int((r.w - 2.0) // 3.0)):
+                for j in range(int((r.h - 2.0) // 3.5)):
                     x, y = r.x0 + 1.5 + i * 3.0, r.y0 + 1.5 + j * 3.5
-                    add_box(bm, x, x + 0.8, y, y + 1.9, z, z + 0.25, FM["dark"])
-                    add_box(bm, x, x + 0.8, y + 1.5, y + 1.9, z + 0.25, z + 1.4, FM["steel"])
-        elif "bike" in name:
-            for k in range(int(r.h // 0.6)):
-                y = r.y0 + 0.3 + k * 0.6
-                add_box(bm, r.x0 + 0.3, r.x0 + 2.0, y, y + 0.05, z, z + 0.9, FM["steel"])
+                    if j % 2 == 0:   # treadmill
+                        add_box(bm, x, x + 0.8, y, y + 1.9, z, z + 0.25, FM["dark"])
+                        add_box(bm, x, x + 0.8, y + 1.5, y + 1.9, z + 0.25, z + 1.4, FM["steel"])
+                        add_box(bm, x + 0.05, x + 0.75, y + 1.6, y + 1.9, z + 1.25, z + 1.3, FM["dark"])
+                    else:            # weight bench + rack
+                        add_box(bm, x + 0.15, x + 0.65, y + 0.2, y + 1.5, z + 0.4, z + 0.48, FM["dark"])
+                        add_bar(bm, (x - 0.5, y + 1.3, z + 1.1), (x + 1.3, y + 1.3, z + 1.1), 0.015, FM["steel"])
+                        add_cyl(bm, x - 0.3, y + 1.3, z + 0.9, z + 1.3, 0.12, FM["dark"], 12)
+                        add_cyl(bm, x + 1.1, y + 1.3, z + 0.9, z + 1.3, 0.12, FM["dark"], 12)
+            add_box(bm, r.x0 + 0.5, r.x1 - 0.5, r.y1 - 0.04, r.y1 - 0.02, z + 0.3, z + 2.3, FM["mirror"])
+            self._accent_wall(bm, r, z, region, mi=FM["navy"])
+        elif "recreation" in name or "rec" == name[:3]:
+            add_box(bm, r.cx - 1.3, r.cx + 1.3, r.cy - 0.7, r.cy + 0.7, z + 0.7, z + 0.82, FM["desk_wood"])
+            add_box(bm, r.cx - 1.2, r.cx + 1.2, r.cy - 0.6, r.cy + 0.6, z + 0.82, z + 0.83, FM["felt"])
+            for (dx, dy) in ((-1.15, -0.55), (1.15, -0.55), (-1.15, 0.55), (1.15, 0.55)):
+                add_box(bm, r.cx + dx - 0.08, r.cx + dx + 0.08, r.cy + dy - 0.08, r.cy + dy + 0.08, z, z + 0.7, FM["dark"])
+            self._pendant(bm, r.cx, r.cy, z_top, drop=1.2)
+            self._sofa(bm, r.x0 + 0.4, r.y0 + 0.4, "y", z, FM["blue"])
+            self._sofa(bm, r.x1 - 1.3, r.y1 - 2.4, "y", z, FM["purple"])
+            self._tv(bm, r, z, region)
+            self._accent_wall(bm, r, z, region, mi=FM["navy"])
+        elif "music" in name:
+            add_box(bm, r.x0 + 0.6, r.x0 + 2.1, r.y0 + 0.6, r.y0 + 1.2, z + 0.7, z + 1.0, FM["dark"])   # upright piano
+            add_box(bm, r.x0 + 0.6, r.x0 + 2.1, r.y0 + 0.9, r.y0 + 1.2, z, z + 0.7, FM["dark"])
+            add_box(bm, r.x0 + 0.6, r.x0 + 2.1, r.y0 + 0.6, r.y0 + 1.2, z + 1.0, z + 1.3, FM["dark"])
+            add_box(bm, r.x0 + 0.9, r.x0 + 1.8, r.y0 + 1.5, r.y0 + 1.9, z, z + 0.5, FM["desk_wood"])
+            for k in range(3):
+                add_box(bm, r.x1 - 0.5, r.x1 - 0.2, r.y0 + 0.5 + k * 1.2, r.y0 + 0.8 + k * 1.2, z + 1.0, z + 1.9, FM["dark"])
+        elif "courtyard" in name:
+            for k in range(max(1, int(r.w // 5))):
+                x = r.x0 + 1.0 + k * 5.0
+                self._sofa(bm, x, r.cy - 0.45, "x", z, FM["blue"] if k % 2 else FM["purple"], length=2.4)
+                add_cyl(bm, x + 1.2, r.cy + 1.1, z + 0.38, z + 0.42, 0.4, FM["desk_wood"], 16)
+                add_cyl(bm, x + 1.2, r.cy + 1.1, z, z + 0.38, 0.03, FM["steel"], 6)
+            self._slat_ceiling(bm, r, z_top)
+        elif "academic" in name or "stiles" in name:
+            nx, ny = max(1, int((r.w - 2) // 3.2)), max(1, int((r.h - 2) // 2.6))
+            for i in range(nx):
+                for j in range(ny):
+                    x, y = r.x0 + 1.5 + i * 3.2, r.y0 + 1.5 + j * 2.6
+                    self._long_table(bm, x, x + 2.0, y, y + 0.8, z)
+            self._accent_wall(bm, r, z, region, mi=FM["white"])
+            self._accent_wall(bm, R(r.x0, r.y0, r.x1, r.y0 + 1), z, None, mi=FM["lime"])
+            for k in range(max(1, int(r.w // 6))):
+                self._pendant(bm, r.x0 + 3 + k * 6, r.cy, z_top, drop=0.9)
+            self._slat_ceiling(bm, r, z_top)
         else:
-            self._lounge(bm, r, z, sofas=True, colour=FM["blue"], region=region)
+            self._lounge(bm, r, z, z_top, region, sofas=True)
+
+    def _corridor(self, bm, r, z, z_top, lv):
+        # Continuous light strip down the middle; the yellow light "halo" graphics from the real corridors.
+        horiz = r.w >= r.h
+        if horiz:
+            add_box(bm, r.x0 + 0.5, r.x1 - 0.5, r.cy - 0.08, r.cy + 0.08, z_top - 0.05, z_top - 0.02, FM["lightpanel"])
+            n = int((r.w - 4) // 9)
+            for k in range(n):
+                x = r.x0 + 4.5 + k * 9
+                add_disc(bm, x, r.y1 - 0.07, z + 1.6, 0.7, 0.01, "y", FM["amber"])
+                add_disc(bm, x, r.y1 - 0.08, z + 1.6, 0.35, 0.012, "y", FM["white"])
+        else:
+            add_box(bm, r.cx - 0.08, r.cx + 0.08, r.y0 + 0.5, r.y1 - 0.5, z_top - 0.05, z_top - 0.02, FM["lightpanel"])
+            n = int((r.h - 4) // 9)
+            for k in range(n):
+                y = r.y0 + 4.5 + k * 9
+                add_disc(bm, r.x0 + 0.07, y, z + 1.6, 0.7, 0.01, "x", FM["amber"])
+                add_disc(bm, r.x0 + 0.08, y, z + 1.6, 0.35, 0.012, "x", FM["white"])
+
+    def _plant_room(self, bm, r, z, z_top, pipes=True):
+        # Cable tray / pipe runs along the ceiling, conduit drops, a bollard-yellow floor line.
+        if pipes:
+            for k, off in enumerate((-0.6, 0.0, 0.6)):
+                add_bar(bm, (r.x0 + 0.3, r.cy + off, z_top - 0.4), (r.x1 - 0.3, r.cy + off, z_top - 0.4), 0.06 + 0.03 * (k % 2), FM["pipe_blue"] if k == 1 else FM["steel"])
+            add_bar(bm, (r.x0 + 1.0, r.cy, z + 0.1), (r.x0 + 1.0, r.cy, z_top - 0.4), 0.06, FM["pipe_blue"])
+        else:
+            add_box(bm, r.x0 + 0.3, r.x1 - 0.3, r.cy - 0.25, r.cy + 0.25, z_top - 0.45, z_top - 0.35, FM["steel"])
+            for k in range(int((r.w - 1) // 2.5)):
+                x = r.x0 + 1.0 + k * 2.5
+                add_bar(bm, (x, r.cy, z + 2.2), (x, r.cy, z_top - 0.45), 0.025, FM["steel"])
+        add_box(bm, r.x0 + 0.2, r.x1 - 0.2, r.y0 + 0.9, r.y0 + 0.98, z, z + 0.004, FM["amber"])
 
     def _stair(self, bm, r, z, z_top):
         rise = z_top - z
@@ -1193,6 +1658,11 @@ class Builder:
                 zk2 = z + rise / 2 + rise / 2 * k / steps
                 add_box(bm, r.x1 - half, r.x1 - 0.05, yk, yk + run, zk2, zk2 + rise / (2 * steps) + 0.02, FM["concrete"])
             add_box(bm, r.x0 + 0.05, r.x1 - 0.05, r.y1 - 1.4, r.y1 - 0.05, z + rise / 2 - 0.1, z + rise / 2, FM["concrete"])
+            add_bar(bm, (r.cx, r.y0 + 0.2, z + 0.9), (r.cx, r.y1 - 1.4, z + rise / 2 + 0.9), 0.02, FM["steel"])
+            add_bar(bm, (r.cx, r.y1 - 1.4, z + rise / 2 + 0.9), (r.cx, r.y0 + 0.2, z + rise + 0.9), 0.02, FM["steel"])
+            for k in range(0, steps, 2):
+                y = r.y0 + 0.2 + k * run
+                add_bar(bm, (r.cx, y, z + rise / 2 * k / steps), (r.cx, y, z + rise / 2 * k / steps + 0.9), 0.012, FM["steel"])
         else:
             run = (r.w - 1.6) / steps
             half = (r.y1 - r.y0) / 2 - 0.05
@@ -1204,6 +1674,43 @@ class Builder:
                 zk2 = z + rise / 2 + rise / 2 * k / steps
                 add_box(bm, xk, xk + run, r.y1 - half, r.y1 - 0.05, zk2, zk2 + rise / (2 * steps) + 0.02, FM["concrete"])
             add_box(bm, r.x1 - 1.4, r.x1 - 0.05, r.y0 + 0.05, r.y1 - 0.05, z + rise / 2 - 0.1, z + rise / 2, FM["concrete"])
+            add_bar(bm, (r.x0 + 0.2, r.cy, z + 0.9), (r.x1 - 1.4, r.cy, z + rise / 2 + 0.9), 0.02, FM["steel"])
+            add_bar(bm, (r.x1 - 1.4, r.cy, z + rise / 2 + 0.9), (r.x0 + 0.2, r.cy, z + rise + 0.9), 0.02, FM["steel"])
+
+    def doors_and_signs(self, bm, lv, z):
+        """A door leaf in every opening of this level, exit signs over the stair doors."""
+        for o in self.spec["openings"]:
+            if o["level"] != lv["id"] or o["b"] == "outside" or o["kind"] == "opening":
+                continue
+            w = min(o["width"], 2.0)
+            fixed = o["y"] if o["axis"] == "x" else o["x"]
+            c = o["x"] if o["axis"] == "x" else o["y"]
+            t = INT_WALL / 2
+            if o["kind"] == "lift_door":
+                mi, h = FM["steel"], 2.2
+            elif o["kind"] == "fire_door":
+                mi, h = FM["dark"], 2.1
+            else:
+                mi, h = FM["desk_wood"], 2.1
+
+            def box(a0, a1, n0, n1, za, zb, m):
+                if o["axis"] == "x":
+                    add_box(bm, a0, a1, fixed + n0, fixed + n1, za, zb, m)
+                else:
+                    add_box(bm, fixed + n0, fixed + n1, a0, a1, za, zb, m)
+
+            box(c - w / 2, c + w / 2, -0.02, 0.02, z, z + h, mi)                       # leaf (closed)
+            box(c - w / 2 - 0.05, c - w / 2, -t, t, z, z + h + 0.05, FM["dark"])        # jambs + head
+            box(c + w / 2, c + w / 2 + 0.05, -t, t, z, z + h + 0.05, FM["dark"])
+            box(c - w / 2 - 0.05, c + w / 2 + 0.05, -t, t, z + h, z + h + 0.05, FM["dark"])
+            if o["kind"] == "lift_door":
+                box(c - 0.01, c + 0.01, -0.025, 0.025, z, z + h, FM["dark"])              # centre seam
+            else:
+                box(c + w / 2 - 0.12, c + w / 2 - 0.04, -0.05, 0.05, z + 1.0, z + 1.03, FM["steel"])  # handle
+            if o["kind"] == "fire_door":
+                box(c - 0.18, c + 0.18, -0.03, 0.03, z + h + 0.12, z + h + 0.3, FM["led"])      # exit sign
+            if o["kind"] == "lift_door":
+                box(c + w / 2 + 0.15, c + w / 2 + 0.25, -t - 0.005, -t, z + 1.0, z + 1.15, FM["steel"])  # call plate
 
     def build_courtyards(self):
         m = self.mats
