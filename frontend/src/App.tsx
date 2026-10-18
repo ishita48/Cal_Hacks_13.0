@@ -96,6 +96,9 @@ export default function App() {
           <span className="mono text-[11px] text-t3">
             run {world.run_id} · v{world.version}
           </span>
+          <a href="/phone" target="_blank" rel="noreferrer" className="pill pill-blue" title="The on-call manager's phone view">
+            Phone
+          </a>
         </div>
       </header>
 

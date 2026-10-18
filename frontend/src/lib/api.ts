@@ -1,4 +1,4 @@
-import type { AgentInfo, BuildingSpec, Roster, RuleParse } from '../state/types'
+import type { AgentInfo, BuildingSpec, Roster, RuleParse, SensorHistory } from '../state/types'
 
 const base = import.meta.env.VITE_HAVEN_API ?? ''
 
@@ -34,6 +34,8 @@ export const api = {
   loadDemo: () => request<{ run_id: string; mode: string; event_count: number }>('POST', '/api/demo/load'),
   building: () => request<BuildingSpec>('GET', '/api/building'),
   people: () => request<Roster>('GET', '/api/people'),
+  sensorHistory: (sensorId: string, limit = 120) =>
+    request<SensorHistory>('GET', `/api/sensor/${encodeURIComponent(sensorId)}/history?limit=${limit}`),
   agents: () => request<AgentInfo[]>('GET', '/api/agents'),
   toggleAgent: (agent: string, enabled: boolean) => request('POST', '/api/agent', { agent, enabled }),
   decidePlan: (plan_version: number, decision: 'approve' | 'reject', actor = 'manager') =>

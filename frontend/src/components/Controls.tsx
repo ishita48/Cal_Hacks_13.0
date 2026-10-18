@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type RunSummary } from '../lib/api'
 import { STATUS_COLOR } from '../lib/labels'
+import { SensorChart } from './SensorChart'
 import type { WorldState } from '../state/types'
 
 interface Props {
@@ -48,6 +49,7 @@ export function Controls({ world }: Props) {
             <div className="label mono">{sensor?.source ?? '—'}</div>
           </div>
         </div>
+        <SensorChart sensorId={SENSOR} />
         {leak && (
           <div className="mt-2 flex items-center gap-2 text-[11px] text-haven-water">
             <span className={`h-1.5 w-1.5 rounded-full bg-haven-water ${leak.active ? 'haven-pulse' : ''}`} />

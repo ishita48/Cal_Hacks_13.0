@@ -207,6 +207,20 @@ export interface RuleParse {
   step?: number
 }
 
+export interface SensorReadingRow {
+  time: number
+  value: number
+  wet: boolean
+  source: string
+  run_id: string
+  step: number
+}
+
+export interface SensorHistory {
+  source: 'tiger' | 'event_log'
+  readings: SensorReadingRow[]
+}
+
 export interface AgentInfo {
   id: string
   label: string
