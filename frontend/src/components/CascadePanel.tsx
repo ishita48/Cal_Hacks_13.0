@@ -23,41 +23,37 @@ export function CascadePanel({ world, clock }: Props) {
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden">
       <section className="flex min-h-0 flex-1 flex-col">
-        <h2 className="mb-2 flex items-baseline justify-between text-xs font-semibold uppercase tracking-wider text-slate-500">
-          <span>Forecast · chain of consequences</span>
-          <span className="font-mono normal-case tracking-normal text-slate-600">
-            {upcoming.length ? `${upcoming.length} predicted` : f.settled ? 'nothing pending' : ''}
-          </span>
-        </h2>
-        <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-          {upcoming.length === 0 && (
-            <li className="rounded border border-dashed border-ink-700 px-3 py-4 text-center text-xs text-slate-600">
-              No leak. The chain appears here the moment the sensor fires.
-            </li>
-          )}
+        <div className="mb-2 flex items-baseline justify-between">
+          <span className="eyebrow">Forecast · chain of consequences</span>
+          <span className="mono text-[10px] text-t3">{upcoming.length ? `${upcoming.length} predicted` : f.settled ? 'nothing pending' : ''}</span>
+        </div>
+        <ol className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {upcoming.length === 0 && <li className="glass-card px-3 py-5 text-center text-[12px] text-t3">No leak. The chain appears here the moment the sensor fires.</li>}
           {upcoming.map((e, i) => (
-            <li key={`${e.kind}-${e.id}-${i}`} className="flex gap-2 rounded border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-xs">
+            <li key={`${e.kind}-${e.id}-${i}`} className="row flex items-start gap-2.5 py-2">
               <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[e.severity]}`} />
               <div className="min-w-0 flex-1">
-                <div className={SEVERITY_TEXT[e.severity]}>{e.message}</div>
-                <div className="mt-0.5 flex gap-2 font-mono text-[10px] text-slate-500">
+                <div className={`text-[12px] leading-snug ${e.severity === 'critical' ? SEVERITY_TEXT.critical : 'text-t1'}`}>{e.message}</div>
+                <div className="mono mt-0.5 flex gap-2 text-[10px] text-t3">
                   <span>{formatClockHM(clock.time_of_day + (e.at - clock.sim_time))}</span>
-                  <span className="text-slate-400">in {formatCountdown(e.remaining)}</span>
                   {e.cause && <span className="truncate">← {e.cause}</span>}
                 </div>
               </div>
+              <span className="pill pill-mono mt-0.5 shrink-0">in {formatCountdown(e.remaining)}</span>
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col border-t border-ink-700 pt-3">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Timeline · what happened</h2>
-        <ol className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+      <section className="hairline flex min-h-0 flex-1 flex-col pt-3">
+        <span className="eyebrow mb-2">Timeline · what happened</span>
+        <ol className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {timeline.length === 0 && <li className="glass-card px-3 py-5 text-center text-[12px] text-t3">Nothing yet.</li>}
           {timeline.map((t, i) => (
-            <li key={`${t.step}-${i}`} className="flex gap-2 rounded border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-xs">
-              <span className="shrink-0 font-mono text-slate-500">{formatTimeOfDay(clock.time_of_day - (clock.step - t.step) * clock.dt)}</span>
-              <span className={SEVERITY_TEXT[t.severity]}>{t.message}</span>
+            <li key={`${t.step}-${i}`} className="row flex items-start gap-2.5 py-1.5">
+              <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${SEVERITY_DOT[t.severity]}`} />
+              <span className={`min-w-0 flex-1 text-[12px] leading-snug ${t.severity === 'critical' ? SEVERITY_TEXT.critical : t.severity === 'warning' ? 'text-t1' : 'text-t2'}`}>{t.message}</span>
+              <span className="mono shrink-0 text-[10px] text-t3">{formatTimeOfDay(clock.time_of_day - (clock.step - t.step) * clock.dt)}</span>
             </li>
           ))}
         </ol>

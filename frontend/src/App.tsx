@@ -33,93 +33,109 @@ export default function App() {
   const [rightTab, setRightTab] = useState<'agents' | 'messages' | 'cascade'>('agents')
 
   if (!world || !clock) {
-    return <div className="flex h-full items-center justify-center text-slate-500">connecting to the world…</div>
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-t3">
+        <span className="h-2 w-2 rounded-full bg-haven-blue haven-pulse" />
+        <span className="text-xs">connecting to the world…</span>
+      </div>
+    )
   }
 
   const darkNow = new Set(world.impact.dark_levels)
   const darkSoon = new Set(world.forecast.impact.dark_levels)
   const wetLevels = new Set(world.wet_spaces.map((s) => s.split('-')[0]))
+  const shown = world.approved_plan ?? world.plan
+  const criticalMessages = shown.messages?.filter((m) => m.priority === 'critical').length ?? 0
+  const vetoes = world.plan.stances.filter((s) => s.stance === 'veto').length
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-6 border-b border-ink-700 bg-ink-900 px-5 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <span className="text-lg font-semibold tracking-[0.2em] text-white">HAVEN</span>
-          <span className="text-xs text-slate-500">David Blackwell Hall · cascade engine</span>
+    <div className="flex h-full flex-col gap-3 p-3">
+      <header className="glass flex h-14 shrink-0 items-center gap-6 px-5" style={{ borderRadius: 16 }}>
+        <div className="flex items-baseline gap-3">
+          <span className="text-[15px] font-semibold tracking-[0.18em] text-t1">HAVEN</span>
+          <span className="label">David Blackwell Hall · {world.mode === 'replay' ? 'replay' : 'live'}</span>
         </div>
-        <div className="font-mono text-2xl tabular-nums text-white">{formatTimeOfDay(clock.time_of_day)}</div>
-        <div className="flex gap-1">
-          <button className="rounded bg-ink-700 px-3 py-1 text-sm hover:bg-ink-600" onClick={() => api.clock({ playing: !clock.playing })}>
-            {clock.playing ? 'Pause' : 'Play'}
+
+        <div className="ml-6 flex items-center gap-4">
+          <span className="mono num text-[34px] leading-none text-t1">{formatTimeOfDay(clock.time_of_day)}</span>
+          <button
+            className="btn-secondary btn-icon"
+            onClick={() => api.clock({ playing: !clock.playing })}
+            title={clock.playing ? 'Pause' : 'Play'}
+            aria-label={clock.playing ? 'Pause' : 'Play'}
+          >
+            {clock.playing ? (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <rect x="1.5" y="1" width="3" height="10" rx="1" />
+                <rect x="7.5" y="1" width="3" height="10" rx="1" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M2.5 1.5v9l8-4.5z" />
+              </svg>
+            )}
           </button>
-          {[1, 5, 20, 60].map((s) => (
-            <button
-              key={s}
-              className={`rounded px-2 py-1 text-sm ${clock.speed === s ? 'bg-slate-200 text-ink-900' : 'bg-ink-700 hover:bg-ink-600'}`}
-              onClick={() => api.clock({ speed: s })}
-            >
-              {s}×
-            </button>
-          ))}
+          <div className="seg seg-xs">
+            {[1, 5, 20, 60].map((s) => (
+              <button key={s} className={`seg-item mono ${clock.speed === s ? 'is-on' : ''}`} onClick={() => api.clock({ speed: s })}>
+                {s}×
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="ml-auto flex items-center gap-3 text-xs">
-          {world.mode === 'replay' && (
-            <span className="rounded border border-amber-500/50 px-2 py-0.5 text-amber-400">REPLAY · {clock.replay_remaining} events left</span>
-          )}
-          <span className="flex items-center gap-1.5 text-slate-400">
-            <span className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-amber-400' : 'bg-haven-danger'}`} />
+
+        <div className="ml-auto flex items-center gap-3">
+          {world.mode === 'replay' && <span className="pill pill-amber pill-mono">REPLAY · {clock.replay_remaining} left</span>}
+          <span className="flex items-center gap-2 text-[11px] text-t2">
+            <span
+              className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-haven-amber' : 'bg-haven-danger'}`}
+              style={{ boxShadow: connection === 'open' ? '0 0 8px rgba(48,209,88,0.6)' : undefined }}
+            />
             {connection}
           </span>
-          <span className="font-mono text-slate-500">
+          <span className="mono text-[11px] text-t3">
             run {world.run_id} · v{world.version}
           </span>
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-[320px_1fr_400px] gap-px overflow-hidden bg-ink-700">
-        <section className="flex min-h-0 flex-col gap-4 overflow-hidden bg-ink-900 p-4">
+      <main className="stagger grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)_420px] gap-3 overflow-hidden">
+        <section className="glass flex min-h-0 flex-col gap-4 overflow-hidden p-4">
           <Controls world={world} />
-          <div className="border-t border-ink-700 pt-3">
+          <div className="hairline pt-4">
             <VoiceRule world={world} />
           </div>
-          <div className="min-h-0 flex-1 border-t border-ink-700 pt-3">
+          <div className="hairline min-h-0 flex-1 pt-4">
             <ImpactLedger world={world} clock={clock} />
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col bg-ink-950">
-          <div className="flex items-center gap-1 border-b border-ink-700 px-3 py-2">
-            {[...levels]
-              .sort((a, b) => b.index - a.index)
-              .map((lv) => {
-                const now = darkNow.has(lv.id)
-                const soon = !now && darkSoon.has(lv.id)
-                const wet = wetLevels.has(lv.id)
-                return (
-                  <button
-                    key={lv.id}
-                    onClick={() => setLevel(lv.id)}
-                    className={`relative rounded px-2.5 py-1 text-xs ${level === lv.id ? 'bg-slate-200 text-ink-900' : 'bg-ink-800 text-slate-400 hover:bg-ink-700'}`}
-                    title={lv.name}
-                  >
-                    {lv.id}
-                    {(now || soon || wet) && (
-                      <span className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-amber-400 haven-pulse'}`} />
-                    )}
-                  </button>
-                )
-              })}
-            {view === '3d' && (
-              <button
-                onClick={() => setLevel('all')}
-                className={`rounded px-2.5 py-1 text-xs ${level === 'all' ? 'bg-slate-200 text-ink-900' : 'bg-ink-800 text-slate-400 hover:bg-ink-700'}`}
-                title="Whole building"
-              >
-                all
-              </button>
-            )}
-            <span className="ml-3 text-xs text-slate-500">{level === 'all' ? 'Whole building' : levels.find((l) => l.id === level)?.name}</span>
-            <div className="ml-3 flex rounded border border-ink-600 text-[11px]">
+        <section className="glass flex min-h-0 flex-col overflow-hidden">
+          <div className="hairline-b flex items-center gap-3 px-4 py-2.5">
+            <div className="seg">
+              {[...levels]
+                .sort((a, b) => b.index - a.index)
+                .map((lv) => {
+                  const now = darkNow.has(lv.id)
+                  const soon = !now && darkSoon.has(lv.id)
+                  const wet = wetLevels.has(lv.id)
+                  return (
+                    <button key={lv.id} onClick={() => setLevel(lv.id)} className={`seg-item mono ${level === lv.id ? 'is-on' : ''}`} title={lv.name}>
+                      {lv.id}
+                      {(now || soon || wet) && (
+                        <span className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-haven-amber haven-pulse'}`} />
+                      )}
+                    </button>
+                  )
+                })}
+              {view === '3d' && (
+                <button onClick={() => setLevel('all')} className={`seg-item ${level === 'all' ? 'is-on' : ''}`} title="Whole building">
+                  all
+                </button>
+              )}
+            </div>
+            <span className="label">{level === 'all' ? 'Whole building' : levels.find((l) => l.id === level)?.name}</span>
+            <div className="seg seg-xs ml-1">
               {(['2d', '3d'] as const).map((v) => (
                 <button
                   key={v}
@@ -127,7 +143,7 @@ export default function App() {
                     setView(v)
                     if (v === '2d' && level === 'all') setLevel('L4')
                   }}
-                  className={`px-2 py-0.5 uppercase ${view === v ? 'bg-slate-200 text-ink-900' : 'text-slate-400 hover:text-slate-200'}`}
+                  className={`seg-item ${view === v ? 'is-on' : ''}`}
                 >
                   {v === '2d' ? '2D plan' : '3D twin'}
                 </button>
@@ -138,7 +154,7 @@ export default function App() {
           <div className="min-h-0 flex-1 p-3">
             {view === '3d' ? (
               <ViewErrorBoundary fallback={<FloorPlan world={world} level={level === 'all' ? 'L4' : level} />}>
-                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-slate-500">loading the 3D twin…</div>}>
+                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">loading the 3D twin…</div>}>
                   <Building3D level={level} />
                 </Suspense>
               </ViewErrorBoundary>
@@ -148,31 +164,25 @@ export default function App() {
           </div>
         </section>
 
-        <section className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-px overflow-hidden bg-ink-700">
-          <div className="min-h-0 overflow-hidden bg-ink-900 p-4">
+        <section className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden">
+          <div className="glass min-h-0 overflow-hidden p-4">
             <PlanPanel world={world} clock={clock} />
           </div>
-          <div className="flex min-h-0 flex-col overflow-hidden bg-ink-900">
-            <div className="flex gap-1 border-b border-ink-700 px-4 pt-2">
-              {(['agents', 'messages', 'cascade'] as const).map((t) => {
-                const shown = world.approved_plan ?? world.plan
-                const critical = shown.messages?.filter((m) => m.priority === 'critical').length ?? 0
-                const label =
-                  t === 'agents'
-                    ? `Agents (${world.plan.stances.filter((s) => s.stance === 'veto').length} veto)`
-                    : t === 'messages'
-                      ? `Messages${critical ? ` (${critical} critical)` : ''}`
-                      : 'Cascade'
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setRightTab(t)}
-                    className={`rounded-t px-3 py-1 text-xs uppercase tracking-wider ${rightTab === t ? 'bg-ink-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                  >
-                    {label}
+          <div className="glass flex min-h-0 flex-col overflow-hidden">
+            <div className="hairline-b flex items-center px-4 py-2.5">
+              <div className="seg">
+                {(['agents', 'messages', 'cascade'] as const).map((t) => (
+                  <button key={t} onClick={() => setRightTab(t)} className={`seg-item ${rightTab === t ? 'is-on' : ''}`}>
+                    {t === 'agents' ? 'Agents' : t === 'messages' ? 'Messages' : 'Cascade'}
+                    {t === 'agents' && vetoes > 0 && (
+                      <span className="ml-1.5 inline-block rounded-full bg-haven-danger px-1.5 text-[10px] font-semibold text-white">{vetoes}</span>
+                    )}
+                    {t === 'messages' && criticalMessages > 0 && (
+                      <span className="ml-1.5 inline-block rounded-full bg-white/10 px-1.5 text-[10px] font-semibold text-t1">{criticalMessages}</span>
+                    )}
                   </button>
-                )
-              })}
+                ))}
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden p-4">
               {rightTab === 'agents' ? (
@@ -204,19 +214,19 @@ class ViewErrorBoundary extends Component<{ fallback: ReactNode; children: React
 }
 
 function Legend() {
-  const item = (color: string, label: string, extra = '') => (
-    <span className="flex items-center gap-1">
-      <span className={`inline-block h-2.5 w-2.5 rounded-sm ${extra}`} style={{ background: color }} />
+  const item = (color: string, label: string, round = false) => (
+    <span className="flex items-center gap-1.5">
+      <span className={`inline-block h-2 w-2 ${round ? 'rounded-full' : 'rounded-[3px]'}`} style={{ background: color }} />
       {label}
     </span>
   )
   return (
-    <div className="ml-auto flex gap-3 text-[10px] text-slate-500">
-      {item('#3ba7ff', 'water')}
-      {item('rgba(255,77,79,0.5)', 'dark now')}
-      {item('rgba(255,176,32,0.6)', 'dark if nothing is done')}
-      {item('#2ecc8f', 'step-free route')}
-      {item('#ff4d4f', 'person at risk', 'rounded-full')}
+    <div className="ml-auto flex gap-3 text-[10px] text-t3">
+      {item('#64d2ff', 'water')}
+      {item('rgba(255,69,58,0.55)', 'dark now')}
+      {item('rgba(255,214,10,0.6)', 'dark if nothing is done')}
+      {item('#30d158', 'step-free route')}
+      {item('#ff453a', 'person at risk', true)}
     </div>
   )
 }

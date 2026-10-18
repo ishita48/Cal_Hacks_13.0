@@ -50,72 +50,69 @@ export function MessagesPanel({ world, clock }: Props) {
   if (plan.status === 'none' || total === 0) {
     return (
       <div className="flex h-full flex-col">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Messages</h2>
-        <div className="mt-2 rounded border border-dashed border-ink-700 px-3 py-4 text-center text-xs text-slate-600">
-          No plan yet. Each affected person gets their own message once the agents agree.
-        </div>
+        <span className="eyebrow">Messages</span>
+        <div className="glass-card mt-3 px-3 py-6 text-center text-[12px] text-t3">No plan yet. Each affected person gets their own message once the agents agree.</div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full flex-col gap-2 overflow-hidden">
+    <div className="flex h-full flex-col gap-2.5 overflow-hidden">
       <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Messages <span className="font-mono normal-case tracking-normal text-slate-600">{total} · {critical} critical</span>
-        </h2>
-        <div className="flex gap-1 text-[10px]">
+        <div className="flex items-baseline gap-2">
+          <span className="eyebrow">Messages</span>
+          <span className="mono text-[10px] text-t3">
+            {total} · {critical} critical
+          </span>
+        </div>
+        <div className="seg seg-xs">
           {(['all', 'critical', 'staff'] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`rounded px-2 py-0.5 uppercase tracking-wider ${filter === f ? 'bg-slate-200 text-ink-900' : 'bg-ink-700 text-slate-400 hover:bg-ink-600'}`}
-            >
-              {f}
+            <button key={f} onClick={() => setFilter(f)} className={`seg-item ${filter === f ? 'is-on' : ''}`}>
+              {f === 'all' ? 'All' : f === 'critical' ? 'Critical' : 'Staff'}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         {groups.map(([title, msgs]) => {
           const rows = msgs.filter(visible)
           if (rows.length === 0) return null
           return (
             <section key={title}>
-              <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+              <div className="eyebrow mb-1.5">
                 {title} · {rows.length}
-              </h3>
-              <ul className="space-y-1">
+              </div>
+              <ul className="space-y-1.5">
                 {rows.map((m) => {
                   const at = sentAt(m)
                   const maya = m.to === 'maya'
                   return (
-                    <li
-                      key={m.id}
-                      className={`rounded border px-2.5 py-1.5 text-xs ${
-                        maya ? 'border-haven-safe/60 bg-haven-safe/5' : m.priority === 'critical' ? 'border-haven-danger/40 bg-ink-900' : 'border-ink-700 bg-ink-900'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className={`rounded px-1 font-mono text-[9px] ${m.channel === 'call' ? 'bg-haven-power/20 text-haven-power' : 'bg-ink-700 text-slate-300'}`} title={m.channel}>
+                    <li key={m.id} className={`glass-card px-3 py-2.5 ${maya ? 'tint-blue' : ''}`}>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`mono flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-1.5 text-[9px] font-semibold ${
+                            m.channel === 'call' ? 'bg-haven-power/20 text-haven-power' : 'bg-white/8 text-t2'
+                          }`}
+                          title={m.channel}
+                        >
                           {CHANNEL_GLYPH[m.channel] ?? m.channel}
                         </span>
-                        <span className="truncate font-medium text-white">{m.name}</span>
-                        {m.lang !== 'en' && <span className="rounded border border-ink-600 px-1 text-[9px] uppercase text-slate-400">{m.lang}</span>}
-                        {m.count > 1 && <span className="rounded bg-ink-700 px-1 text-[9px] text-slate-300">×{m.count}</span>}
-                        {m.priority === 'critical' && <span className="rounded border border-haven-danger/50 px-1 text-[9px] uppercase text-haven-danger">critical</span>}
-                        <span className="ml-auto shrink-0 font-mono text-[10px]">
+                        <span className="truncate text-[13px] font-semibold text-t1">{m.name}</span>
+                        {m.lang !== 'en' && <span className="pill mono">{m.lang}</span>}
+                        {m.count > 1 && <span className="pill mono">×{m.count}</span>}
+                        {m.priority === 'critical' && <span className="pill pill-red">critical</span>}
+                        <span className="mono ml-auto shrink-0 text-[10px]">
                           {at != null ? (
-                            <span className="text-haven-safe">✓ sent {formatTimeOfDay(clock.time_of_day - (clock.step - at) * clock.dt)}</span>
+                            <span className="text-haven-safe">sent {formatTimeOfDay(clock.time_of_day - (clock.step - at) * clock.dt)}</span>
                           ) : world.approved_plan ? (
-                            <span className="text-slate-500">queued</span>
+                            <span className="text-t3">queued</span>
                           ) : (
-                            <span className="text-slate-600">draft</span>
+                            <span className="text-t3">draft</span>
                           )}
                         </span>
                       </div>
-                      <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-slate-300">{m.text}</p>
+                      <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-t2">{m.text}</p>
                     </li>
                   )
                 })}

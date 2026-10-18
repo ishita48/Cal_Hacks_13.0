@@ -70,23 +70,31 @@ export function FloorPlan({ world, level }: Props) {
     return out
   }, [world.impact.routes, spaces, level])
 
-  if (!spec) return <div className="flex h-full items-center justify-center text-slate-500">loading building…</div>
+  if (!spec) return <div className="flex h-full items-center justify-center text-[12px] text-t3">loading building…</div>
 
   return (
-    <svg viewBox={`-1 -1 ${width + 2} ${depth + 2}`} className="h-full w-full" style={{ maxHeight: '100%' }}>
+    <svg viewBox={`-2 -2 ${width + 4} ${depth + 4}`} className="h-full w-full" style={{ maxHeight: '100%' }}>
       <defs>
         <pattern id="hatch" width="1.2" height="1.2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="0.5" height="1.2" fill="#ffb020" opacity="0.45" />
+          <rect width="0.5" height="1.2" fill="#ffd60a" opacity="0.35" />
         </pattern>
+        <filter id="routeGlow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="0.6" />
+        </filter>
+        <radialGradient id="vignette" cx="50%" cy="45%" r="70%">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.03)" />
+          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+        </radialGradient>
       </defs>
+      <rect x={-2} y={-2} width={width + 4} height={depth + 4} fill="url(#vignette)" rx={3} />
       <g transform={`translate(0 ${depth}) scale(1 -1)`}>
         {spec.footprint.map((r, i) => (
-          <rect key={i} x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} fill="#0d1117" stroke="#2a3442" strokeWidth={0.15} />
+          <rect key={i} x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.14)" strokeWidth={0.14} />
         ))}
 
         {here.map((s) => {
           const w = world.water[s.id]
-          const waterOpacity = w ? Math.min(0.9, 0.25 + (w.depth / 0.3) * 0.65) : 0
+          const waterOpacity = w ? Math.min(0.85, 0.22 + (w.depth / 0.3) * 0.6) : 0
           return (
             <g key={s.id}>
               <rect
@@ -94,8 +102,8 @@ export function FloorPlan({ world, level }: Props) {
                 y={s.rect.y0}
                 width={s.rect.x1 - s.rect.x0}
                 height={s.rect.y1 - s.rect.y0}
-                fill={KIND_FILL[s.kind] ?? '#1a2330'}
-                stroke="#3a4656"
+                fill={KIND_FILL[s.kind] ?? 'rgba(255,255,255,0.05)'}
+                stroke="rgba(255,255,255,0.12)"
                 strokeWidth={0.08}
               >
                 <title>
@@ -104,13 +112,13 @@ export function FloorPlan({ world, level }: Props) {
                 </title>
               </rect>
               {darkNow && s.kind !== 'courtyard' && (
-                <rect x={s.rect.x0} y={s.rect.y0} width={s.rect.x1 - s.rect.x0} height={s.rect.y1 - s.rect.y0} fill="#ff4d4f" opacity={0.18} pointerEvents="none" />
+                <rect x={s.rect.x0} y={s.rect.y0} width={s.rect.x1 - s.rect.x0} height={s.rect.y1 - s.rect.y0} fill="#ff453a" opacity={0.16} pointerEvents="none" />
               )}
               {darkSoon && s.kind !== 'courtyard' && (
                 <rect x={s.rect.x0} y={s.rect.y0} width={s.rect.x1 - s.rect.x0} height={s.rect.y1 - s.rect.y0} fill="url(#hatch)" className="haven-pulse" pointerEvents="none" />
               )}
               {w && (
-                <rect x={s.rect.x0} y={s.rect.y0} width={s.rect.x1 - s.rect.x0} height={s.rect.y1 - s.rect.y0} fill="#3ba7ff" opacity={waterOpacity} pointerEvents="none" />
+                <rect x={s.rect.x0} y={s.rect.y0} width={s.rect.x1 - s.rect.x0} height={s.rect.y1 - s.rect.y0} fill="#64d2ff" opacity={waterOpacity} pointerEvents="none" />
               )}
             </g>
           )
@@ -118,14 +126,17 @@ export function FloorPlan({ world, level }: Props) {
 
         {openings.map((o) =>
           o.axis === 'x' ? (
-            <line key={o.id} x1={o.x - o.width / 2} x2={o.x + o.width / 2} y1={o.y} y2={o.y} stroke={o.kind === 'exit' ? '#2ecc8f' : '#6b7a90'} strokeWidth={0.25} />
+            <line key={o.id} x1={o.x - o.width / 2} x2={o.x + o.width / 2} y1={o.y} y2={o.y} stroke={o.kind === 'exit' ? '#30d158' : 'rgba(255,255,255,0.35)'} strokeWidth={0.22} />
           ) : (
-            <line key={o.id} x1={o.x} x2={o.x} y1={o.y - o.width / 2} y2={o.y + o.width / 2} stroke={o.kind === 'exit' ? '#2ecc8f' : '#6b7a90'} strokeWidth={0.25} />
+            <line key={o.id} x1={o.x} x2={o.x} y1={o.y - o.width / 2} y2={o.y + o.width / 2} stroke={o.kind === 'exit' ? '#30d158' : 'rgba(255,255,255,0.35)'} strokeWidth={0.22} />
           ),
         )}
 
         {routes.map((r) => (
-          <polyline key={r.id} points={r.points} fill="none" stroke="#2ecc8f" strokeWidth={0.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} strokeDasharray="1.2 0.6" />
+          <g key={r.id}>
+            <polyline points={r.points} fill="none" stroke="#30d158" strokeWidth={1.1} strokeLinejoin="round" strokeLinecap="round" opacity={0.6} filter="url(#routeGlow)" />
+            <polyline points={r.points} fill="none" stroke="#30d158" strokeWidth={0.45} strokeLinejoin="round" strokeLinecap="round" opacity={0.95} strokeDasharray="1.2 0.6" />
+          </g>
         ))}
 
         {equipment.map((e) => {
@@ -133,8 +144,8 @@ export function FloorPlan({ world, level }: Props) {
           const leaking = world.leaks[e.id]?.active
           return (
             <g key={e.id}>
-              {leaking && <circle cx={e.x} cy={e.y} r={2.2} fill="#3ba7ff" opacity={0.35} className="haven-pulse" />}
-              <circle cx={e.x} cy={e.y} r={e.kind === 'sensor' ? 0.55 : 0.7} fill={STATUS_COLOR[st]} stroke="#07090c" strokeWidth={0.12}>
+              {leaking && <circle cx={e.x} cy={e.y} r={2.2} fill="#64d2ff" opacity={0.3} className="haven-pulse" />}
+              <circle cx={e.x} cy={e.y} r={e.kind === 'sensor' ? 0.55 : 0.7} fill={STATUS_COLOR[st]} stroke="rgba(0,0,0,0.6)" strokeWidth={0.12}>
                 <title>
                   {e.name} · {st}
                   {e.flood_height != null ? ` · fails at ${(e.flood_height * 100).toFixed(0)} cm` : ''}
@@ -145,7 +156,7 @@ export function FloorPlan({ world, level }: Props) {
         })}
 
         {movedMarks.map((m) => (
-          <circle key={`moved-${m.id}`} cx={m.x} cy={m.y} r={m.named ? 0.8 : 0.45} fill="#2ecc8f" stroke="#07090c" strokeWidth={0.12}>
+          <circle key={`moved-${m.id}`} cx={m.x} cy={m.y} r={m.named ? 0.8 : 0.45} fill="#30d158" stroke="rgba(255,255,255,0.15)" strokeWidth={0.12}>
             <title>{m.name} · moved here</title>
           </circle>
         ))}
@@ -153,10 +164,10 @@ export function FloorPlan({ world, level }: Props) {
         {marks.map(({ r, predicted, space }) => {
           const cx = (space.rect.x0 + space.rect.x1) / 2
           const cy = (space.rect.y0 + space.rect.y1) / 2
-          const color = r.severity === 'critical' ? '#ff4d4f' : '#ffb020'
+          const color = r.severity === 'critical' ? '#ff453a' : '#ffd60a'
           return (
             <g key={r.id}>
-              <circle cx={cx} cy={cy} r={NAMED.has(r.id) ? 1.1 : 0.7} fill={color} opacity={predicted ? 0.55 : 1} stroke="#07090c" strokeWidth={0.15}>
+              <circle cx={cx} cy={cy} r={NAMED.has(r.id) ? 1.1 : 0.7} fill={color} opacity={predicted ? 0.55 : 1} stroke="rgba(255,255,255,0.15)" strokeWidth={0.15}>
                 <title>
                   {r.name} · {space.name} · {r.impacts.join(', ')}
                 </title>
@@ -167,25 +178,34 @@ export function FloorPlan({ world, level }: Props) {
       </g>
 
       {/* Labels are drawn un-flipped so the text reads normally. */}
-      <g fontFamily="Inter, sans-serif" fontSize={1.1} fill="#94a3b8" pointerEvents="none">
+      <g fontFamily="Geist, sans-serif" fontSize={1.1} fill="#a1a1a6" pointerEvents="none">
         {here
           .filter((s) => s.kind !== 'room' && s.kind !== 'bathroom' && s.rect.x1 - s.rect.x0 > 3 && s.rect.y1 - s.rect.y0 > 2.4)
           .map((s) => (
-            <text key={s.id} x={(s.rect.x0 + s.rect.x1) / 2} y={depth - (s.rect.y0 + s.rect.y1) / 2} textAnchor="middle" dominantBaseline="middle" fontSize={s.kind === 'corridor' ? 0.9 : 1.1} opacity={0.8}>
+            <text
+              key={s.id}
+              x={(s.rect.x0 + s.rect.x1) / 2}
+              y={depth - (s.rect.y0 + s.rect.y1) / 2}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={s.kind === 'corridor' ? 0.95 : 1.15}
+              fontWeight={500}
+              opacity={0.7}
+            >
               {short(s.name)}
             </text>
           ))}
         {marks
           .filter((m) => NAMED.has(m.r.id))
           .map(({ r, space }) => (
-            <text key={r.id} x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 - 1.5} textAnchor="middle" fontSize={1.3} fill="#fff" fontWeight={600}>
+            <text key={r.id} x={(space.rect.x0 + space.rect.x1) / 2} y={depth - (space.rect.y0 + space.rect.y1) / 2 - 1.5} textAnchor="middle" fontSize={1.3} fill="#f5f5f7" fontWeight={600}>
               {r.name.split(' ')[0]}
             </text>
           ))}
         {movedMarks
           .filter((m) => m.named)
           .map((m) => (
-            <text key={`moved-label-${m.id}`} x={m.x} y={depth - m.y - 1.2} textAnchor="middle" fontSize={1.3} fill="#2ecc8f" fontWeight={600}>
+            <text key={`moved-label-${m.id}`} x={m.x} y={depth - m.y - 1.2} textAnchor="middle" fontSize={1.3} fill="#30d158" fontWeight={600}>
               {m.name.split(' ')[0]}
             </text>
           ))}

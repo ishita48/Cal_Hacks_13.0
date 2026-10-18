@@ -20,11 +20,11 @@ const SPECIALIST_BLURB: Record<string, string> = {
   capacity: 'Does the overflow space actually fit the people sent to it?',
 }
 
-const STANCE_STYLE: Record<StanceKind, string> = {
-  propose: 'border-haven-water/60 text-haven-water',
-  support: 'border-haven-safe/60 text-haven-safe',
-  critique: 'border-amber-400/60 text-amber-400',
-  veto: 'border-haven-danger bg-haven-danger/15 text-haven-danger',
+const STANCE_PILL: Record<StanceKind, string> = {
+  propose: 'pill-blue',
+  support: 'pill-green',
+  critique: 'pill-amber',
+  veto: 'pill-red',
 }
 
 /** One card per agent in the negotiation. Toggling a card is an input event to the world. */
@@ -72,24 +72,21 @@ export function AgentConsole({ world }: Props) {
   )
 
   return (
-    <div className="flex h-full flex-col gap-2 overflow-hidden">
+    <div className="flex h-full flex-col gap-2.5 overflow-hidden">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Agents · who speaks in the negotiation</h2>
-        <span className="font-mono text-[10px] text-slate-600">
+        <span className="eyebrow">Agents · who speaks in the negotiation</span>
+        <span className="mono text-[10px] text-t3">
           {world.plan.enabled_agents.length}/{agentIds.length} on
         </span>
       </div>
-      {error && <p className="text-xs text-haven-danger">{error}</p>}
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+      {error && <p className="text-[11px] text-haven-danger">{error}</p>}
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {SPECIALISTS.filter((id) => id in world.agents).map((id) => card(id))}
-        <div className="pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">Personal agents</div>
+        <div className="eyebrow pt-2">Personal agents</div>
         {storyIds.map((id) => card(id, id === 'resident:maya'))}
         {rest.length > 0 && (
-          <button
-            onClick={() => setShowAll((v) => !v)}
-            className="w-full rounded border border-dashed border-ink-700 px-3 py-1.5 text-center text-[11px] text-slate-500 hover:bg-ink-800"
-          >
-            {showAll ? 'hide' : 'show'} {rest.length} more personal agents
+          <button onClick={() => setShowAll((v) => !v)} className="btn-secondary btn-sm w-full">
+            {showAll ? 'Hide' : 'Show'} {rest.length} more personal agents
           </button>
         )}
         {showAll && rest.map((id) => card(id))}
@@ -133,48 +130,41 @@ function AgentCard({
     prevStance.current = stance?.stance ?? null
   })
 
-  const border = !enabled
-    ? 'border-ink-700'
-    : stance?.stance === 'veto'
-      ? 'border-haven-danger'
-      : prominent
-        ? 'border-slate-300/70'
-        : 'border-ink-600'
+  const veto = enabled && stance?.stance === 'veto'
 
   return (
     <div
-      className={`rounded-lg border bg-ink-900 ${border} ${prominent ? 'p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_24px_rgba(59,167,255,0.12)]' : 'p-2.5'} ${!enabled ? 'opacity-55' : ''} ${shake ? 'haven-shake' : ''} transition-opacity`}
+      className={`glass-card relative ${prominent ? 'p-3.5' : 'p-3'} ${!enabled ? 'opacity-45' : ''} ${shake ? 'haven-shake' : ''} ${veto ? 'tint-red' : ''} transition-opacity`}
+      style={prominent ? { boxShadow: 'inset 3px 0 0 #0a84ff, 0 10px 30px rgba(10,132,255,0.10)' } : undefined}
     >
-      <div className="flex items-center gap-2">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${enabled ? 'bg-haven-safe' : 'bg-slate-600'}`} />
-        <span className={`font-medium ${prominent ? 'text-base text-white' : 'text-sm text-slate-100'}`}>{label}</span>
-        {prominent && <span className="rounded bg-haven-water/20 px-1.5 text-[9px] uppercase tracking-wider text-haven-water">the Maya moment</span>}
-        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[10px] text-slate-400" title={`${id}: ${enabled ? 'in' : 'out of'} the negotiation`}>
-          <span>{enabled ? 'on' : 'off'}</span>
-          <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${enabled ? 'bg-haven-safe' : 'bg-ink-600'} ${replay ? 'opacity-40' : ''}`}>
-            <input type="checkbox" className="peer sr-only" checked={enabled} disabled={replay} onChange={(e) => onToggle(e.target.checked)} />
-            <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${enabled ? 'left-3.5' : 'left-0.5'}`} />
-          </span>
+      <div className="flex items-center gap-2.5">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${enabled ? 'bg-haven-safe' : 'bg-t3'}`} style={enabled ? { boxShadow: '0 0 8px rgba(48,209,88,0.5)' } : undefined} />
+        <span className={`font-semibold ${prominent ? 'text-[15px] text-t1' : 'text-[13px] text-t1'}`}>{label}</span>
+        {prominent && <span className="pill pill-blue">the Maya moment</span>}
+        <label className="switch ml-auto" title={`${id}: ${enabled ? 'in' : 'out of'} the negotiation`}>
+          <input type="checkbox" checked={enabled} disabled={replay} onChange={(e) => onToggle(e.target.checked)} />
+          <span className="track" />
+          <span className="knob" />
         </label>
       </div>
-      {blurb && <p className={`mt-1 ${prominent ? 'text-xs text-slate-300' : 'text-[11px] text-slate-500'}`}>{blurb}</p>}
+      {blurb && <p className={`mt-1.5 ${prominent ? 'text-[12px] text-t2' : 'text-[11px] text-t3'}`}>{blurb}</p>}
       {!enabled ? (
-        <p className="mt-1.5 text-[11px] italic text-slate-500">not in the negotiation — nobody speaks for this constraint</p>
+        <p className="mt-2 text-[11px] text-t3">Not in the negotiation · nobody speaks for this constraint</p>
       ) : stance ? (
-        <div className="mt-1.5">
+        <div className="mt-2">
           <div className="flex items-start gap-2">
-            <span className={`shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wider ${STANCE_STYLE[stance.stance]}`}>{stance.stance}</span>
-            <span className="text-[11px] text-slate-300">{stance.reason}</span>
+            <span className={`pill ${STANCE_PILL[stance.stance]} shrink-0`}>{stance.stance}</span>
+            <span className="text-[11px] leading-snug text-t1">{stance.reason}</span>
           </div>
           {stance.constraint && (
-            <div className="mt-1 text-[10px] text-slate-500">
-              <span className={`mr-1 rounded px-1 uppercase ${stance.constraint.type === 'hard' ? 'bg-haven-danger/20 text-haven-danger' : 'bg-ink-700 text-slate-400'}`}>{stance.constraint.type}</span>
-              {stance.constraint.rule}
+            <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-t3">
+              <span className={`pill ${stance.constraint.type === 'hard' ? 'pill-red' : ''} shrink-0`}>{stance.constraint.type}</span>
+              <span className="pt-px">{stance.constraint.rule}</span>
             </div>
           )}
         </div>
       ) : (
-        <p className="mt-1.5 text-[11px] text-slate-600">listening · nothing to say yet</p>
+        <p className="mt-2 text-[11px] text-t3">Listening · nothing to say yet</p>
       )}
     </div>
   )

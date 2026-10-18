@@ -32,32 +32,40 @@ export function Controls({ world }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sensor · {SENSOR}</h2>
-      <div className={`rounded-lg border p-3 ${sensor?.wet ? 'border-haven-water bg-haven-water/10' : 'border-ink-600'}`}>
-        <div className="flex items-baseline justify-between">
-          <div className="text-2xl font-semibold tabular-nums">{((sensor?.value ?? 0) * 100).toFixed(0)}%</div>
-          <div className="text-xs text-slate-400">{sensor?.wet ? 'WATER DETECTED' : 'dry'} · {sensor?.source ?? '—'}</div>
+      <div className="flex items-baseline justify-between">
+        <span className="eyebrow">Sensor</span>
+        <span className="mono text-[10px] text-t3">{SENSOR}</span>
+      </div>
+
+      <div className={`glass-card p-3.5 ${sensor?.wet ? 'tint-cyan' : ''}`}>
+        <div className="flex items-end justify-between">
+          <div className={`num text-[32px] leading-none ${sensor?.wet ? 'text-haven-water' : 'text-t1'}`}>
+            {((sensor?.value ?? 0) * 100).toFixed(0)}
+            <span className="ml-0.5 text-[14px] font-medium text-t3">%</span>
+          </div>
+          <div className="text-right">
+            <div className={`text-[12px] font-medium ${sensor?.wet ? 'text-haven-water' : 'text-t2'}`}>{sensor?.wet ? 'Water detected' : 'Dry'}</div>
+            <div className="label mono">{sensor?.source ?? '—'}</div>
+          </div>
         </div>
         {leak && (
-          <div className="mt-1 text-xs text-haven-water">
-            riser burst · {leak.flow_lps.toFixed(0)} L/s {leak.active ? '' : '· stopped (valve closed)'}
+          <div className="mt-2 flex items-center gap-2 text-[11px] text-haven-water">
+            <span className={`h-1.5 w-1.5 rounded-full bg-haven-water ${leak.active ? 'haven-pulse' : ''}`} />
+            riser burst · {leak.flow_lps.toFixed(0)} L/s{leak.active ? '' : ' · stopped, valve closed'}
           </div>
         )}
       </div>
+
       <div className="flex gap-2">
-        <button
-          disabled={replay}
-          className="flex-1 rounded bg-haven-water/90 px-3 py-2 text-sm font-medium text-ink-950 hover:bg-haven-water disabled:opacity-30"
-          onClick={act(() => api.sensor(SENSOR, 0.85))}
-        >
+        <button disabled={replay} className="btn-primary flex-1" onClick={act(() => api.sensor(SENSOR, 0.85))}>
           Simulate leak
         </button>
-        <button disabled={replay} className="flex-1 rounded bg-ink-700 px-3 py-2 text-sm hover:bg-ink-600 disabled:opacity-30" onClick={act(() => api.sensor(SENSOR, 0.02))}>
+        <button disabled={replay} className="btn-secondary flex-1" onClick={act(() => api.sensor(SENSOR, 0.02))}>
           Dry
         </button>
       </div>
 
-      <h2 className="mt-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Levers</h2>
+      <span className="eyebrow mt-1">Levers</span>
       <div className="grid grid-cols-2 gap-2">
         <Lever
           label="Close main valve"
@@ -70,55 +78,67 @@ export function Controls({ world }: Props) {
           label={msbB === 'isolated' ? 'Restore MSB-B' : 'Cut MSB-B'}
           hint="floors 3–4 dark, lifts on generator"
           status={msbB}
+          danger={msbB !== 'isolated'}
           disabled={replay || msbB === 'flooded'}
           onClick={act(() => api.command('msb_b', msbB === 'isolated' ? 'on' : 'off', 'manager'))}
         />
       </div>
 
       <div className="flex gap-2">
-        <button className="flex-1 rounded bg-ink-700 px-3 py-2 text-sm hover:bg-ink-600" onClick={act(api.reset)}>
-          New run (reset world)
+        <button className="btn-secondary btn-sm flex-1" onClick={act(api.reset)}>
+          New run
         </button>
-        <button className="rounded bg-ink-800 px-3 py-2 text-xs text-slate-400 hover:bg-ink-700" onClick={() => setShowRuns((v) => !v)}>
-          runs ({runs.length})
+        <button className="btn-secondary btn-sm" onClick={act(api.loadDemo)} title="Replays the recorded canonical run at 5×: leak, Maya off/on, spoken rule, approve, HAVEN acts">
+          Replay demo
+        </button>
+        <button className="btn-secondary btn-sm mono" onClick={() => setShowRuns((v) => !v)}>
+          runs · {runs.length}
         </button>
       </div>
-      <button
-        className="rounded border border-amber-500/40 bg-ink-800 px-3 py-2 text-xs text-amber-300 hover:bg-ink-700"
-        title="Replays the recorded canonical run at 5x: leak, Maya off/on, spoken rule, approve, HAVEN acts"
-        onClick={act(api.loadDemo)}
-      >
-        Replay the recorded demo (backup)
-      </button>
+
       {showRuns && (
-        <ul className="max-h-40 space-y-1 overflow-y-auto">
+        <ul className="glass-card max-h-40 overflow-y-auto px-3">
           {runs.slice(0, 12).map((r) => (
-            <li key={r.id} className="flex items-center justify-between rounded border border-ink-700 px-2 py-1 text-[11px]">
-              <span className="font-mono">
+            <li key={r.id} className="row flex items-center justify-between py-1.5 text-[11px]">
+              <span className="mono text-t2">
                 {r.id}
-                <span className="ml-2 text-slate-500">{r.event_count} ev</span>
+                <span className="ml-2 text-t3">{r.event_count} ev</span>
               </span>
-              <button disabled={r.event_count === 0} className="rounded bg-ink-700 px-2 py-0.5 hover:bg-ink-600 disabled:opacity-30" onClick={act(() => api.replay(r.id, 5))}>
+              <button disabled={r.event_count === 0} className="btn-secondary btn-sm" onClick={act(() => api.replay(r.id, 5))}>
                 Replay
               </button>
             </li>
           ))}
         </ul>
       )}
-      {error && <p className="text-xs text-haven-danger">{error}</p>}
+      {error && <p className="text-[11px] text-haven-danger">{error}</p>}
     </div>
   )
 }
 
-function Lever({ label, hint, status, disabled, onClick }: { label: string; hint: string; status: string; disabled: boolean; onClick: () => void }) {
+function Lever({
+  label,
+  hint,
+  status,
+  disabled,
+  danger,
+  onClick,
+}: {
+  label: string
+  hint: string
+  status: string
+  disabled: boolean
+  danger?: boolean
+  onClick: () => void
+}) {
   return (
-    <button disabled={disabled} onClick={onClick} className="rounded border border-ink-600 bg-ink-800 px-3 py-2 text-left hover:bg-ink-700 disabled:opacity-40">
-      <div className="flex items-center gap-2 text-sm">
-        <span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLOR[status as keyof typeof STATUS_COLOR] ?? '#64748b' }} />
+    <button disabled={disabled} onClick={onClick} className={`glass-card px-3 py-2.5 text-left transition-transform active:scale-[0.98] disabled:opacity-35 ${danger ? 'hover:tint-red' : ''}`}>
+      <div className="flex items-center gap-2 text-[13px] font-medium text-t1">
+        <span className="h-2 w-2 rounded-full" style={{ background: STATUS_COLOR[status as keyof typeof STATUS_COLOR] ?? '#8e8e93' }} />
         {label}
       </div>
-      <div className="text-[10px] text-slate-500">
-        {hint} · {status}
+      <div className="label mt-0.5">
+        {hint} · <span className="mono">{status}</span>
       </div>
     </button>
   )

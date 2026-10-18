@@ -43,13 +43,13 @@ export default function Building3D({ level }: Props) {
         orthographic
         dpr={[1, 1.5]}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
-        style={{ background: '#07090c' }}
+        style={{ background: '#050507' }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping
           gl.toneMappingExposure = 1.05
         }}
       >
-        <color attach="background" args={['#07090c']} />
+        <color attach="background" args={['#050507']} />
         <Suspense fallback={<LoadingLabel />}>
           <Scene level={level} />
         </Suspense>
@@ -146,14 +146,14 @@ function Scene({ level }: Props) {
         minZoom={3}
         maxZoom={30}
       />
-      <hemisphereLight args={['#dfe7f3', '#0b0f14', 0.95]} />
+      <hemisphereLight args={['#e8e8ed', '#0a0a0d', 0.95]} />
       <directionalLight position={[40, 90, 30]} intensity={1.5} color="#fff4e0" />
       <directionalLight position={[-60, 40, -80]} intensity={0.35} color="#8fb4ff" />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
         <planeGeometry args={[400, 400]} />
-        <meshStandardMaterial color="#0b1016" roughness={1} metalness={0} />
+        <meshStandardMaterial color="#09090c" roughness={1} metalness={0} />
       </mesh>
-      <gridHelper args={[400, 80, '#1c2430', '#131922']} position={[center.x, -0.07, center.z]} />
+      <gridHelper args={[400, 80, '#1f1f24', '#141418']} position={[center.x, -0.07, center.z]} />
 
       <primitive object={exterior.scene} />
       <primitive object={interior.scene} />
@@ -485,7 +485,7 @@ function People({
             <Html center position={[0, 1.4, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
               <div
                 className="rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap"
-                style={{ borderColor: m.color, color: '#fff', background: 'rgba(12,16,21,0.85)', opacity: m.faded ? 0.7 : 1 }}
+                style={{ borderColor: m.color, color: '#fff', background: 'rgba(5,5,7,0.85)', opacity: m.faded ? 0.7 : 1 }}
               >
                 {m.name.split(' ')[0]}
               </div>
