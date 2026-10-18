@@ -1,6 +1,6 @@
 import { Html, Line, OrbitControls, OrthographicCamera, useGLTF } from '@react-three/drei'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo, useRef } from 'react'
+import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import * as THREE from 'three'
 import { STATUS_COLOR } from '../lib/labels'
 import { useBuilding } from '../state/building'
@@ -17,6 +17,8 @@ import type { Rect, ResidentImpact, Space, WorldState } from '../state/types'
 
 const EXTERIOR_URL = '/models/blackwell.glb'
 const INTERIOR_URL = '/models/blackwell_interior.glb'
+// Optional third file: furniture split out so the shell and interior stream first. Missing = fine.
+const FURNITURE_URL = '/models/blackwell_furniture.glb'
 useGLTF.preload(EXTERIOR_URL)
 useGLTF.preload(INTERIOR_URL)
 
@@ -61,7 +63,7 @@ export default function Building3D({ level }: Props) {
 function LoadingLabel() {
   return (
     <Html center>
-      <div className="rounded border border-ink-700 bg-ink-900/90 px-3 py-2 text-xs text-slate-400">streaming the building…</div>
+      <div className="glass-card px-3 py-2 text-[11px] text-t2">streaming the building…</div>
     </Html>
   )
 }
@@ -157,6 +159,11 @@ function Scene({ level }: Props) {
 
       <primitive object={exterior.scene} />
       <primitive object={interior.scene} />
+      <Optional>
+        <Suspense fallback={null}>
+          <Furniture level={level} levelIndex={levelIndex} />
+        </Suspense>
+      </Optional>
 
       <Tinter index={index} levelIndex={levelIndex} />
       <WaterPlanes level={level} levelIndex={levelIndex} levelElev={levelElev} spaces={spaces} />
@@ -499,4 +506,35 @@ function People({
 
 function centerOf(r: Rect, y: number): [number, number, number] {
   return [(r.x0 + r.x1) / 2, y, -(r.y0 + r.y1) / 2]
+}
+
+
+// ---- optional furniture file ----------------------------------------------------------------
+
+function Furniture({ level, levelIndex }: { level: string; levelIndex: Record<string, number> }) {
+  const furniture = useGLTF(FURNITURE_URL)
+  const meshes = useMemo(() => {
+    const out: { mesh: THREE.Object3D; index: number }[] = []
+    furniture.scene.traverse((o) => {
+      const li = Number(o.userData?.level_index)
+      if (!Number.isNaN(li) && o.userData?.level_index !== undefined) out.push({ mesh: o, index: li })
+    })
+    return out
+  }, [furniture.scene])
+  useEffect(() => {
+    const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
+    for (const { mesh, index: li } of meshes) mesh.visible = li <= focus
+  }, [level, levelIndex, meshes])
+  return <primitive object={furniture.scene} />
+}
+
+/** Renders nothing if the child throws (e.g. the optional GLB is absent or fails to parse). */
+class Optional extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    return this.state.failed ? null : this.props.children
+  }
 }
