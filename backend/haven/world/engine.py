@@ -11,10 +11,9 @@ import contextlib
 import logging
 from typing import Any
 
-from ..building.blackwell import build_blackwell_hall
-from ..building.graph import build_graph
 from ..building.model import BuildingSpec
-from ..people.roster import Roster, build_roster
+from ..people.roster import Roster
+from .context import WorldContext, build_context
 from .events import InputEvent, LoggedEvent
 from .state import DT, SCENARIO_START_TOD, WorldState, advance, apply_input, initial_state
 from .store import EventStore
@@ -33,9 +32,10 @@ class WorldEngine:
     def __init__(self, store: EventStore, scenario: str = "blackwell_basement_leak") -> None:
         self.store = store
         # Static world: the building and who lives in it. Immutable for the life of the process.
-        self.building: BuildingSpec = build_blackwell_hall()
-        self.graph = build_graph(self.building)
-        self.roster: Roster = build_roster(self.building)
+        self.ctx: WorldContext = build_context()
+        self.building: BuildingSpec = self.ctx.spec
+        self.graph = self.ctx.graph
+        self.roster: Roster = self.ctx.roster
         self.scenario = scenario
         self.playing = True
         self.speed = 1.0
@@ -46,7 +46,7 @@ class WorldEngine:
         self._task: asyncio.Task | None = None
         self._last_broadcast_version = -1
         self._last_broadcast_step = -1
-        self.state: WorldState = initial_state(store.create_run(scenario), scenario)
+        self.state: WorldState = initial_state(store.create_run(scenario), scenario, self.ctx)
 
     # ---- lifecycle -------------------------------------------------------------------
 
@@ -68,13 +68,13 @@ class WorldEngine:
             if self.state.mode == "replay":
                 raise ReplayActiveError("World is replaying a recorded run; reset to go live.")
             logged = self.store.append(self.state.run_id, self.state.step, event)
-            apply_input(self.state, event)
+            apply_input(self.state, event, self.ctx)
         await self._broadcast(force=True)
         return logged
 
     async def reset(self) -> WorldState:
         async with self._lock:
-            self.state = initial_state(self.store.create_run(self.scenario), self.scenario)
+            self.state = initial_state(self.store.create_run(self.scenario), self.scenario, self.ctx)
             self._replay_queue = []
             self._step_budget = 0.0
         await self._broadcast(force=True)
@@ -83,7 +83,7 @@ class WorldEngine:
     async def start_replay(self, run_id: str, speed: float | None = None) -> WorldState:
         events = self.store.events(run_id)
         async with self._lock:
-            self.state = initial_state(run_id, self.scenario, mode="replay")
+            self.state = initial_state(run_id, self.scenario, self.ctx, mode="replay")
             self._replay_queue = events
             self._step_budget = 0.0
             self._apply_due_replay_events()
@@ -140,7 +140,7 @@ class WorldEngine:
                         self._step_budget += self.speed * TICK_SECONDS / DT
                         while self._step_budget >= 1.0:
                             self._step_budget -= 1.0
-                            advance(self.state)
+                            advance(self.state, self.ctx)
                             self._apply_due_replay_events()
                 await self._broadcast()
             except Exception:  # keep the world alive; one bad tick must not kill the demo
@@ -149,7 +149,7 @@ class WorldEngine:
 
     def _apply_due_replay_events(self) -> None:
         while self._replay_queue and self._replay_queue[0].step <= self.state.step:
-            apply_input(self.state, self._replay_queue.pop(0).event)
+            apply_input(self.state, self._replay_queue.pop(0).event, self.ctx)
 
     async def _broadcast(self, force: bool = False) -> None:
         if not force and (

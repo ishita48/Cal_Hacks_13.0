@@ -1,131 +1,127 @@
 import { useEffect, useState } from 'react'
-import { api, formatTimeOfDay, type RunSummary } from './lib/api'
+import { CascadePanel } from './components/CascadePanel'
+import { Controls } from './components/Controls'
+import { FloorPlan } from './components/FloorPlan'
+import { ImpactLedger } from './components/ImpactLedger'
+import { api, formatTimeOfDay } from './lib/api'
+import { useBuilding } from './state/building'
 import { connectWorld, useWorld } from './state/world'
 
 export default function App() {
   useEffect(() => connectWorld(), [])
-  const { connection, clock, world } = useWorld()
-  const [runs, setRuns] = useState<RunSummary[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const loadBuilding = useBuilding((b) => b.load)
+  const levels = useBuilding((b) => b.spec?.levels ?? [])
+  useEffect(() => {
+    loadBuilding().catch(() => {})
+  }, [loadBuilding])
 
-  const act = (fn: () => Promise<unknown>) => () => {
-    setError(null)
-    fn().catch((e: Error) => setError(e.message))
+  const { connection, clock, world } = useWorld()
+  const [level, setLevel] = useState('L4')
+
+  if (!world || !clock) {
+    return <div className="flex h-full items-center justify-center text-slate-500">connecting to the world…</div>
   }
 
-  useEffect(() => {
-    api.runs().then(setRuns).catch(() => {})
-  }, [world?.run_id])
-
-  const sensor = world?.sensors['basement_mech_1']
+  const darkNow = new Set(world.impact.dark_levels)
+  const darkSoon = new Set(world.forecast.impact.dark_levels)
+  const wetLevels = new Set(world.wet_spaces.map((s) => s.split('-')[0]))
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-6 border-b border-ink-700 bg-ink-900 px-5 py-3">
+      <header className="flex items-center gap-6 border-b border-ink-700 bg-ink-900 px-5 py-2.5">
         <div className="flex items-baseline gap-2">
           <span className="text-lg font-semibold tracking-[0.2em] text-white">HAVEN</span>
-          <span className="text-xs text-slate-500">David Blackwell Hall · world-state spine</span>
+          <span className="text-xs text-slate-500">David Blackwell Hall · cascade engine</span>
         </div>
-        <div className="font-mono text-2xl tabular-nums text-white">
-          {clock ? formatTimeOfDay(clock.time_of_day) : '--:--:--'}
-        </div>
+        <div className="font-mono text-2xl tabular-nums text-white">{formatTimeOfDay(clock.time_of_day)}</div>
         <div className="flex gap-1">
-          <button
-            className="rounded bg-ink-700 px-3 py-1 text-sm hover:bg-ink-600"
-            onClick={act(() => api.clock({ playing: !clock?.playing }))}
-          >
-            {clock?.playing ? 'Pause' : 'Play'}
+          <button className="rounded bg-ink-700 px-3 py-1 text-sm hover:bg-ink-600" onClick={() => api.clock({ playing: !clock.playing })}>
+            {clock.playing ? 'Pause' : 'Play'}
           </button>
           {[1, 5, 20, 60].map((s) => (
             <button
               key={s}
-              className={`rounded px-2 py-1 text-sm ${clock?.speed === s ? 'bg-slate-200 text-ink-900' : 'bg-ink-700 hover:bg-ink-600'}`}
-              onClick={act(() => api.clock({ speed: s }))}
+              className={`rounded px-2 py-1 text-sm ${clock.speed === s ? 'bg-slate-200 text-ink-900' : 'bg-ink-700 hover:bg-ink-600'}`}
+              onClick={() => api.clock({ speed: s })}
             >
               {s}×
             </button>
           ))}
         </div>
         <div className="ml-auto flex items-center gap-3 text-xs">
-          {clock?.mode === 'replay' && (
-            <span className="rounded border border-amber-500/50 px-2 py-0.5 text-amber-400">
-              REPLAY · {clock.replay_remaining} events left
-            </span>
+          {world.mode === 'replay' && (
+            <span className="rounded border border-amber-500/50 px-2 py-0.5 text-amber-400">REPLAY · {clock.replay_remaining} events left</span>
           )}
           <span className="flex items-center gap-1.5 text-slate-400">
-            <span
-              className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-amber-400' : 'bg-haven-danger'}`}
-            />
+            <span className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-amber-400' : 'bg-haven-danger'}`} />
             {connection}
           </span>
-          <span className="font-mono text-slate-500">run {world?.run_id ?? '—'} · v{world?.version ?? 0}</span>
+          <span className="font-mono text-slate-500">
+            run {world.run_id} · v{world.version}
+          </span>
         </div>
       </header>
 
-      <main className="grid flex-1 grid-cols-[320px_1fr_320px] gap-px overflow-hidden bg-ink-700">
-        <section className="flex flex-col gap-4 bg-ink-900 p-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sensor · basement_mech_1</h2>
-          <div className={`rounded-lg border p-4 ${sensor?.wet ? 'border-haven-water bg-haven-water/10' : 'border-ink-600'}`}>
-            <div className="text-3xl font-semibold tabular-nums">{((sensor?.value ?? 0) * 100).toFixed(0)}%</div>
-            <div className="text-sm text-slate-400">{sensor?.wet ? 'WATER DETECTED' : 'dry'} · source {sensor?.source ?? '—'}</div>
+      <main className="grid min-h-0 flex-1 grid-cols-[340px_1fr_380px] gap-px overflow-hidden bg-ink-700">
+        <section className="flex min-h-0 flex-col gap-4 overflow-hidden bg-ink-900 p-4">
+          <Controls world={world} />
+          <div className="min-h-0 flex-1 border-t border-ink-700 pt-3">
+            <ImpactLedger world={world} />
           </div>
-          <div className="flex gap-2">
-            <button
-              className="flex-1 rounded bg-haven-water/90 px-3 py-2 text-sm font-medium text-ink-950 hover:bg-haven-water"
-              onClick={act(() => api.sensor('basement_mech_1', 0.85))}
-            >
-              Simulate leak
-            </button>
-            <button
-              className="flex-1 rounded bg-ink-700 px-3 py-2 text-sm hover:bg-ink-600"
-              onClick={act(() => api.sensor('basement_mech_1', 0.02))}
-            >
-              Dry
-            </button>
-          </div>
-          <button className="rounded bg-ink-700 px-3 py-2 text-sm hover:bg-ink-600" onClick={act(api.reset)}>
-            New run (reset world)
-          </button>
-          {error && <p className="text-xs text-haven-danger">{error}</p>}
         </section>
 
-        <section className="overflow-y-auto bg-ink-950 p-4">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Timeline</h2>
-          <ol className="space-y-2">
-            {[...(world?.timeline ?? [])].reverse().map((t, i) => (
-              <li key={`${t.step}-${i}`} className="flex gap-3 rounded border border-ink-700 bg-ink-900 px-3 py-2 text-sm">
-                <span className="font-mono text-slate-500">
-                  {clock ? formatTimeOfDay(clock.time_of_day - (clock.step - t.step) * clock.dt) : t.step}
-                </span>
-                <span className={t.severity === 'critical' ? 'text-haven-danger' : t.severity === 'warning' ? 'text-amber-400' : ''}>
-                  {t.message}
-                </span>
-              </li>
-            ))}
-          </ol>
+        <section className="flex min-h-0 flex-col bg-ink-950">
+          <div className="flex items-center gap-1 border-b border-ink-700 px-3 py-2">
+            {[...levels]
+              .sort((a, b) => b.index - a.index)
+              .map((lv) => {
+                const now = darkNow.has(lv.id)
+                const soon = !now && darkSoon.has(lv.id)
+                const wet = wetLevels.has(lv.id)
+                return (
+                  <button
+                    key={lv.id}
+                    onClick={() => setLevel(lv.id)}
+                    className={`relative rounded px-2.5 py-1 text-xs ${level === lv.id ? 'bg-slate-200 text-ink-900' : 'bg-ink-800 text-slate-400 hover:bg-ink-700'}`}
+                    title={lv.name}
+                  >
+                    {lv.id}
+                    {(now || soon || wet) && (
+                      <span className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-amber-400 haven-pulse'}`} />
+                    )}
+                  </button>
+                )
+              })}
+            <span className="ml-3 text-xs text-slate-500">{levels.find((l) => l.id === level)?.name}</span>
+            <Legend />
+          </div>
+          <div className="min-h-0 flex-1 p-3">
+            <FloorPlan world={world} level={level} />
+          </div>
         </section>
 
-        <section className="overflow-y-auto bg-ink-900 p-4">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Recorded runs</h2>
-          <ul className="space-y-2">
-            {runs.map((r) => (
-              <li key={r.id} className="flex items-center justify-between rounded border border-ink-700 px-3 py-2 text-xs">
-                <span className="font-mono">
-                  {r.id}
-                  <span className="ml-2 text-slate-500">{r.event_count} ev</span>
-                </span>
-                <button
-                  disabled={r.event_count === 0}
-                  className="rounded bg-ink-700 px-2 py-1 hover:bg-ink-600 disabled:opacity-30"
-                  onClick={act(() => api.replay(r.id, 5))}
-                >
-                  Replay
-                </button>
-              </li>
-            ))}
-          </ul>
+        <section className="min-h-0 overflow-hidden bg-ink-900 p-4">
+          <CascadePanel world={world} clock={clock} />
         </section>
       </main>
+    </div>
+  )
+}
+
+function Legend() {
+  const item = (color: string, label: string, extra = '') => (
+    <span className="flex items-center gap-1">
+      <span className={`inline-block h-2.5 w-2.5 rounded-sm ${extra}`} style={{ background: color }} />
+      {label}
+    </span>
+  )
+  return (
+    <div className="ml-auto flex gap-3 text-[10px] text-slate-500">
+      {item('#3ba7ff', 'water')}
+      {item('rgba(255,77,79,0.5)', 'dark now')}
+      {item('rgba(255,176,32,0.6)', 'dark if nothing is done')}
+      {item('#2ecc8f', 'step-free route')}
+      {item('#ff4d4f', 'person at risk', 'rounded-full')}
     </div>
   )
 }

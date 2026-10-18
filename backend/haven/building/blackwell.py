@@ -262,6 +262,8 @@ def build_blackwell_hall() -> BuildingSpec:
             "plausible reconstruction, not facilities drawings.",
             "Lifts are on standby power via ATS-EQ, but ATS-EQ sits in the same basement "
             "electrical room as the normal-power switchboard.",
+            "A full-bore break of the 4-inch riser at ~60 psi releases on the order of 100+ L/s "
+            "(orifice flow, Cd ~0.6); the mechanical room floor drain and sump cannot keep up.",
         ],
     )
 
@@ -390,6 +392,7 @@ def _explicit_openings(b: _Builder) -> None:
     # Basement plant rooms open onto the plant corridor (auto_doors covers them); the electrical
     # room gets a second, double door so switchgear can be swapped.
     b.opening("B1", "B1-elec", "B1-cor_plant", 26.0, 24.0, 1.8, "x", oid="B1:elec_double_door")
+    b.opening("B1", "B1-mech", "B1-cor_plant", 18.0, 22.0, 1.8, "x", oid="B1:mech_double_door")
 
 
 def _services(b: _Builder) -> None:
@@ -403,20 +406,22 @@ def _services(b: _Builder) -> None:
         dep(Dependency(src=src, dst=dst, rel=rel))
 
     # ---- electrical: utility -> main switchboard sections -> risers -> floor panels ---------
+    # The original switchgear sits on a 300 mm housekeeping pad; section B and ATS-EQ were added in
+    # a later retrofit at floor level (100 mm channel base), so they are the first to go under.
     E("pge_service", "utility_feed", "PG&E 12 kV service + pad transformer", "L1", 20.0, -3.0, "L1-retail_durant",
       note="Transformer is outdoors in a vault on Durant Ave")
-    E("msb", "switchboard", "Main switchboard MSB (4000 A)", "B1", 18.0, 34.5, "B1-elec", flood_height=0.10)
-    E("msb_a", "switchboard_section", "MSB section A", "B1", 16.5, 34.5, "B1-elec", flood_height=0.10)
+    E("msb", "switchboard", "Main switchboard MSB (4000 A)", "B1", 18.0, 34.5, "B1-elec", flood_height=0.30)
+    E("msb_a", "switchboard_section", "MSB section A", "B1", 16.5, 34.5, "B1-elec", flood_height=0.30)
     E("msb_b", "switchboard_section", "MSB section B", "B1", 19.5, 34.5, "B1-elec", flood_height=0.10)
-    E("msb_c", "switchboard_section", "MSB section C", "B1", 22.5, 34.5, "B1-elec", flood_height=0.10)
-    E("msb_m", "switchboard_section", "MSB section M (mechanical)", "B1", 25.5, 34.5, "B1-elec", flood_height=0.10)
+    E("msb_c", "switchboard_section", "MSB section C", "B1", 22.5, 34.5, "B1-elec", flood_height=0.30)
+    E("msb_m", "switchboard_section", "MSB section M (mechanical)", "B1", 25.5, 34.5, "B1-elec", flood_height=0.30)
     D("pge_service", "msb")
     for s in ("msb_a", "msb_b", "msb_c", "msb_m"):
         D("msb", s)
 
     E("generator", "generator", "Standby generator 500 kW (diesel)", "B1", 3.0, 32.0, "B1-generator",
       flood_height=0.30)
-    E("ats_em", "transfer_switch", "ATS-EM (life safety)", "B1", 15.5, 25.2, "B1-elec", flood_height=0.10)
+    E("ats_em", "transfer_switch", "ATS-EM (life safety)", "B1", 15.5, 25.2, "B1-elec", flood_height=0.45)
     E("ats_eq", "transfer_switch", "ATS-EQ (lifts + sump)", "B1", 17.5, 25.2, "B1-elec", flood_height=0.10)
     D("generator", "ats_em", "backs_up")
     D("generator", "ats_eq", "backs_up")
@@ -453,7 +458,7 @@ def _services(b: _Builder) -> None:
     E("booster_pump", "pump", "Domestic water booster pumps", "B1", 22.0, 10.0, "B1-mech", flood_height=0.25)
     E("water_heater", "water_heater", "Domestic water heaters", "B1", 26.0, 8.0, "B1-mech", flood_height=0.3)
     E("water_riser", "water_riser", "Domestic water riser (4\")", "B1", 27.5, 21.0, "B1-mech",
-      burst_flow_lps=6.5)
+      burst_flow_lps=150.0)
     E("sump_pump", "sump_pump", "Sump pump (duplex)", "B1", 15.0, 5.0, "B1-mech", flood_height=0.5,
       capacity_lps=3.0)
     D("water_main", "main_valve", "feeds_water")

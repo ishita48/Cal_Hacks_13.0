@@ -21,7 +21,20 @@ class SensorReading(BaseModel):
     source: Literal["manual", "esp32", "replay"] = "manual"
 
 
-InputEvent = Annotated[Union[SensorReading], Field(discriminator="type")]
+class EquipmentCommand(BaseModel):
+    """Someone (an operator, a plumber, later an approved agent action) operates equipment.
+
+    close/open are for valves (closing takes the valve's `seconds_to_close`);
+    off/on isolate or restore an electrical item (a flooded item stays dead when switched on).
+    """
+
+    type: Literal["equipment_command"] = "equipment_command"
+    equipment_id: str
+    command: Literal["close", "open", "off", "on"]
+    actor: str = "operator"
+
+
+InputEvent = Annotated[Union[SensorReading, EquipmentCommand], Field(discriminator="type")]
 
 
 class LoggedEvent(BaseModel):

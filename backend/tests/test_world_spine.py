@@ -5,6 +5,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from haven.api.app import create_app
+from haven.world.context import build_context
 from haven.world.engine import WorldEngine
 from haven.world.events import SensorReading
 from haven.world.state import advance, replay_events
@@ -15,7 +16,7 @@ def test_sensor_event_is_logged_and_applied():
     async def scenario():
         engine = WorldEngine(EventStore())
         for _ in range(7):
-            advance(engine.state)
+            advance(engine.state, engine.ctx)
         logged = await engine.submit(SensorReading(sensor_id="basement_1", value=0.9))
         assert logged.step == 7
         assert engine.state.sensors["basement_1"].wet
@@ -30,13 +31,13 @@ def test_replay_reproduces_live_world():
         engine = WorldEngine(EventStore())
         for value, steps in [(0.1, 3), (0.8, 10), (0.2, 4), (0.95, 1)]:
             for _ in range(steps):
-                advance(engine.state)
+                advance(engine.state, engine.ctx)
             await engine.submit(SensorReading(sensor_id="basement_1", value=value))
         for _ in range(5):
-            advance(engine.state)
+            advance(engine.state, engine.ctx)
 
         live = engine.state
-        rebuilt = replay_events(live.run_id, live.scenario, engine.store.events(live.run_id), live.step)
+        rebuilt = replay_events(live.run_id, live.scenario, engine.store.events(live.run_id), live.step, engine.ctx)
         assert rebuilt.model_dump(exclude={"mode"}) == live.model_dump(exclude={"mode"})
 
     asyncio.run(scenario())

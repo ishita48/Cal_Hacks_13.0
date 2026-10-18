@@ -16,3 +16,9 @@
 
 html, body, #root { height: 100%; }
 body { @apply bg-ink-950 text-slate-200 antialiased font-sans; }
+
+@keyframes haven-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.haven-pulse { animation: haven-pulse 1.6s ease-in-out infinite; }

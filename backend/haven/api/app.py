@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from ..world.engine import ReplayActiveError, WorldEngine
-from ..world.events import SensorReading
+from ..world.events import EquipmentCommand, SensorReading
 from ..world.store import EventStore
 
 
@@ -56,6 +56,16 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
             raise HTTPException(401, "bad sensor token")
         try:
             logged = await engine.submit(reading)
+        except ReplayActiveError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"seq": logged.seq, "step": logged.step}
+
+    @app.post("/api/command")
+    async def post_command(cmd: EquipmentCommand):
+        if cmd.equipment_id not in engine.ctx.equipment:
+            raise HTTPException(404, f"unknown equipment {cmd.equipment_id}")
+        try:
+            logged = await engine.submit(cmd)
         except ReplayActiveError as e:
             raise HTTPException(409, str(e)) from e
         return {"seq": logged.seq, "step": logged.step}
