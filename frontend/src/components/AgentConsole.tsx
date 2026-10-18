@@ -190,10 +190,54 @@ function AgentCard({
               <span className="pt-px">{stance.constraint.rule}</span>
             </div>
           )}
+          <Explain agent={id} version={version} />
         </div>
       ) : (
         <p className="mt-2 text-[11px] text-t3">Listening · nothing to say yet</p>
       )}
     </div>
+  )
+}
+
+
+/** The agent in its own words: Claude paraphrases the stance when a key is set, a template otherwise. */
+function Explain({ agent, version }: { agent: string; version: number }) {
+  const [text, setText] = useState<string | null>(null)
+  const [source, setSource] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const seen = useRef(version)
+  useEffect(() => {
+    if (seen.current !== version) {
+      seen.current = version
+      setText(null)
+      setSource(null)
+    }
+  }, [version])
+  const ask = async () => {
+    setBusy(true)
+    try {
+      const r = await api.explain(agent)
+      setText(r.text)
+      setSource(r.source)
+    } catch {
+      setText(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (text) {
+    return (
+      <div className="enter mt-2 rounded-[10px] bg-white/[0.04] px-2.5 py-2 text-[11px] leading-snug text-t1">
+        <span className="text-t2">“</span>
+        {text}
+        <span className="text-t2">”</span>
+        <span className="mono ml-2 text-[9px] text-t3">{source === 'llm' ? 'claude' : 'template'}</span>
+      </div>
+    )
+  }
+  return (
+    <button className="mt-1.5 text-[10px] text-haven-blue hover:underline disabled:opacity-40" onClick={ask} disabled={busy}>
+      {busy ? '…' : 'Explain'}
+    </button>
   )
 }
