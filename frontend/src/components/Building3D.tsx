@@ -232,6 +232,10 @@ function Scene({ level, connections = false, overlay, night }: Props & { overlay
   }, [level, levelIndex, index, topLevel])
 
   const center = useMemo(() => new THREE.Vector3(width / 2, 6, -depth / 2), [width, depth])
+  // Looking into a basement: the ground plane would hide it and the night sky lights nothing down there.
+  const ground = useBuilding((b) => b.ground)
+  const belowGrade = level !== 'all' && ground != null && (levelIndex[level] ?? 0) < (levelIndex[ground] ?? 1)
+  const focusElev = level !== 'all' ? (levelElev[level] ?? 0) : 0
 
   return (
     <>
@@ -240,7 +244,13 @@ function Scene({ level, connections = false, overlay, night }: Props & { overlay
       <Exposure night={night} />
       <OrbitControls target={center} enableDamping dampingFactor={0.08} minPolarAngle={0.25} maxPolarAngle={1.35} minZoom={3} maxZoom={60} />
       {night ? <NightRig center={center} /> : <DayRig />}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow>
+      {belowGrade && (
+        <>
+          <ambientLight intensity={night ? 0.9 : 0.5} color="#dfe6f5" />
+          <pointLight position={[center.x, focusElev + 3.2, center.z]} intensity={900} distance={140} decay={2} color="#f3f1e6" />
+        </>
+      )}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[center.x, -0.08, center.z]} receiveShadow visible={!belowGrade}>
         <planeGeometry args={[700, 700]} />
         <meshStandardMaterial color={night ? '#0f131c' : '#d9dee6'} roughness={1} metalness={0} />
       </mesh>

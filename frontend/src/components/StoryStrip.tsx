@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, formatCountdown } from '../lib/api'
 import { useBuilding } from '../state/building'
-import type { Clock, WorldState } from '../state/types'
+import type { Clock, IncidentMemory, WorldState } from '../state/types'
 import { useWorld } from '../state/world'
 import { stages } from './Lifecycle'
 
@@ -16,6 +16,27 @@ export function StoryStrip({ world, clock }: { world: WorldState; clock: Clock }
   const heroId = useBuilding((b) => b.heroId)
   const residents = useBuilding((b) => b.residents)
   const [error, setError] = useState<string | null>(null)
+  // Cross-incident memory: how this incident compares with the last one, and what is remembered on a quiet night.
+  const done = world.approved_plan?.status === 'done'
+  const [memory, setMemory] = useState<IncidentMemory | null>(null)
+  useEffect(() => {
+    if (world.mode !== 'live' && !done) return
+    api.incidents().then(setMemory).catch(() => {})
+  }, [done, world.run_id, world.mode])
+  const remembered = (() => {
+    if (!memory) return null
+    if (done && memory.current) {
+      const c = memory.comparison
+      if (!c) return 'First incident remembered: the next one will be compared with it.'
+      const faster = c.minutes_faster >= 0 ? `${c.minutes_faster} min faster` : `${-c.minutes_faster} min slower`
+      return `${faster} than the last incident, ${c.left_behind_delta <= 0 ? 'nobody more' : `${c.left_behind_delta} more`} left behind.`
+    }
+    if (n.stage === 'quiet' && memory.incidents.length > 0) {
+      const last = memory.incidents[0]
+      return `${memory.incidents.length} earlier incident${memory.incidents.length === 1 ? '' : 's'} remembered; the last took ${last.minutes_to_done} min from drip to done${last.rules.length ? ` under the rule "${last.rules[0].replace(/_/g, ' ')}"` : ''}.`
+    }
+    return null
+  })()
   const heroAgent = heroId ? `resident:${heroId}` : null
   const heroOn = heroAgent && heroAgent in world.agents ? world.agents[heroAgent] : undefined
   const heroName = heroId ? (residents[heroId]?.name.split(' ')[0] ?? heroId) : null
@@ -50,6 +71,7 @@ export function StoryStrip({ world, clock }: { world: WorldState; clock: Clock }
           {n.headline}
         </p>
         {n.detail && <p className="story-detail">{n.detail}</p>}
+        {remembered && <p className="story-detail text-haven-purple">{remembered}</p>}
         {n.next && (
           <p key={n.next} className="story-next fade-swap">
             {leftBehind > 0 && !world.approved_plan ? <b className="text-haven-purple">{n.next}</b> : <b>{n.next}</b>}

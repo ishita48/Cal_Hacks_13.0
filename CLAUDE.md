@@ -128,6 +128,8 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   labels, HUD) and POSTs inputs back. `snapshot()` does the same once, headless, for a render.
 
 ## Commands
+- Both servers: `scripts/dev.sh` (macOS/Linux) or `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1` (Windows; it
+  stops a stale backend first: a leftover uvicorn keeps :8000 and :8010 and a new one dies with exit 3).
 - Backend: `cd backend && uv run uvicorn haven.api.app:create_app --factory --port 8000 --reload --reload-dir haven`
 - Backend tests: `cd backend && uv run pytest -q`
 - Floor-plan PNG: `cd backend && PYTHONPATH=. uv run python tools/plot_plans.py out.png [LEVEL]`

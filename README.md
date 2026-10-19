@@ -11,9 +11,17 @@ replays exactly.
 ## Run it
 
 ```bash
+scripts/dev.sh                                   # macOS/Linux: both servers, Ctrl+C stops them
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1   # Windows: same, stops a stale backend first
+```
+
+or by hand:
+
+```bash
 cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
 cd backend  && uv run pytest -q                  # 71 tests, a few minutes
+cd frontend && npx tsc -b && npx vitest run      # typecheck + 14 tests
 ```
 
 Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live

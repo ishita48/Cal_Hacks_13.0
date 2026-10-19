@@ -474,7 +474,7 @@ body {
 .buds-chat-toggle:hover { transform: scale(1.1); }
 
 .buds-nudge {
-  position: fixed; right: 22px; bottom: 86px; z-index: 69; max-width: 280px;
+  position: fixed; right: 86px; bottom: 24px; z-index: 69; max-width: 250px;
   padding: 8px 12px; font-size: 12px; color: var(--ink-1); text-align: left;
   animation: haven-fp-fade 400ms ease-out both;
 }
