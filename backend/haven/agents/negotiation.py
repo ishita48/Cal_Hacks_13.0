@@ -252,10 +252,11 @@ class Negotiator:
             for agent in state.plan.enabled_agents:
                 if agent in ("checker", "redteam") or agent in spoken:
                     continue
-                if not self._speaks(agent, sit):
-                    continue
                 k = f"{key}#{rnd.n}#{agent}"
                 if k in self.requested:
+                    continue
+                if not self._speaks(agent, sit):
+                    self.requested.add(k)          # nothing at stake for them: remembered, never asked again
                     continue
                 self.requested.add(k)
                 self.pending[k] = time.time()

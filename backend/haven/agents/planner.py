@@ -13,7 +13,7 @@ No LLM here: an LLM may later paraphrase these stances, never decide them.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from ..people.roster import Resident
@@ -163,7 +163,33 @@ def situation_key(sit: Situation) -> str:
 # ---- situation -----------------------------------------------------------------------------
 
 
+_SIT_CACHE: dict[int, tuple[tuple, Situation]] = {}
+
+
+def _situation_signature(state: WorldState) -> tuple:
+    """Everything the Situation is a function of, besides the static context. Water volumes move only
+    with the step, so the step stands in for them; a logged stance or a toggle does not change it."""
+    return (state.run_id, state.step, state.forecast.computed_step, tuple(state.flooded), tuple(state.isolated),
+            tuple(state.closed_valves), tuple((p.equipment_id, p.completes_step) for p in state.pending),
+            tuple(sorted(state.moved.items())), tuple(r.code for r in state.rules),
+            tuple(sorted(a for a, on in state.agents.items() if on)), tuple(sorted(state.power.live)),
+            tuple(sorted((e, l.active) for e, l in state.leaks.items())))
+
+
 def _situation(ctx: WorldContext, state: WorldState) -> Situation:
+    """The Situation for this state, computed once per physical state: the planner, the negotiator and the
+    Fetch.ai society all ask for it in the same burst (each logged stance re-derives the plan and wakes every
+    plan listener), and the forward hydraulics inside it is the expensive part. Callers get their own shallow
+    copy, since compute_plan tightens `eta_cut_s` when the red team lands."""
+    sig = _situation_signature(state)
+    hit = _SIT_CACHE.get(id(ctx))
+    if hit is None or hit[0] != sig:
+        hit = (sig, _situation_uncached(ctx, state))
+        _SIT_CACHE[id(ctx)] = hit
+    return replace(hit[1])
+
+
+def _situation_uncached(ctx: WorldContext, state: WorldState) -> Situation:
     f = state.forecast
     elapsed = (state.step - f.computed_step) * _dt()     # the forecast may be a few minutes old
     lifts_up = all(state.power.lifts.values())

@@ -102,7 +102,7 @@ export function StoryStrip({ world, clock }: { world: WorldState; clock: Clock }
       {incident && (
         <div className="story-facts">
           {remaining != null && n.contact_name && (
-            <Fact v={remaining > 0 ? formatCountdown(remaining) : 'now'} k={`until water reaches ${n.contact_name}`} tone={remaining < 300 ? 'hot' : 'warm'} />
+            <Fact v={remaining > 0 ? formatCountdown(remaining) : 'now'} k={`until water reaches ${n.contact_name}`} tone={remaining < 300 ? 'hot' : 'warm'} live />
           )}
           <Fact v={n.affected_if_nothing_done} k="residents affected if nobody acts" tone={n.affected_if_nothing_done ? 'warm' : undefined} />
           <Fact v={n.affected_by_plan} k="people the plan moves or tells" />
@@ -114,10 +114,11 @@ export function StoryStrip({ world, clock }: { world: WorldState; clock: Clock }
   )
 }
 
-function Fact({ v, k, tone, buds }: { v: number | string; k: string; tone?: 'hot' | 'warm' | 'ok'; buds?: string }) {
+/** A number with its meaning. A value that changes on its own every second (a countdown) is not re-animated, or it would flicker. */
+function Fact({ v, k, tone, buds, live }: { v: number | string; k: string; tone?: 'hot' | 'warm' | 'ok'; buds?: string; live?: boolean }) {
   return (
     <div className={`fact ${tone ? `is-${tone}` : ''}`} data-buds={buds}>
-      <span key={String(v)} className="fact-v fade-swap">
+      <span key={live ? 'live' : String(v)} className={`fact-v ${live ? '' : 'fade-swap'}`}>
         {v}
       </span>
       <span className="fact-k">{k}</span>
