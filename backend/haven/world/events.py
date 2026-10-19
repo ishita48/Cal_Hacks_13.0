@@ -89,8 +89,19 @@ class PlanDecision(BaseModel):
     actor: str = "manager"
 
 
+class WorkOrder(BaseModel):
+    """A facilities manager files (or closes) a maintenance work order for one finding of the audit."""
+
+    type: Literal["work_order"] = "work_order"
+    finding_id: str               # operations.findings id, e.g. "raise:msb_b", "service:sump_pump"
+    title: str
+    status: Literal["open", "done"] = "open"
+    actor: str = "facilities manager"
+    detail: str = ""              # the ticket id when filed in Linear, "simulated" otherwise
+
+
 InputEvent = Annotated[
-    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent, AgentStance],
+    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent, AgentStance, WorkOrder],
     Field(discriminator="type"),
 ]
 

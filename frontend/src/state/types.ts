@@ -577,3 +577,78 @@ export interface Roster {
   residents: Resident[]
   staff: Staff[]
 }
+
+// ---- operations (backend/haven/world/operations.py, GET /api/ops) -------------------------------------
+
+export interface OpsImpact {
+  dark_levels: string[]
+  lifts_down: string[]
+  stranded: number
+  medication: number
+  device_power: number
+  on_dark_floors: number
+  affected: number
+  named: string[]
+}
+
+export interface OpsEnergy {
+  now_kw: number
+  normal_kw: number
+  floors: Record<string, number>
+  plant: Record<string, number>
+  curve_kw: number[]
+  hour: number
+  peak_hour: number
+  peak_kw: number
+  today_kwh: number
+  today_usd: number
+  today_co2_kg: number
+  tariff_usd_kwh: number
+  carbon_kg_kwh: number
+  dark_levels: string[]
+  standby: { id: string; name: string; rated_kw: number; load_kw: number; fuel_l: number; fuel_pct: number; runtime_h: number | null; carries: { id: string; name: string; kw: number }[]; running: boolean } | null
+}
+
+export interface OpsHealth {
+  id: string
+  name: string
+  kind: string
+  level: string
+  space: string
+  installed: number
+  last_service: string | null
+  service_days: number | null
+  days_since: number | null
+  overdue_days: number
+  next_due: string | null
+  task: string | null
+  condition: number
+  status: string
+  flood_height: number | null
+}
+
+export interface OpsFinding {
+  id: string
+  severity: 'critical' | 'serious' | 'warning'
+  equipment: string | null
+  kind: 'design' | 'service'
+  title: string
+  why: string
+  protects: number
+  stranded: number | null
+  work_order: { finding_id: string; title: string; status: 'open' | 'done'; actor: string; detail: string; step: number } | null
+}
+
+export interface OpsSnapshot {
+  date: string
+  energy: OpsEnergy
+  health: OpsHealth[]
+  audit: {
+    single: { id: string; name: string; kind: string; space: string; impact: OpsImpact; score: number }[]
+    rooms: { space: string; name: string; depth_m: number; fails: string[]; impact: OpsImpact; score: number }[]
+    common_mode: { space: string; name: string; detail: string }[]
+    flood_probe_m: number
+  }
+  findings: OpsFinding[]
+  summary: { plant: number; overdue: number; critical_findings: number; open_findings: number; single_points: number; people_exposed: number }
+}

@@ -51,6 +51,8 @@ def _join(items: list[str]) -> str:
 
 
 def _floors(ctx: WorldContext, levels: list[str]) -> str:
+    if len(levels) >= len(ctx.level_order) and len(levels) > 2:
+        return "every one"
     return _join([ctx.level_short(lv) for lv in levels])
 
 
@@ -58,7 +60,7 @@ def narrate(ctx: WorldContext, state: WorldState, tod: float, dt: float) -> Narr
     by_id = ctx.roster.by_id()
     first = lambda rid: by_id[rid].name.split()[0] if rid in by_id else rid  # noqa: E731
     plan = state.approved_plan or state.plan
-    incident = bool(state.leaks or state.flooded or state.forecast.events)
+    incident = bool(state.leaks or state.flooded or state.forecast.events or state.impact.dark_levels or state.impact.lifts_down)
     home = [r for r in ctx.roster.residents if r.presence != "away"]
 
     if not incident:
@@ -68,7 +70,7 @@ def narrate(ctx: WorldContext, state: WorldState, tod: float, dt: float) -> Narr
         return Narrative(
             stage="quiet", headline=f"{ctx.short_name} is quiet.",
             detail=f"{len(home)} residents are home tonight, {asleep} of them asleep. The water sensor in the {room} reads dry.",
-            next="", ask="Drip on the sensor, or press Simulate leak.")
+            next="", ask="Drip on the sensor, press Simulate leak, or trip the grid feed or the generator.")
 
     # -- what is happening ------------------------------------------------------------------------
     fc = state.forecast
@@ -83,8 +85,23 @@ def narrate(ctx: WorldContext, state: WorldState, tod: float, dt: float) -> Narr
     dark_soon = fc.impact.dark_levels
     lifts_down = bool(state.impact.lifts_down)
     valve_closed = leak is not None and not leak.active
+    live_set = set(state.power.live)
+    feeds = [e for e in ctx.spec.equipment if e.kind == "utility_feed"]
+    gens = [e for e in ctx.spec.equipment if e.kind == "generator"]
+    grid_down = bool(feeds) and any(f.id not in live_set for f in feeds)
+    gen_down = bool(gens) and any(g.id not in live_set for g in gens)
+    power_only = leak is None and not state.wet_spaces
 
-    if valve_closed and not dark_now:
+    if power_only and (grid_down or gen_down):
+        if grid_down and gen_down:
+            headline = (f"Grid feed and standby generator both down: floors {_floors(ctx, dark_now)} are dark"
+                        + (" and the lifts are down." if lifts_down else "."))
+        elif grid_down:
+            headline = (f"The grid feed is down; the generator is carrying the lifts and life safety. Floors "
+                        f"{_floors(ctx, dark_now)} are dark.")
+        else:
+            headline = f"{gens[0].name} is down: no standby power" + (f"; floors {_floors(ctx, dark_now)} are dark." if dark_now else ".")
+    elif valve_closed and not dark_now:
         valve = ctx.valve_for(leak.equipment_id)
         headline = f"The leak is stopped: {ctx.equipment[valve].name.lower() if valve else 'the valve'} is closed."
     elif dark_now:

@@ -5,7 +5,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 [ -d "$root/backend/.venv" ] || (cd "$root/backend" && uv sync)
 [ -d "$root/frontend/node_modules" ] || (cd "$root/frontend" && npm install)
-(cd "$root/backend" && uv run uvicorn haven.api.app:create_app --factory --port 8000) &
+envfile=""; [ -f "$root/backend/.env" ] && envfile="--env-file .env"
+(cd "$root/backend" && uv run $envfile uvicorn haven.api.app:create_app --factory --port 8000) &
 backend=$!
 (cd "$root/frontend" && npm run dev) &
 frontend=$!

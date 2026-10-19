@@ -1,4 +1,4 @@
-import type { AgentInfo, BudsReply, BuildingSpec, FetchStatus, Graph, IncidentMemory, Integrations, MemoryRule, NegotiationStatus, Roster, RuleParse, SensorHistory, SponsorReport } from '../state/types'
+import type { AgentInfo, BudsReply, BuildingSpec, FetchStatus, Graph, IncidentMemory, Integrations, MemoryRule, NegotiationStatus, OpsSnapshot, Roster, RuleParse, SensorHistory, SponsorReport } from '../state/types'
 
 const base = import.meta.env.VITE_HAVEN_API ?? ''
 
@@ -66,6 +66,8 @@ export const api = {
   memory: () => request<MemoryRule[]>('GET', '/api/memory'),
   incidents: () => request<IncidentMemory>('GET', '/api/memory/incidents'),
   graph: () => request<Graph>('GET', '/api/graph'),
+  ops: () => request<OpsSnapshot>('GET', '/api/ops'),
+  workOrder: (finding_id: string, status: 'open' | 'done' = 'open') => request('POST', '/api/ops/work-order', { finding_id, status }),
   sponsors: (fresh = false) => request<SponsorReport>('GET', `/api/sponsors${fresh ? '?fresh=true' : ''}`),
   budsAsk: (text: string) => request<BudsReply>('POST', '/api/buds/ask', { text }),
   budsAct: (kind: string, payload: Record<string, unknown>) => request('POST', '/api/buds/act', { kind, payload }),

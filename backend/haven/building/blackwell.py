@@ -245,6 +245,7 @@ def build_blackwell_hall() -> BuildingSpec:
     )
 
     _services(b)
+    _facility_records(b)
     _designate_singles(b)
 
     return BuildingSpec(
@@ -485,6 +486,48 @@ def _services(b: _Builder) -> None:
     # ---- the sensor (ESP32 + water probe on the mechanical room floor by the riser) ---------
     E("basement_mech_1", "sensor", "Water sensor (ESP32)", "B1", 27.0, 20.0, "B1-mech", hardware="ESP32")
     D("basement_mech_1", "water_riser", "monitors")
+
+
+# ---- facility records: what the maintenance log and the meters know about each piece of plant ------
+# installed (year), last_service (ISO date), service_days (interval the manufacturer or code asks for),
+# rated_kw (nameplate draw), and for the utility feed the tariff and grid carbon; for the generator its
+# tank. Invented but plausible for a 2018 building with a 2022 retrofit; the operations view reads them.
+_RECORDS: dict[str, dict] = {
+    "pge_service": dict(installed=2018, tariff_usd_kwh=0.29, carbon_kg_kwh=0.21, demand_usd_kw=24.0),
+    "msb": dict(installed=2018, last_service="2024-08-12", service_days=1095, task="Infrared scan and torque check"),
+    "msb_a": dict(installed=2018, last_service="2024-08-12", service_days=1095, task="Infrared scan and torque check"),
+    "msb_b": dict(installed=2022, last_service="2022-06-01", service_days=1095, task="Infrared scan and torque check",
+                  note="Retrofit section on a 100 mm channel base"),
+    "msb_c": dict(installed=2018, last_service="2024-08-12", service_days=1095, task="Infrared scan and torque check"),
+    "msb_m": dict(installed=2018, last_service="2024-08-12", service_days=1095, task="Infrared scan and torque check"),
+    "generator": dict(installed=2018, last_service="2026-03-02", service_days=365, task="Annual load-bank test",
+                      rated_kw=500, fuel_l=1900, fuel_level=0.62, burn_lph_full=135),
+    "ats_em": dict(installed=2018, last_service="2025-09-15", service_days=365, task="Transfer test under load"),
+    "ats_eq": dict(installed=2022, last_service="2022-06-20", service_days=365, task="Transfer test under load",
+                   note="Retrofit at floor level next to MSB section B"),
+    "lift_1": dict(installed=2018, last_service="2026-08-29", service_days=30, task="Monthly lift inspection", rated_kw=18),
+    "lift_2": dict(installed=2018, last_service="2026-10-02", service_days=30, task="Monthly lift inspection", rated_kw=18),
+    "main_valve": dict(installed=2018, last_service="2019-04-03", service_days=365, task="Exercise the gate valve (full close and reopen)"),
+    "booster_pump": dict(installed=2018, last_service="2026-05-04", service_days=365, task="Seal and bearing check", rated_kw=15),
+    "water_heater": dict(installed=2018, last_service="2025-11-10", service_days=365, task="Flush and anode check"),
+    "water_riser": dict(installed=2018, last_service="2023-01-16", service_days=1095, task="Pressure test and joint inspection"),
+    "sump_pump": dict(installed=2018, last_service="2025-02-21", service_days=180, task="Float switch and impeller test", rated_kw=2.2),
+    "fire_alarm": dict(installed=2018, last_service="2026-06-01", service_days=365, task="Annual fire alarm test", rated_kw=1.5),
+    "emergency_lighting": dict(installed=2018, last_service="2026-04-20", service_days=365, task="90-minute battery test", rated_kw=9),
+    "basement_mech_1": dict(installed=2026, last_service="2026-10-01", service_days=180, task="Probe clean and battery check"),
+}
+
+
+def _facility_records(b: _Builder) -> None:
+    by_id = {e.id: e for e in b.equipment}
+    for eid, rec in _RECORDS.items():
+        if eid in by_id:
+            by_id[eid].props.update(rec)
+    for e in b.equipment:
+        if e.kind == "fridge":
+            e.props.update(installed=2018, last_service="2026-01-15", service_days=365, task="Coil clean, door seal", rated_kw=0.35)
+        elif e.kind == "elevator_controller":
+            e.props.update(installed=2018, last_service="2026-08-29", service_days=90, task="Controller check", rated_kw=0.5)
 
 
 def _designate_singles(b: _Builder) -> None:

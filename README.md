@@ -18,14 +18,15 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1   # Windows: same, stop
 or by hand:
 
 ```bash
-cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
+cd backend  && uv run --env-file .env uvicorn haven.api.app:create_app --factory --port 8000   # --env-file once backend/.env exists
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
-cd backend  && uv run pytest -q                  # 71 tests, a few minutes
+cd backend  && uv run pytest -q                  # 74 tests, a few minutes
 cd frontend && npx tsc -b && npx vitest run      # typecheck + 14 tests
 ```
 
 Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live
-(bright) and which are simulated (dim). Copy `backend/.env.example` to `backend/.env` and fill in what you have.
+(bright) and which are simulated (dim). Copy `backend/.env.example` to `backend/.env` and fill in what you have;
+the dev scripts pass it to the backend (`uv run --env-file .env`). Sign-in is the same: `frontend/.env.example`.
 
 ## What is real, what is simulated
 
@@ -66,6 +67,20 @@ Judges ask. Here is the honest list.
   and how a floor is said in a sentence from each level's `short` label. `tests/test_no_hardcoding.py` fails the
   build if any level, room, equipment or resident id of this building appears outside the spec and the roster.
   Swap the spec and roster and the same code plans, narrates and draws a different building.
+- **Operations, the everyday view.** The dashboard opens on the building on an ordinary night: load now and
+  by floor, the day's load curve with cost and carbon, what the standby generator carries and for how long,
+  every piece of plant with its age, last service and condition, and the **resilience audit**: each piece of
+  electrical plant is failed in the dependency graph and each plant room flooded to 15 cm, and the result is
+  ranked by who would be stranded or lose medication, device power or light. The audit's findings ("raise MSB
+  section B onto a 30 cm pad", "exercise the gate valve nobody has turned since 2019") file as maintenance work
+  orders (Linear when keyed), each with its reason and the number of people it protects. Everything comes from
+  `GET /api/ops` (`backend/haven/world/operations.py`); the facility records (install year, service interval,
+  ratings, tariff, fuel) live in the building spec. Three drills open the incident view: a riser burst, a grid
+  outage (the generator carries the lifts and life safety; the floors go dark) and a generator trip.
+- **More than water.** A grid outage or a generator failure runs through the same graph, agents, checker, red
+  team and gate: the planner calls the utility or the generator contractor instead of the plumber, brings
+  wheelchair users down while the lifts run on standby, and shelters them with an evacuation chair when they do
+  not. Switching a resident's agent off leaves them behind in any of the three.
 - **Reading the screen.** The **story strip** under the top bar is the backend's own account of the incident
   (`state.narrative`, `backend/haven/world/narrative.py`): what is happening, what it means and for whom, what the
   agents propose, and what the person at this screen should do now, with the numbers spelled out (minutes until the
@@ -79,7 +94,8 @@ Judges ask. Here is the honest list.
   round 2, the checker) and **Hard rules** (every hard constraint an agent demanded, whether the plan holds it,
   who is silent, and the red team's attacks). Messages is an outbox: each message hangs off a plan step and
   shows draft, queued (with the countdown to its step), sending, sent at a time, or failed, with a delivery bar.
-  T and N hide the side columns; the stage is the simulation.
+  In the incident view the twin fills the stage and the panels float over it as glass; T and N hide the side
+  docks.
 - **The look** is the Sentinel/Argus app language: a floating top bar, slate shell, white cards, one blue,
   colour only where it means something. Light by default; the moon button switches to dark. The 3D twin follows
   the world's clock, not the theme: the scenario runs at 23:41, so it is a night scene in which every window shows
@@ -107,6 +123,7 @@ Judges ask. Here is the honest list.
 | `TIGER_DATABASE_URL` | console.cloud.timescale.com (Tiger Data) → service → connection string | Sensor readings land in a hypertable; `GET /api/sensor/{id}/history` reads it (event log otherwise) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` + `HAVEN_PLUMBER_NUMBER` (`_2`, `_3` for the on-call list), `HAVEN_SMS_TO`, `HAVEN_PUBLIC_URL` | console.twilio.com (trial works; verify the numbers); the public URL is a tunnel or the deployed host | On approval the plumber is really phoned with the plan's script and asked yes or no; no or silence dials the next number; the first critical resident message is texted to the demo phone |
 | `LINEAR_API_KEY`, `LINEAR_TEAM_ID` | linear.app → Settings → API (personal key; team id from the team settings URL or the API) | On approval the facilities ticket is filed in Linear; the step shows its identifier and URL |
+| `VITE_CLERK_PUBLISHABLE_KEY` (frontend/.env) | clerk.com → your app → API keys | Sign-in in front of the command centre and the phones (`src/components/Gate.tsx`); the story page stays public. Without it the demo runs open |
 | `HAVEN_SENSOR_TOKEN` | make one up | The ESP32 must send it as `X-Haven-Token`; manual and UI readings are unaffected |
 | Railway + Vercel accounts | railway.app, vercel.com | Deploy: `backend/railway.json`, `frontend/vercel.json`; set `VITE_HAVEN_WS=wss://<railway-app>/ws` at build |
 

@@ -1,5 +1,5 @@
-import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react'
-import { BookOpen, CircleHelp, Droplets, Moon, PanelLeft, PanelRight, Pause, Play, Radio, RotateCcw, Share2, Smartphone, Sun } from 'lucide-react'
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Activity, BookOpen, CircleHelp, Droplets, Gauge, Moon, X, PanelLeft, PanelRight, Pause, Play, Radio, RotateCcw, Share2, Smartphone, Sun } from 'lucide-react'
 import { AgentConsole } from './components/AgentConsole'
 import { Buds } from './components/Buds'
 import { CascadePanel } from './components/CascadePanel'
@@ -9,6 +9,7 @@ import { Guide, useGuide } from './components/Guide'
 import { ImpactLedger } from './components/ImpactLedger'
 import { Inspector, useSelection } from './components/Inspector'
 import { MessagesPanel } from './components/MessagesPanel'
+import { OpsView } from './components/OpsView'
 import { PlanPanel } from './components/PlanPanel'
 import { StoryStrip } from './components/StoryStrip'
 import { VoiceRule } from './components/VoiceRule'
@@ -39,6 +40,7 @@ export default function App() {
   const loadBuilding = useBuilding((b) => b.load)
   const spec = useBuilding((b) => b.spec)
   const sensorId = useBuilding((b) => b.sensorId)
+  const equipment = useBuilding((b) => b.equipment)
   const heroLevel = useBuilding((b) => b.heroLevel)
   const levels = spec?.levels ?? NO_LEVELS
   useEffect(() => {
@@ -55,15 +57,33 @@ export default function App() {
   const [view, setView] = useState<View>('3d')
   const [rightTab, setRightTab] = useState<RightTab>('agents')
   const [leftTab, setLeftTab] = useState<LeftTab>('inputs')
-  const [docks, setDocks] = useState({ left: true, right: true })
+  // Both docks open on a wide screen; on a narrow one the stage comes first and T / N bring them back.
+  const [docks, setDocks] = useState(() => ({ left: window.innerWidth >= 1280, right: window.innerWidth >= 1100 }))
   const [connections, setConnections] = useState(false)
-  const [selection] = useSelection()
+  const [selection, setSelection] = useSelection()
+  // Operations is the everyday view; the incident view opens by itself when the sensor fires.
+  const [mode, setMode] = useState<'ops' | 'incident'>('incident')
+  const stage = world?.narrative.stage ?? 'quiet'
+  const prevStage = useRef(stage)
   useEffect(() => {
-    if (selection) {
+    if (prevStage.current === 'quiet' && stage !== 'quiet') setMode('incident')
+    prevStage.current = stage
+  }, [stage])
+  useEffect(() => {
+    if (selection && mode === 'incident') {
       setLeftTab('selected')
       setDocks((d) => ({ ...d, left: true }))
     }
-  }, [selection])
+  }, [selection, mode])
+  const stripRef = useRef<HTMLElement>(null)
+  const [stripHeight, setStripHeight] = useState(180)
+  useEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setStripHeight(el.getBoundingClientRect().height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [mode, world != null])
   const planLevel = level === 'all' ? (heroLevel ?? levels[levels.length - 1]?.id ?? 'all') : level
 
   // Blender's habit: T hides the tool dock on the left, N the properties dock on the right.
@@ -129,16 +149,57 @@ export default function App() {
   const responderActor = actors.find((a) => a.label.startsWith('RA') && a.status !== 'idle' && a.status !== 'offsite') ?? actors.find((a) => a.label.startsWith('RA')) ?? actors[0]
 
   return (
-    <div className="app-shell grid h-full grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden p-3">
-      <TopBar clock={clock} connection={connection} integrations={integrations} buildingName={spec?.name ?? ''} replay={world.mode === 'replay'} sensorId={sensorId} responder={responderActor?.actor ?? 'staff'} responderLabel={responderActor?.label ?? 'A responder'} onGuide={() => guide.setOpen(true)} replayRemaining={clock.replay_remaining} />
+    <div className={mode === 'incident' ? 'app-shell flex h-screen flex-col gap-3 overflow-hidden p-3' : 'app-shell grid min-h-screen content-start gap-3 p-3'}>
+      <TopBar mode={mode} setMode={setMode} incident={stage !== 'quiet'} clock={clock} connection={connection} integrations={integrations} buildingName={spec?.name ?? ''} replay={world.mode === 'replay'} sensorId={sensorId} responder={responderActor?.actor ?? 'staff'} responderLabel={responderActor?.label ?? 'A responder'} onGuide={() => guide.setOpen(true)} replayRemaining={clock.replay_remaining} />
 
-      <section className="glass">
-        <StoryStrip world={world} clock={clock} />
-      </section>
+      {mode === 'ops' ? (
+        <>
+          <OpsView world={world} onDrill={(kind) => {
+            if (stage === 'quiet') {
+              if (kind === 'flood' && sensorId) api.sensor(sensorId, 0.9).catch(() => {})
+              const target = Object.values(equipment).find((e) => e.kind === (kind === 'grid' ? 'utility_feed' : 'generator'))
+              if (kind !== 'flood' && target) api.command(target.id, 'off', kind === 'grid' ? 'grid' : 'fault').catch(() => {})
+            }
+            setMode('incident')
+          }} />
+          {selection && (
+            <aside className="ops-drawer glass enter" aria-label="Selected record">
+              <div className="flex items-center justify-between px-4 pt-3">
+                <span className="eyebrow">Record</span>
+                <button className="btn-secondary btn-icon" onClick={() => setSelection(null)} aria-label="Close record">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="overflow-y-auto p-4">
+                <Inspector world={world} selection={selection} />
+              </div>
+            </aside>
+          )}
+        </>
+      ) : (
+      <>
 
-      <main className="grid min-h-0 gap-3 overflow-hidden" style={{ gridTemplateColumns: `${docks.left ? '300px ' : ''}minmax(0,1fr)${docks.right ? ' 440px' : ''}` }}>
+      <main className="relative min-h-0 flex-1 overflow-hidden rounded-[18px]" data-buds="panel:map">
+        {/* the stage: the twin fills the whole area; the 2D plan keeps clear of the docks so it stays legible */}
+        <div className="absolute inset-0" style={view === '2d' ? { paddingLeft: docks.left ? 318 : 12, paddingRight: docks.right ? 458 : 12, paddingTop: stripHeight + 18, paddingBottom: 64 } : undefined}>
+          {view === '3d' ? (
+            <ViewErrorBoundary fallback={<FloorPlan world={world} level={planLevel} />}>
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
+                <Building3D level={level} connections={connections} />
+              </Suspense>
+            </ViewErrorBoundary>
+          ) : (
+            <FloorPlan world={world} level={planLevel} connections={connections} />
+          )}
+        </div>
+        {/* the glass over it: nothing here catches the pointer except the panels themselves */}
+        <div className="pointer-events-none relative z-[6] flex h-full flex-col gap-3 p-3">
+          <section ref={stripRef} data-dock className="glass pointer-events-auto max-h-[46%] overflow-y-auto">
+            <StoryStrip world={world} clock={clock} />
+          </section>
+          <div className="flex min-h-0 flex-1 gap-3">
         {docks.left && (
-          <aside className="glass flex min-h-0 flex-col overflow-hidden enter">
+          <aside data-dock className="glass pointer-events-auto flex w-[300px] min-h-0 shrink-0 flex-col overflow-hidden enter">
             <div className="hairline-b flex items-center px-3 py-2.5">
               <div className="seg">
                 {(['inputs', 'rule', 'people', 'selected'] as const).map((t) => (
@@ -155,9 +216,16 @@ export default function App() {
           </aside>
         )}
 
-        {/* the stage: the simulation, with its own toolbar above the picture */}
-        <section className="glass flex min-h-0 flex-col overflow-hidden" data-buds="panel:map">
-          <div className="hairline-b flex flex-wrap items-center gap-2 px-3 py-2">
+
+            <div className="relative min-w-0 flex-1">
+              {quiet && (
+                <div className="stage-empty glass-card">
+                  <div className="text-[13px] font-semibold text-t1">A $4 water sensor sits on the basement floor by the riser.</div>
+                  <div className="mt-0.5 text-[11.5px] text-t2">Press Simulate leak, or trip the grid feed or the generator in Inputs. HAVEN traces what fails, the agents argue a plan, you approve it, and nobody gets left behind.</div>
+                </div>
+              )}
+              <div className="absolute bottom-0 left-0 max-w-full">
+          <div className="glass pointer-events-auto flex flex-wrap items-center gap-2 px-3 py-2" style={{ borderRadius: 14 }}>
             <span className="eyebrow mr-1">{view === '3d' ? 'Building' : 'Floor'}</span>
             <div className="seg">
               {[...levels]
@@ -202,27 +270,10 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div className="relative min-h-0 flex-1 overflow-hidden" style={{ padding: view === '2d' ? 12 : 0 }}>
-            {quiet && (
-              <div className="stage-empty glass-card">
-                <div className="text-[13px] font-semibold text-t1">A $4 water sensor sits on the basement floor by the riser.</div>
-                <div className="mt-0.5 text-[11.5px] text-t2">Press Simulate leak. HAVEN traces what fails, the agents argue a plan, you approve it, and nobody gets left behind.</div>
               </div>
-            )}
-            {view === '3d' ? (
-              <ViewErrorBoundary fallback={<FloorPlan world={world} level={planLevel} />}>
-                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
-                  <Building3D level={level} connections={connections} />
-                </Suspense>
-              </ViewErrorBoundary>
-            ) : (
-              <FloorPlan world={world} level={planLevel} connections={connections} />
-            )}
-          </div>
-        </section>
-
+            </div>
         {docks.right && (
-          <aside className="grid min-h-0 grid-rows-[minmax(0,1.1fr)_minmax(0,1fr)] gap-3 enter">
+          <aside data-dock className="pointer-events-auto grid w-[440px] min-h-0 shrink-0 grid-rows-[minmax(0,1.1fr)_minmax(0,1fr)] gap-3 enter">
             <div className={`glass min-h-0 overflow-hidden p-4 ${leftBehind ? 'tint-red' : ''}`}>
               <PlanPanel world={world} clock={clock} />
             </div>
@@ -242,14 +293,19 @@ export default function App() {
             </div>
           </aside>
         )}
+
+          </div>
+        </div>
       </main>
+      </>
+      )}
       {guide.open && <Guide world={world} onClose={guide.close} />}
       <Buds />
     </div>
   )
 }
 
-function TopBar({ clock, connection, integrations, buildingName, replay, sensorId, responder, responderLabel, onGuide, replayRemaining }: { clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; integrations: Integrations | null; buildingName: string; replay: boolean; sensorId: string | null; responder: string; responderLabel: string; onGuide: () => void; replayRemaining: number }) {
+function TopBar({ mode, setMode, incident, clock, connection, integrations, buildingName, replay, sensorId, responder, responderLabel, onGuide, replayRemaining }: { mode: 'ops' | 'incident'; setMode: (m: 'ops' | 'incident') => void; incident: boolean; clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; integrations: Integrations | null; buildingName: string; replay: boolean; sensorId: string | null; responder: string; responderLabel: string; onGuide: () => void; replayRemaining: number }) {
   const [error, setError] = useState<string | null>(null)
   const act = (fn: () => Promise<unknown>) => () => {
     setError(null)
@@ -266,6 +322,15 @@ function TopBar({ clock, connection, integrations, buildingName, replay, sensorI
           <span className="argus-eyebrow block">{buildingName || 'command centre'}</span>
         </span>
       </a>
+      <div className="seg ml-2" role="tablist" aria-label="View">
+        <button role="tab" aria-selected={mode === 'ops'} className={`seg-item flex items-center gap-1.5 ${mode === 'ops' ? 'is-on' : ''}`} onClick={() => setMode('ops')} title="Energy, plant health and the resilience audit: the building on an ordinary day">
+          <Gauge className="h-3.5 w-3.5" /> Operations
+        </button>
+        <button role="tab" aria-selected={mode === 'incident'} className={`seg-item flex items-center gap-1.5 ${mode === 'incident' ? 'is-on' : ''}`} onClick={() => setMode('incident')} title="The live incident: the building, the plan, the agents">
+          <Activity className="h-3.5 w-3.5" /> Incident
+          {incident && <span className="h-1.5 w-1.5 rounded-full bg-haven-danger haven-pulse" />}
+        </button>
+      </div>
       <div className="ml-3 flex items-center gap-2.5">
         <span className="mono num text-[24px] leading-none text-t1" title="Simulated time of day">
           {formatTimeOfDay(clock.time_of_day)}

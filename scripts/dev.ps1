@@ -6,7 +6,10 @@ $stale = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*u
 foreach ($p in $stale) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
 if (-not (Test-Path "$root\backend\.venv")) { Push-Location "$root\backend"; uv sync; Pop-Location }
 if (-not (Test-Path "$root\frontend\node_modules")) { Push-Location "$root\frontend"; npm install; Pop-Location }
-Start-Process -FilePath "uv" -ArgumentList "run uvicorn haven.api.app:create_app --factory --port 8000" -WorkingDirectory "$root\backend" -WindowStyle Minimized
+# uv run does not read .env by itself; the keys reach the process only through --env-file.
+$envFile = ""
+if (Test-Path "$root\backend\.env") { $envFile = "--env-file .env " }
+Start-Process -FilePath "uv" -ArgumentList "run ${envFile}uvicorn haven.api.app:create_app --factory --port 8000" -WorkingDirectory "$root\backend" -WindowStyle Minimized
 Start-Process -FilePath "npm" -ArgumentList "run dev" -WorkingDirectory "$root\frontend" -WindowStyle Minimized
 Write-Host "HAVEN: backend http://localhost:8000/api/health · dashboard http://localhost:5173 · phone /phone · story /story"
 Write-Host "Keys (all optional) go in backend\.env; see backend\.env.example and the README."

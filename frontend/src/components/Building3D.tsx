@@ -931,7 +931,19 @@ function LabelLayer({ overlay, level, levelIndex, levelElev, spaces, index }: { 
     [],
   )
 
+  // Glass panels float over the stage; a label under one would show through it, so those are hidden.
+  const covered = useRef<{ x: number; y: number; w: number; h: number }[]>([])
+  const coveredAt = useRef(0)
   useFrame(() => {
+    const root = overlay.current
+    if (root && performance.now() - coveredAt.current > 400) {
+      coveredAt.current = performance.now()
+      const base = root.getBoundingClientRect()
+      covered.current = Array.from(document.querySelectorAll<HTMLElement>('[data-dock]')).map((el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height }
+      })
+    }
     const placed: { x: number; y: number; w: number; h: number }[] = []
     const order = [...labels].sort((a, b) => a.priority - b.priority)
     for (const l of order) {
@@ -946,6 +958,12 @@ function LabelLayer({ overlay, level, levelIndex, levelElev, spaces, index }: { 
       const h = el.offsetHeight || 18
       const box = { x: ((v.x + 1) / 2) * size.width - w / 2, y: ((1 - v.y) / 2) * size.height - h - 4, w, h }
       box.x = Math.max(2, Math.min(size.width - w - 2, box.x))
+      const cx = box.x + w / 2
+      const cy = box.y + h / 2
+      if (covered.current.some((d) => cx > d.x && cx < d.x + d.w && cy > d.y && cy < d.y + d.h)) {
+        el.style.display = 'none'
+        continue
+      }
       for (let k = 0; k < 8; k++) {
         const hit = placed.find((p) => box.x < p.x + p.w + 4 && p.x < box.x + box.w + 4 && box.y < p.y + p.h + 2 && p.y < box.y + box.h + 2)
         if (!hit) break

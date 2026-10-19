@@ -15,7 +15,7 @@ from ..integrations.tiger import TigerSink
 from ..world.engine import ReplayActiveError, WorldEngine
 from ..agents.negotiation import Negotiator
 from ..agents.registry import agent_info
-from ..world.events import ActionEvent, AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading
+from ..world.events import ActionEvent, AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading, WorkOrder
 from ..world.store import EventStore
 
 
@@ -333,6 +333,46 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         except ReplayActiveError as e:
             raise HTTPException(409, str(e)) from e
         return {"seq": logged.seq, "step": logged.step}
+
+    @app.get("/api/ops")
+    async def operations_view():
+        """The building on an ordinary day: energy, plant health, the resilience audit and the findings it
+        implies. Derived from the spec, the graph and the world state; nothing here is stored."""
+        from datetime import date
+
+        from ..world import operations
+        from ..world.state import SCENARIO_DATE
+
+        return operations.snapshot(engine.ctx, engine.state, engine.clock()["time_of_day"], date.fromisoformat(SCENARIO_DATE))
+
+    class WorkOrderBody(BaseModel):
+        finding_id: str
+        status: str = "open"
+        actor: str = "facilities manager"
+
+    @app.post("/api/ops/work-order")
+    async def work_order(body: WorkOrderBody):
+        """File a finding as a maintenance ticket (Linear when keyed), then log it as an input event."""
+        from datetime import date
+
+        from ..integrations import linear
+        from ..world import operations
+        from ..world.state import SCENARIO_DATE
+
+        f = next((x for x in operations.findings(engine.ctx, engine.state, date.fromisoformat(SCENARIO_DATE))
+                  if x["id"] == body.finding_id), None)
+        if f is None:
+            raise HTTPException(404, "no such finding")
+        if body.status not in ("open", "done"):
+            raise HTTPException(400, "status must be open or done")
+        detail = "simulated: set LINEAR_API_KEY and LINEAR_TEAM_ID to file it in Linear"
+        if body.status == "open" and linear.configured():
+            issue = await linear.create_issue(f"{engine.ctx.short_name}: {f['title']}", f["why"])
+            detail = f"{issue['identifier']} {issue['url']}" if issue else "Linear error; logged locally"
+        elif body.status == "done":
+            detail = "closed"
+        return await _submit(WorkOrder(finding_id=f["id"], title=f["title"], status=body.status,
+                                       actor=body.actor, detail=detail))
 
     @app.get("/api/agents")
     async def get_agents():

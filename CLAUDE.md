@@ -25,6 +25,15 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     ask, the people named, `contact_at_s`, affected-if-nothing-done vs affected-by-plan). A pure function of
     (context, state, clock) recomputed on every rederive and once a simulated minute; the dashboard's story
     strip, the phone and the story page read it, nobody re-derives those sentences.
+  - `haven/world/operations.py` the everyday view (`GET /api/ops`): energy per floor and plant from who is home
+    and awake (a dormitory load shape scaled to tonight), cost and carbon from the utility feed's props, the
+    standby generator's load and runtime from its props, plant health from each item's `installed` /
+    `last_service` / `service_days` / `task` props, and the resilience audit (every electrical item failed alone
+    in the graph, every plant room flooded to 15 cm, ranked by who is stranded) whose findings become
+    `WorkOrder` input events (`POST /api/ops/work-order`, Linear when keyed). Facility records are spec props.
+  - Incidents are not only water: `Situation.kind` is `flood` or `power` (a dead utility feed or generator,
+    via `EquipmentCommand off`); `_first_call` picks the plumber, the utility or the generator contractor; the
+    planner escorts wheelchair users by lift while the lifts run on standby and shelters them when they do not.
   - `haven/agents/registry.py` who the agents are: `agent_label` / `agent_info` (label, kind, description, named,
     fixed) from the roster; `GET /api/agents` serves it and the frontend never names an agent.
   - Performance: `physics._spill` only visits openings that touch a space holding water (`ctx.links_by_space`),
@@ -111,7 +120,9 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   meshopt GLBs from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` /
   `level_index` and `win_<space_id>` names per `blender/README.md`, a night rig when the world clock says
   night, DOM labels projected over the canvas, and reads nothing but the world store). 3D is the default view;
-  the 2D plan opens on the hero's floor.
+  the 2D plan opens on the hero's floor. The app has two modes: Operations (`OpsView`, a scrolling page) and
+  Incident (the twin fills the stage, the story strip and the docks float over it as glass); the incident view
+  opens by itself when the narrative stage leaves `quiet`.
   `Buds` (the companion: `src/lib/companion.ts` is a DOM cursor that rides next to the mouse, bobs, wears a mood
   ring, carries the speech bubble and flies to `[data-buds="kind:id"]` elements on `buds:point`; hold Ctrl+Alt to
   talk, Alt+B on/off, Alt+C chat, Alt+Shift+V hands-free; App listens for `haven:focus` to switch tab/floor).
@@ -130,7 +141,8 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
 ## Commands
 - Both servers: `scripts/dev.sh` (macOS/Linux) or `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1` (Windows; it
   stops a stale backend first: a leftover uvicorn keeps :8000 and :8010 and a new one dies with exit 3).
-- Backend: `cd backend && uv run uvicorn haven.api.app:create_app --factory --port 8000 --reload --reload-dir haven`
+- Backend: `cd backend && uv run --env-file .env uvicorn haven.api.app:create_app --factory --port 8000 --reload --reload-dir haven`
+  (`uv run` does not read `.env` on its own; the keys only reach the process through `--env-file`, which the dev scripts add).
 - Backend tests: `cd backend && uv run pytest -q`
 - Floor-plan PNG: `cd backend && PYTHONPATH=. uv run python tools/plot_plans.py out.png [LEVEL]`
 - Export spec for Blender: `cd backend && PYTHONPATH=. uv run python tools/export_building.py` → `shared/`

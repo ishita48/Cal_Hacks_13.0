@@ -21,7 +21,7 @@ from ..building.graph import POWER_RELS, powered_levels
 from .cascade import Forecast, Impact, assess, describe, forecast
 from .context import WorldContext
 from .events import (ActionEvent, AgentStance, AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision,
-                     SensorReading)
+                     SensorReading, WorkOrder)
 from .narrative import Narrative
 from .narrative import narrate as tell_story
 from .physics import Happening, Hydraulics, step
@@ -30,6 +30,8 @@ from .physics import Happening, Hydraulics, step
 DT = 0.2
 # Wall-clock time of day (seconds after midnight) at step 0: Tuesday 23:41:30.
 SCENARIO_START_TOD = 23 * 3600 + 41 * 60 + 30
+# The calendar day the scenario runs on (the maintenance log is read against it).
+SCENARIO_DATE = "2026-10-20"
 
 WET_THRESHOLD = 0.5
 DEFAULT_VALVE_SECONDS = 60.0
@@ -108,6 +110,15 @@ class ActorState(BaseModel):
     since_step: int = 0
 
 
+class WorkOrderState(BaseModel):
+    finding_id: str
+    title: str
+    status: Literal["open", "done"] = "open"
+    actor: str = ""
+    detail: str = ""
+    step: int = 0
+
+
 class SpokenStance(BaseModel):
     """What one agent said about one round of one situation (from a logged AgentStance event)."""
 
@@ -148,6 +159,7 @@ class WorldState(BaseModel):
     moved: dict[str, str] = Field(default_factory=dict)              # resident id -> space they are in now
     actors: dict[str, ActorState] = Field(default_factory=dict)      # responder id -> where they are (derived)
     spoken: dict[str, dict[str, SpokenStance]] = Field(default_factory=dict)  # "situation#round" -> agent -> stance
+    work_orders: dict[str, WorkOrderState] = Field(default_factory=dict)     # finding id -> maintenance ticket
 
     # -- derived views (recomputed by the reducer, never logged) --
     equipment: dict[str, EquipmentState] = Field(default_factory=dict)
@@ -210,6 +222,14 @@ def apply_input(state: WorldState, event: InputEvent, ctx: WorldContext) -> None
     elif isinstance(event, AgentStance):
         _apply_stance(state, event, ctx)
         physical = False
+    elif isinstance(event, WorkOrder):
+        state.work_orders[event.finding_id] = WorkOrderState(finding_id=event.finding_id, title=event.title,
+                                                             status=event.status, actor=event.actor,
+                                                             detail=event.detail, step=state.step)
+        state.record("work_order", f"{event.actor}: work order {event.status} · {event.title}"
+                     + (f" ({event.detail})" if event.detail else ""), "info", finding_id=event.finding_id)
+        state.version += 1
+        return                      # maintenance changes nothing physical or in the plan
     if changed:          # a repeated wet/dry reading changes nothing physical: skip everything
         _rederive(state, ctx, [], physical=physical)
     state.version += 1

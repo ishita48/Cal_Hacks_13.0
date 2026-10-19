@@ -32,6 +32,11 @@ export function Controls({ world }: Props) {
   // forecast says floods first: the two levers a human can pull, named from the data.
   const leak = Object.values(world.leaks)[0]
   const valveId = Object.values(equipment).find((e) => e.kind === 'valve')?.id
+  // The other things that can fail: the grid feed and the standby set, by kind, never by id.
+  const feedId = Object.values(equipment).find((e) => e.kind === 'utility_feed')?.id
+  const genId = Object.values(equipment).find((e) => e.kind === 'generator')?.id
+  const feedSt = feedId ? (world.equipment[feedId]?.status ?? 'online') : 'online'
+  const genSt = genId ? (world.equipment[genId]?.status ?? 'online') : 'online'
   const valve = valveId ? (world.equipment[valveId]?.status ?? 'online') : 'online'
   const riskId = world.forecast.events.find((e) => e.kind === 'flooded')?.id ?? world.flooded[0] ?? Object.values(equipment).find((e) => e.kind === 'switchboard' || e.kind === 'transfer_switch')?.id
   const risk = riskId ? equipment[riskId] : undefined
@@ -95,6 +100,26 @@ export function Controls({ world }: Props) {
           disabled={replay || msbB === 'flooded'}
           onClick={act(() => (riskId ? api.command(riskId, msbB === 'isolated' ? 'on' : 'off', 'manager') : Promise.resolve()))}
         />
+        {feedId && (
+          <Lever
+            label={feedSt === 'isolated' ? 'Grid feed restored' : 'Grid outage'}
+            hint={feedSt === 'isolated' ? 'utility feed is dead' : `${equipment[feedId].name} fails; the generator takes the lifts`}
+            status={feedSt}
+            danger={feedSt !== 'isolated'}
+            disabled={replay}
+            onClick={act(() => api.command(feedId, feedSt === 'isolated' ? 'on' : 'off', 'grid'))}
+          />
+        )}
+        {genId && (
+          <Lever
+            label={genSt === 'isolated' ? 'Generator back' : 'Generator trips'}
+            hint={genSt === 'isolated' ? 'no standby power' : `${equipment[genId].name} fails under load`}
+            status={genSt}
+            danger={genSt !== 'isolated'}
+            disabled={replay || genSt === 'flooded'}
+            onClick={act(() => api.command(genId, genSt === 'isolated' ? 'on' : 'off', 'fault'))}
+          />
+        )}
       </div>
 
       <div className="flex items-center gap-2">
