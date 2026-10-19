@@ -38,14 +38,23 @@ _RULE_SYSTEM = (
 )
 
 
+_CLIENT: tuple[str, object] | None = None
+
+
 def _client():
-    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+    """One client for the process (one connection pool, one TLS context); a new one only if the key changes."""
+    global _CLIENT
+    key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
+    if not key:
         return None
+    if _CLIENT is not None and _CLIENT[0] == key:
+        return _CLIENT[1]
     try:
         import anthropic
     except ImportError:  # pragma: no cover
         return None
-    return anthropic.AsyncAnthropic()
+    _CLIENT = (key, anthropic.AsyncAnthropic(max_retries=2, timeout=25.0))
+    return _CLIENT[1]
 
 
 async def parse_rule_llm(text: str) -> ParsedRule | None:

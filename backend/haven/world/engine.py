@@ -9,6 +9,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 from typing import Any, Callable
 
 from ..building.model import BuildingSpec
@@ -58,6 +59,13 @@ class WorldEngine:
 
     async def start(self) -> None:
         if self._task is None:
+            if os.environ.get("HAVEN_LOOP_DEBUG"):
+                # Log every callback that holds the event loop longer than 150 ms, with its name: the way to
+                # find what stalls the world (and the WebSocket) while fifty agents answer at once.
+                loop = asyncio.get_running_loop()
+                loop.set_debug(True)
+                loop.slow_callback_duration = 0.15
+                logging.getLogger("asyncio").setLevel(logging.WARNING)
             self._task = asyncio.create_task(self._loop(), name="haven-world-loop")
 
     async def stop(self) -> None:

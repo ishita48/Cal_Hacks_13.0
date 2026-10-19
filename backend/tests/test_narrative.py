@@ -29,7 +29,7 @@ def test_leak_names_the_chain_the_people_and_the_plan():
     s = _leak()
     n = s.narrative
     assert n.stage == "negotiate"
-    assert "L/s" in n.headline
+    assert "burst" in n.headline and "litres a second" in n.detail
     assert n.contact_name and n.contact_in_s is not None and 0 < n.contact_in_s < 3600
     assert n.contact_name in n.detail and "lifts stop" in n.detail
     first = CTX.roster.by_id()[HERO].name.split()[0]

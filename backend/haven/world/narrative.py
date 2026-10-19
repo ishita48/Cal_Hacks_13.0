@@ -108,14 +108,16 @@ def narrate(ctx: WorldContext, state: WorldState, tod: float, dt: float) -> Narr
         headline = (f"Floors {_floors(ctx, dark_now)} are dark" + (", the lifts are down" if lifts_down else "")
                     + (" and the leak is stopped." if valve_closed else f"; water is {deepest * 100:.0f} cm deep in the basement."))
     elif leak is not None:
-        headline = (f"Water is pouring into the {ctx.spec.space(leak.space).name.lower()}: "
-                    f"{leak.flow_lps:.0f} L/s from the {ctx.equipment[leak.equipment_id].name.lower()}.")
+        room = ctx.spec.space(leak.space).name.split(" (")[0].lower()
+        headline = f"A pipe has burst in the {room}. Water is rising."
     else:
         headline = "Water in the basement."
 
     # -- what it means, for whom --------------------------------------------------------------------
     parts: list[str] = []
     acting = state.approved_plan is not None
+    if leak is not None and leak.active and not acting:
+        parts.append(f"{leak.flow_lps:.0f} litres a second from the {ctx.equipment[leak.equipment_id].name.lower()}.")
     if acting:
         # While HAVEN acts, the facts that matter are what is true now, not the forecast nobody is ignoring.
         # The headline already says which floors are dark; here: the water, the people, the switchgear still at risk.

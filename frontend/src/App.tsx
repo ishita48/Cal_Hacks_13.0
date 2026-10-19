@@ -9,6 +9,7 @@ import { Guide, useGuide } from './components/Guide'
 import { ImpactLedger } from './components/ImpactLedger'
 import { Inspector, useSelection } from './components/Inspector'
 import { MessagesPanel } from './components/MessagesPanel'
+import { CalmView } from './components/CalmView'
 import { OpsView } from './components/OpsView'
 import { PlanPanel } from './components/PlanPanel'
 import { StoryStrip } from './components/StoryStrip'
@@ -27,6 +28,7 @@ const NO_LEVELS: Level[] = []
 type RightTab = 'agents' | 'messages' | 'cascade'
 type LeftTab = 'inputs' | 'rule' | 'people' | 'selected'
 type View = '2d' | '3d'
+type Mode = 'calm' | 'incident' | 'ops'
 
 /**
  * The command centre: a top bar (clock, the three buttons that drive the demo, the other surfaces),
@@ -62,15 +64,15 @@ export default function App() {
   const [connections, setConnections] = useState(false)
   const [selection, setSelection] = useSelection()
   // Operations is the everyday view; the incident view opens by itself when the sensor fires.
-  const [mode, setMode] = useState<'ops' | 'incident'>('incident')
+  const [mode, setMode] = useState<Mode>('calm')
   const stage = world?.narrative.stage ?? 'quiet'
   const prevStage = useRef(stage)
   useEffect(() => {
-    if (prevStage.current === 'quiet' && stage !== 'quiet') setMode('incident')
+    if (prevStage.current === 'quiet' && stage !== 'quiet') setMode((m) => (m === 'ops' ? 'calm' : m))
     prevStage.current = stage
   }, [stage])
   useEffect(() => {
-    if (selection && mode === 'incident') {
+    if (selection && mode !== 'ops') {
       setLeftTab('selected')
       setDocks((d) => ({ ...d, left: true }))
     }
@@ -84,6 +86,12 @@ export default function App() {
     ro.observe(el)
     return () => ro.disconnect()
   }, [mode, world != null])
+  const drill = (kind: 'flood' | 'grid' | 'generator') => {
+    if (stage !== 'quiet') return
+    if (kind === 'flood' && sensorId) api.sensor(sensorId, 0.9).catch(() => {})
+    const target = Object.values(equipment).find((e) => e.kind === (kind === 'grid' ? 'utility_feed' : 'generator'))
+    if (kind !== 'flood' && target) api.command(target.id, 'off', kind === 'grid' ? 'grid' : 'fault').catch(() => {})
+  }
   const planLevel = level === 'all' ? (heroLevel ?? levels[levels.length - 1]?.id ?? 'all') : level
 
   // Blender's habit: T hides the tool dock on the left, N the properties dock on the right.
@@ -149,19 +157,12 @@ export default function App() {
   const responderActor = actors.find((a) => a.label.startsWith('RA') && a.status !== 'idle' && a.status !== 'offsite') ?? actors.find((a) => a.label.startsWith('RA')) ?? actors[0]
 
   return (
-    <div className={mode === 'incident' ? 'app-shell flex h-screen flex-col gap-3 overflow-hidden p-3' : 'app-shell grid min-h-screen content-start gap-3 p-3'}>
+    <div className={mode !== 'ops' ? 'app-shell flex h-screen flex-col gap-3 overflow-hidden p-3' : 'app-shell grid min-h-screen content-start gap-3 p-3'}>
       <TopBar mode={mode} setMode={setMode} incident={stage !== 'quiet'} clock={clock} connection={connection} integrations={integrations} buildingName={spec?.name ?? ''} replay={world.mode === 'replay'} sensorId={sensorId} responder={responderActor?.actor ?? 'staff'} responderLabel={responderActor?.label ?? 'A responder'} onGuide={() => guide.setOpen(true)} replayRemaining={clock.replay_remaining} />
 
       {mode === 'ops' ? (
         <>
-          <OpsView world={world} onDrill={(kind) => {
-            if (stage === 'quiet') {
-              if (kind === 'flood' && sensorId) api.sensor(sensorId, 0.9).catch(() => {})
-              const target = Object.values(equipment).find((e) => e.kind === (kind === 'grid' ? 'utility_feed' : 'generator'))
-              if (kind !== 'flood' && target) api.command(target.id, 'off', kind === 'grid' ? 'grid' : 'fault').catch(() => {})
-            }
-            setMode('incident')
-          }} />
+          <OpsView world={world} onDrill={(kind) => { drill(kind); setMode('calm') }} />
           {selection && (
             <aside className="ops-drawer glass enter" aria-label="Selected record">
               <div className="flex items-center justify-between px-4 pt-3">
@@ -176,9 +177,19 @@ export default function App() {
             </aside>
           )}
         </>
+      ) : mode === 'calm' ? (
+        <main className="relative min-h-0 flex-1 overflow-hidden rounded-[22px]" data-buds="panel:map">
+          <div className="calm-stage">
+            <ViewErrorBoundary fallback={<FloorPlan world={world} level={planLevel} />}>
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
+                <Building3D level={level} connections={false} />
+              </Suspense>
+            </ViewErrorBoundary>
+          </div>
+          <CalmView world={world} clock={clock} onDetails={() => setMode('incident')} onOps={() => setMode('ops')} onDrill={drill} />
+        </main>
       ) : (
       <>
-
       <main className="relative min-h-0 flex-1 overflow-hidden rounded-[18px]" data-buds="panel:map">
         {/* the stage: the twin fills the whole area; the 2D plan keeps clear of the docks so it stays legible */}
         <div className="absolute inset-0" style={view === '2d' ? { paddingLeft: docks.left ? 318 : 12, paddingRight: docks.right ? 458 : 12, paddingTop: stripHeight + 18, paddingBottom: 64 } : undefined}>
@@ -305,7 +316,7 @@ export default function App() {
   )
 }
 
-function TopBar({ mode, setMode, incident, clock, connection, integrations, buildingName, replay, sensorId, responder, responderLabel, onGuide, replayRemaining }: { mode: 'ops' | 'incident'; setMode: (m: 'ops' | 'incident') => void; incident: boolean; clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; integrations: Integrations | null; buildingName: string; replay: boolean; sensorId: string | null; responder: string; responderLabel: string; onGuide: () => void; replayRemaining: number }) {
+function TopBar({ mode, setMode, incident, clock, connection, integrations, buildingName, replay, sensorId, responder, responderLabel, onGuide, replayRemaining }: { mode: Mode; setMode: (m: Mode) => void; incident: boolean; clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; integrations: Integrations | null; buildingName: string; replay: boolean; sensorId: string | null; responder: string; responderLabel: string; onGuide: () => void; replayRemaining: number }) {
   const [error, setError] = useState<string | null>(null)
   const act = (fn: () => Promise<unknown>) => () => {
     setError(null)
@@ -323,14 +334,31 @@ function TopBar({ mode, setMode, incident, clock, connection, integrations, buil
         </span>
       </a>
       <div className="seg ml-2" role="tablist" aria-label="View">
+        <button role="tab" aria-selected={mode === 'calm'} className={`seg-item ${mode === 'calm' ? 'is-on' : ''}`} onClick={() => setMode('calm')} title="The building and one card: what is happening, the risk, the recommendation, the action">
+          Overview
+        </button>
         <button role="tab" aria-selected={mode === 'ops'} className={`seg-item flex items-center gap-1.5 ${mode === 'ops' ? 'is-on' : ''}`} onClick={() => setMode('ops')} title="Energy, plant health and the resilience audit: the building on an ordinary day">
           <Gauge className="h-3.5 w-3.5" /> Operations
         </button>
         <button role="tab" aria-selected={mode === 'incident'} className={`seg-item flex items-center gap-1.5 ${mode === 'incident' ? 'is-on' : ''}`} onClick={() => setMode('incident')} title="The live incident: the building, the plan, the agents">
-          <Activity className="h-3.5 w-3.5" /> Incident
+          <Activity className="h-3.5 w-3.5" /> Details
           {incident && <span className="h-1.5 w-1.5 rounded-full bg-haven-danger haven-pulse" />}
         </button>
       </div>
+      {mode === 'calm' ? (
+        <div className="ml-auto flex items-center gap-2">
+          {replay && <span className="pill pill-amber pill-mono">REPLAY · {replayRemaining} left</span>}
+          <span className="flex items-center gap-1.5 text-[11px] text-t2" title={connection}>
+            <span className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-haven-amber' : 'bg-haven-danger'}`} style={{ boxShadow: connection === 'open' ? '0 0 8px rgba(34,197,94,0.6)' : undefined }} />
+            {connection === 'open' ? 'live' : connection}
+          </span>
+          <button className="btn-secondary btn-icon" onClick={onGuide} title="Guide (?)" aria-label="Guide">
+            <CircleHelp className="h-3.5 w-3.5" />
+          </button>
+          <ThemeToggle />
+        </div>
+      ) : (
+      <>
       <div className="ml-3 flex items-center gap-2.5">
         <span className="mono num text-[24px] leading-none text-t1" title="Simulated time of day">
           {formatTimeOfDay(clock.time_of_day)}
@@ -378,6 +406,8 @@ function TopBar({ mode, setMode, incident, clock, connection, integrations, buil
         </button>
         <ThemeToggle />
       </div>
+      </>
+      )}
     </header>
   )
 }
