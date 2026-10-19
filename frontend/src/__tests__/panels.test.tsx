@@ -1,11 +1,18 @@
 // Smoke tests: every panel renders a realistic world frame without throwing and shows the
 // facts the demo depends on. Rendering only; the backend owns all logic.
-import { render, screen } from '@testing-library/react'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+import { AgentConsole } from '../components/AgentConsole'
 import { CascadePanel } from '../components/CascadePanel'
 import { ImpactLedger } from '../components/ImpactLedger'
 import { MessagesPanel } from '../components/MessagesPanel'
 import { PlanPanel } from '../components/PlanPanel'
+import { StoryStrip } from '../components/StoryStrip'
 import { useBuilding } from '../state/building'
 import { clock, world } from './fixture'
 
@@ -18,6 +25,43 @@ beforeAll(() => {
     spaces: {
       room_412: { id: 'room_412', level: 'L4', kind: 'room', name: 'Room 412', rect: { x0: 0, y0: 0, x1: 4, y1: 6 }, capacity: 1, accessible: true, outdoor: false, tags: [] },
     },
+    storyIds: ['maya'],
+    heroId: 'maya',
+    heroLevel: 'L4',
+    agents: {
+      safety: { id: 'safety', label: 'Safety agent', kind: 'specialist', description: 'Hard veto.', enabled: true, resident: null, name: null, level: null, needs: [], named: false, fixed: false },
+      'resident:maya': { id: 'resident:maya', label: "Maya's agent", kind: 'resident', description: 'Uses a power wheelchair.', enabled: true, resident: 'maya', name: 'Maya Reyes', level: 'L4', needs: ['step_free_route'], named: true, fixed: false },
+    },
+  })
+})
+
+describe('the story strip and the agents', () => {
+  it('story strip says what is happening, offers Approve and the hero switch', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    render(<StoryStrip world={world} clock={clock} />)
+    expect(screen.getByText(/Water is pouring into the mechanical room/)).toBeTruthy()
+    expect(screen.getByText(/The agents propose/)).toBeTruthy()
+    expect(screen.getByText(/Approve plan v3/)).toBeTruthy()
+    expect(screen.getByText(/Maya's agent is speaking/)).toBeTruthy()
+    expect(screen.getByText(/until water reaches MSB section B/)).toBeTruthy()
+    vi.unstubAllGlobals()
+  })
+
+  it('story strip names who is left behind and asks for the switch', () => {
+    const off = { ...world, agents: { ...world.agents, 'resident:maya': false }, narrative: { ...world.narrative, next: 'This plan leaves Maya behind. Maya\'s agent is off: nobody spoke for them.', ask: "Switch Maya's agent back on and watch the plan change." } }
+    render(<StoryStrip world={off} clock={clock} />)
+    expect(screen.getByText(/leaves Maya behind/)).toBeTruthy()
+    expect(screen.getByText(/Maya's agent is off · switch it on/)).toBeTruthy()
+  })
+
+  it('agent console puts the hero first with a switch and a stance', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"configured":false,"running":false,"agents":[],"received":0,"agreeing":0}', { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    render(<AgentConsole world={world} />)
+    expect(screen.getAllByText(/Maya's agent/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/the Maya moment/)).toBeTruthy()
+    expect(screen.getByText(/Lift escort finishes at \+6 min/)).toBeTruthy()
+    expect(screen.getByText('Safety agent')).toBeTruthy()
+    vi.unstubAllGlobals()
   })
 })
 

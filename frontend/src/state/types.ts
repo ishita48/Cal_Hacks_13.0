@@ -401,10 +401,35 @@ export interface MemoryRule {
   active: boolean
 }
 
+/** Who an agent is (backend/haven/agents/registry.py): a role of the system, or a resident's own agent. */
 export interface AgentInfo {
   id: string
   label: string
+  kind: 'specialist' | 'resident' | 'checker' | 'redteam' | string
+  description: string
   enabled: boolean
+  resident: string | null
+  name: string | null
+  level: string | null
+  needs: string[]
+  named: boolean
+  fixed: boolean
+  role?: string
+}
+
+/** The story so far in plain words (backend/haven/world/narrative.py): one derived view every screen shares. */
+export interface Narrative {
+  stage: 'quiet' | 'trace' | 'negotiate' | 'govern' | 'approve' | 'act' | 'done' | string
+  headline: string
+  detail: string
+  next: string
+  ask: string
+  people: string[]
+  contact_in_s: number | null
+  contact_at_s: number | null
+  contact_name: string
+  affected_if_nothing_done: number
+  affected_by_plan: number
 }
 
 export interface WorldState {
@@ -434,6 +459,7 @@ export interface WorldState {
   impact: Impact
   forecast: Forecast
   plan: Plan
+  narrative: Narrative
 }
 
 export interface Clock {
@@ -468,6 +494,8 @@ export interface Level {
   name: string
   elevation: number
   height: number
+  /** How people say it: "4" for Floor 4, "ground", "basement". */
+  short: string
 }
 
 export interface Space {

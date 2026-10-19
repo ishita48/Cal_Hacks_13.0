@@ -2,22 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { Constraints, Transcript } from './Negotiation'
 import { useBuilding } from '../state/building'
-import type { FetchAgent, FetchStatus, NegotiationStatus, Stance, StanceKind, WorldState } from '../state/types'
+import type { AgentInfo, FetchAgent, FetchStatus, NegotiationStatus, Stance, StanceKind, WorldState } from '../state/types'
 
 interface Props {
   world: WorldState
-}
-
-const SPECIALISTS = ['safety', 'housing', 'capacity']
-const SPECIALIST_LABEL: Record<string, string> = {
-  safety: 'Safety agent',
-  housing: 'Housing agent',
-  capacity: 'Capacity agent',
-}
-const SPECIALIST_BLURB: Record<string, string> = {
-  safety: 'Hard veto. De-energise before water contact; nobody in the basement.',
-  housing: 'Who is affected and where they sleep tonight.',
-  capacity: 'Does the overflow space actually fit the people sent to it?',
 }
 
 const STANCE_PILL: Record<StanceKind, string> = {
@@ -26,16 +14,28 @@ const STANCE_PILL: Record<StanceKind, string> = {
   critique: 'pill-amber',
   veto: 'pill-red',
 }
+const STANCE_WORD: Record<StanceKind, string> = { propose: 'proposes', support: 'supports the plan', critique: 'wants a change', veto: 'vetoes' }
 
-/** One card per agent in the negotiation. Toggling a card is an input event to the world. */
+/**
+ * The society: who is in the negotiation and what each one says about the plan on the table.
+ * The first named resident's agent comes first and large, because switching it off is the proof
+ * that the structure matters (the Maya moment). Then the specialists, the other residents with a
+ * need, everyone else folded into one line, and the two agents that are always on. Who the agents
+ * are (label, description, kind) comes from the backend registry; what they say comes from the plan.
+ */
 export function AgentConsole({ world }: Props) {
   const roster = useBuilding((b) => b.residents)
+  const registry = useBuilding((b) => b.agents)
+  const storyIds = useBuilding((b) => b.storyIds)
+  const heroId = useBuilding((b) => b.heroId)
   const [showAll, setShowAll] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<'cards' | 'transcript' | 'constraints'>('cards')
 
   const stances = new Map<string, Stance>()
   for (const s of world.plan.stances) stances.set(s.agent, s)
+  const round1 = new Map<string, Stance>()
+  for (const s of world.plan.rounds[0]?.stances ?? []) round1.set(s.agent, s)
 
   // The residents' agents hosted on Fetch.ai: polled when the plan version changes (their replies
   // arrive a moment after the plan does), never part of the world state.
@@ -83,125 +83,123 @@ export function AgentConsole({ world }: Props) {
     }
   }, [world.plan.version, world.plan.situation])
   const thinking = new Set((negotiation?.pending ?? []).map((p) => p.split('#')[0]))
+  const modelInLoop = negotiation?.mode === 'claude'
 
-  const agentIds = Object.keys(world.agents)
-  const story = useBuilding((b) => b.storyIds)
-  const storyIds = story.map((id) => `resident:${id}`).filter((id) => id in world.agents)
-  const prominent = storyIds[0]
-  const rest = agentIds.filter((id) => !SPECIALISTS.includes(id) && !storyIds.includes(id))
+  const info = (id: string): AgentInfo => {
+    const reg = registry[id]
+    if (reg) return reg
+    const rid = id.startsWith('resident:') ? id.slice('resident:'.length) : null
+    const r = rid ? roster[rid] : undefined
+    return {
+      id,
+      label: r ? `${r.name.split(' ')[0]}'s agent` : id,
+      kind: rid ? 'resident' : id === 'checker' ? 'checker' : id === 'redteam' ? 'redteam' : 'specialist',
+      description: r?.story ?? '',
+      enabled: world.agents[id] ?? false,
+      resident: rid,
+      name: r?.name ?? null,
+      level: r?.level ?? null,
+      needs: r?.needs ?? [],
+      named: !!rid && storyIds.includes(rid),
+      fixed: id === 'checker' || id === 'redteam',
+    }
+  }
+
+  const ids = Object.keys(world.agents)
+  const heroAgent = heroId ? `resident:${heroId}` : null
+  const specialists = ids.filter((id) => info(id).kind === 'specialist')
+  const fixed = ids.filter((id) => info(id).fixed)
+  const named = storyIds.map((rid) => `resident:${rid}`).filter((id) => id in world.agents && id !== heroAgent)
+  const rest = ids.filter((id) => info(id).kind === 'resident' && !info(id).named && id !== heroAgent)
+  const restOn = rest.filter((id) => world.agents[id])
+  const restVerdict = (() => {
+    const kinds = new Set(restOn.map((id) => stances.get(id)?.stance).filter(Boolean))
+    if (kinds.size === 0) return 'listening'
+    if (kinds.size === 1 && kinds.has('support')) return 'all support the plan'
+    const vetoes = restOn.filter((id) => stances.get(id)?.stance === 'veto').length
+    return vetoes ? `${vetoes} veto` : 'mixed'
+  })()
 
   const toggle = (agent: string, enabled: boolean) => {
     setError(null)
     api.toggleAgent(agent, enabled).catch((e: Error) => setError(e.message))
   }
-
-  const labelFor = (id: string) => {
-    if (SPECIALIST_LABEL[id]) return SPECIALIST_LABEL[id]
-    const r = roster[id.replace('resident:', '')]
-    return r ? `${r.name.split(' ')[0]}'s agent` : id
-  }
-  const storyFor = (id: string) => {
-    if (SPECIALIST_BLURB[id]) return SPECIALIST_BLURB[id]
-    const r = roster[id.replace('resident:', '')]
-    if (!r) return null
-    return r.story ?? `${r.name} · ${r.room} · ${r.presence.replace('_', ' ')}`
-  }
-
-  // Display order drives the stagger when a new plan version lands.
-  let order = 0
-  const card = (id: string, prominent = false) => (
-    <AgentCard
-      key={id}
-      id={id}
-      index={order++}
-      version={world.plan.version}
-      label={labelFor(id)}
-      blurb={storyFor(id)}
-      enabled={world.agents[id] ?? false}
-      stance={stances.get(id)}
-      prominent={prominent}
-      replay={world.mode === 'replay'}
-      onToggle={(on) => toggle(id, on)}
-      hosted={fetchStatus?.running ? fetchAgents.get(id) : undefined}
-      hostedOn={fetchStatus?.hosted}
-      thinking={thinking.has(id)}
-    />
-  )
+  const replay = world.mode === 'replay'
+  const quiet = world.plan.status === 'none'
 
   return (
     <div className="flex h-full flex-col gap-2.5 overflow-hidden">
       <div className="flex items-center justify-between gap-2">
         <div className="seg seg-xs">
           {(['cards', 'transcript', 'constraints'] as const).map((v) => (
-            <button key={v} onClick={() => setMode(v)} className={`seg-item ${mode === v ? 'is-on' : ''}`} title={v === 'cards' ? 'Every agent, with its stance; switch one off to silence it' : v === 'transcript' ? 'The negotiation as it happened, round by round' : 'The hard constraints and whether the plan holds them'}>
-              {v === 'cards' ? 'Agents' : v === 'transcript' ? 'Transcript' : 'Constraints'}
+            <button key={v} onClick={() => setMode(v)} className={`seg-item ${mode === v ? 'is-on' : ''}`} title={v === 'cards' ? 'Every agent and its stance; switch one off to silence it' : v === 'transcript' ? 'The negotiation as it happened, round by round' : 'The hard rules the agents demanded and whether the plan holds them'}>
+              {v === 'cards' ? 'Who speaks' : v === 'transcript' ? 'How they argued' : 'Hard rules'}
             </button>
           ))}
         </div>
-        <span className="mono text-[10px] text-t3">
-          {negotiation && (
-            <span className={`mr-2 ${negotiation.mode === 'claude' ? 'text-haven-purple' : 'text-t3'}`} title={negotiation.mode === 'claude' ? 'Agents reason with Claude; every stance is a logged input event' : 'No model key: the rule functions speak (set ANTHROPIC_API_KEY)'}>
-              {negotiation.mode === 'claude' ? `claude · ${negotiation.answered} spoke` : 'rules'}
-              {negotiation.pending.length > 0 ? ` · ${negotiation.pending.length} thinking` : ''}
-            </span>
-          )}
-          {fetchStatus?.running && (
-            <span className="mr-2 text-haven-blue" title={`HAVEN's table on Fetch.ai: ${fetchStatus.table ?? ''}`}>
-              fetch.ai {fetchStatus.hosted} · {fetchStatus.agreeing}/{fetchStatus.received} confirmed
-            </span>
-          )}
-          {world.plan.enabled_agents.length}/{agentIds.length} on
+        <span className="truncate text-[10.5px] text-t3" title={modelInLoop ? 'Every enabled agent reasons with Claude; each answer is logged as an input event' : 'No model key set: each agent is its rule function (same codes, same shape)'}>
+          {world.plan.enabled_agents.length} of {ids.length} agents on
+          {modelInLoop ? ` · reasoning with Claude${thinking.size ? ` · ${thinking.size} thinking` : ''}` : ' · rule-based'}
+          {fetchStatus?.running ? ` · ${fetchStatus.agreeing}/${fetchStatus.received} signed on Fetch.ai` : ''}
         </span>
       </div>
       {error && <p className="text-[11px] text-haven-danger">{error}</p>}
-      {mode !== 'cards' && (
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">{mode === 'transcript' ? <Transcript world={world} /> : <Constraints world={world} />}</div>
-      )}
+      {mode !== 'cards' && <div className="min-h-0 flex-1 overflow-y-auto pr-1">{mode === 'transcript' ? <Transcript world={world} /> : <Constraints world={world} />}</div>}
       <div className={`min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 ${mode !== 'cards' ? 'hidden' : ''}`}>
-        <p className="text-[11px] text-t3">Each card is an agent in the negotiation. Its stance on the current plan is below it; switch a personal agent off and nobody speaks for that resident's needs.</p>
-        {SPECIALISTS.filter((id) => id in world.agents).map((id) => card(id))}
-        <div className="eyebrow pt-2">Personal agents</div>
-        {storyIds.map((id) => card(id, id === prominent))}
+        {quiet && <p className="text-[11.5px] text-t3">Every agent is listening. The moment the chain is forecast, the specialists table a plan and every resident's own agent judges it against that person's needs.</p>}
+
+        {heroAgent && heroAgent in world.agents && (
+          <HeroCard
+            id={heroAgent}
+            info={info(heroAgent)}
+            enabled={world.agents[heroAgent]}
+            stance={stances.get(heroAgent)}
+            first={round1.get(heroAgent)}
+            version={world.plan.version}
+            replay={replay}
+            quiet={quiet}
+            leftBehind={!!info(heroAgent).resident && world.plan.left_behind.includes(info(heroAgent).resident!)}
+            onToggle={(on) => toggle(heroAgent, on)}
+            hosted={fetchStatus?.running ? fetchAgents.get(heroAgent) : undefined}
+            thinking={thinking.has(heroAgent)}
+            modelInLoop={!!modelInLoop}
+          />
+        )}
+
+        <div className="eyebrow pt-1">Specialists</div>
+        {specialists.map((id) => (
+          <AgentRow key={id} id={id} info={info(id)} enabled={world.agents[id]} stance={stances.get(id)} replay={replay} onToggle={(on) => toggle(id, on)} thinking={thinking.has(id)} modelInLoop={!!modelInLoop} />
+        ))}
+
+        {named.length > 0 && <div className="eyebrow pt-1">Residents with a need, each with their own agent</div>}
+        {named.map((id) => (
+          <AgentRow key={id} id={id} info={info(id)} enabled={world.agents[id]} stance={stances.get(id)} replay={replay} onToggle={(on) => toggle(id, on)} hosted={fetchStatus?.running ? fetchAgents.get(id) : undefined} thinking={thinking.has(id)} modelInLoop={!!modelInLoop} />
+        ))}
+
         {rest.length > 0 && (
-          <button onClick={() => setShowAll((v) => !v)} className="btn-secondary btn-sm w-full">
-            {showAll ? 'Hide' : 'Show'} {rest.length} more personal agents
+          <button onClick={() => setShowAll((v) => !v)} className="glass-card flex w-full items-center gap-2 px-3 py-2 text-left" title="Every other resident with a specific need has an agent too; they rarely need to object">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${restOn.length ? 'bg-haven-safe' : 'bg-t3'}`} />
+            <span className="text-[12px] font-medium text-t1">
+              {rest.length} more residents' agents
+            </span>
+            <span className="text-[11px] text-t3">· {quiet ? 'listening' : restVerdict}</span>
+            <span className="mono ml-auto text-[10px] text-t3">{showAll ? 'hide' : 'show'}</span>
           </button>
         )}
-        {showAll && rest.map((id) => card(id))}
+        {showAll && rest.map((id) => <AgentRow key={id} id={id} info={info(id)} enabled={world.agents[id]} stance={stances.get(id)} replay={replay} onToggle={(on) => toggle(id, on)} thinking={thinking.has(id)} modelInLoop={!!modelInLoop} compact />)}
+
+        {fixed.length > 0 && <div className="eyebrow pt-1">Always on</div>}
+        {fixed.map((id) => (
+          <AgentRow key={id} id={id} info={info(id)} enabled stance={stances.get(id)} replay={replay} onToggle={() => {}} modelInLoop={false} />
+        ))}
       </div>
     </div>
   )
 }
 
-function AgentCard({
-  id,
-  index,
-  version,
-  label,
-  blurb,
-  enabled,
-  stance,
-  prominent,
-  replay,
-  onToggle,
-  hosted,
-  hostedOn,
-  thinking,
-}: {
-  id: string
-  index: number
-  version: number
-  label: string
-  blurb: string | null
-  enabled: boolean
-  stance: Stance | undefined
-  prominent: boolean
-  replay: boolean
-  onToggle: (on: boolean) => void
-  hosted?: FetchAgent
-  hostedOn?: 'local' | 'agentverse'
-  thinking?: boolean
-}) {
+/** The first named resident's agent, large: the switch the demo turns, with what it says and what happens when it is off. */
+function HeroCard({ id, info, enabled, stance, first, version, replay, quiet, leftBehind, onToggle, hosted, thinking, modelInLoop }: { id: string; info: AgentInfo; enabled: boolean; stance?: Stance; first?: Stance; version: number; replay: boolean; quiet: boolean; leftBehind: boolean; onToggle: (on: boolean) => void; hosted?: FetchAgent; thinking?: boolean; modelInLoop: boolean }) {
+  const firstName = info.name?.split(' ')[0] ?? info.label
   // Shake and glow the card the first time a veto appears on it.
   const prevStance = useRef<StanceKind | null>(null)
   const [shake, setShake] = useState(false)
@@ -214,97 +212,134 @@ function AgentCard({
     }
     prevStance.current = now
   }, [stance?.stance])
-  useEffect(() => {
-    prevStance.current = stance?.stance ?? null
-  })
-
-  // A new plan version pops every stance pill in display order (60 ms stagger).
-  const [popKey, setPopKey] = useState(0)
-  const prevVersion = useRef(version)
-  useEffect(() => {
-    if (version !== prevVersion.current) {
-      prevVersion.current = version
-      setPopKey((k) => k + 1)
-    }
-  }, [version])
-
   const veto = enabled && stance?.stance === 'veto'
-  const edge = prominent
-    ? enabled
-      ? 'inset 3px 0 0 #0f62fe, 0 10px 30px rgba(15,98,254,0.10)'
-      : 'inset 3px 0 0 #94a3b8, 0 0 0 rgba(0,0,0,0)'
-    : undefined
-
   return (
-    <div
-      data-buds={`agent:${id}`}
-      className={`agent-card glass-card relative ${prominent ? 'p-3.5' : 'p-3'} ${!enabled ? 'opacity-45' : ''} ${shake ? 'haven-shake veto-glow' : ''} ${veto ? 'tint-red' : ''}`}
-      style={edge ? { boxShadow: edge } : undefined}
-    >
-      <div className="flex items-center gap-2.5">
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full transition-colors duration-300 ${enabled ? 'bg-haven-safe' : 'bg-t3'}`}
-          style={enabled ? { boxShadow: '0 0 8px rgba(48,209,88,0.5)' } : undefined}
-        />
-        <span className={`font-semibold ${prominent ? 'text-[15px] text-t1' : 'text-[13px] text-t1'}`}>{label}</span>
-        {prominent && (enabled ? <span className="pill pill-blue">the Maya moment</span> : <span className="pill fade-swap">silenced</span>)}
-        <label className="switch ml-auto" title={`${id}: ${enabled ? 'in' : 'out of'} the negotiation`}>
-          <input type="checkbox" checked={enabled} disabled={replay} onChange={(e) => onToggle(e.target.checked)} />
-          <span className="track" />
-          <span className="knob" />
+    <div data-buds={`agent:${id}`} className={`agent-card glass-card relative p-3.5 ${shake ? 'haven-shake veto-glow' : ''} ${veto || leftBehind ? 'tint-red' : ''}`} style={{ boxShadow: enabled ? 'inset 3px 0 0 var(--argus-blue), 0 10px 30px rgba(15,98,254,0.10)' : 'inset 3px 0 0 #7c3aed' }}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[15px] font-semibold text-t1">{info.label}</span>
+            <span className="pill pill-blue">the Maya moment</span>
+          </div>
+          <p className="mt-1 text-[12px] text-t2">
+            {info.name}
+            {info.level ? ` · ${info.level}` : ''}
+            {info.description ? ` · ${info.description}` : ''}
+          </p>
+        </div>
+        <label className="flex shrink-0 flex-col items-center gap-1" title={enabled ? `Switch ${firstName}'s agent off: nobody speaks for ${firstName}` : `Switch ${firstName}'s agent back on`}>
+          <span className="switch">
+            <input type="checkbox" checked={enabled} disabled={replay} onChange={(e) => onToggle(e.target.checked)} />
+            <span className="track" />
+            <span className="knob" />
+          </span>
+          <span className={`text-[10px] font-semibold ${enabled ? 'text-haven-safe' : 'text-haven-purple'}`}>{enabled ? 'speaking' : 'silenced'}</span>
         </label>
       </div>
-      {blurb && <p className={`mt-1.5 ${prominent ? 'text-[12px] text-t2' : 'text-[11px] text-t3'}`}>{blurb}</p>}
       {!enabled ? (
-        <p className="fade-swap mt-2 text-[11px] text-t3">Not in the negotiation · nobody speaks for this constraint</p>
-      ) : stance ? (
-        <div className="mt-2">
-          <div className="flex items-start gap-2">
-            <span key={popKey} className={`pill ${STANCE_PILL[stance.stance]} pop shrink-0`} style={{ animationDelay: `${index * 60}ms` }}>
-              {stance.stance}
-            </span>
-            <span className="text-[11px] leading-snug text-t1">{stance.reason}</span>
-          </div>
-          <div className="mono mt-1 flex items-center gap-1.5 text-[9px] text-t3">
-            <span className={`pill ${stance.source && stance.source !== 'rules' ? 'pill-purple' : ''}`} title={stance.source === 'fetch:claude' ? 'Reasoned with Claude inside this resident\'s Fetch.ai agent; signed; logged as an input event' : stance.source === 'claude' ? 'Reasoned with Claude; logged as an input event' : 'The deterministic rule function (no model, or the model has not answered yet)'}>
-              {stance.source === 'fetch:claude' ? 'claude via fetch.ai' : stance.source === 'claude' ? 'claude' : 'rules'}
-            </span>
-            {thinking && <span className="text-haven-purple haven-pulse">reasoning…</span>}
-          </div>
-          {stance.constraint && (
-            <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-t3">
-              <span className={`pill ${stance.constraint.type === 'hard' ? 'pill-red' : ''} shrink-0`}>{stance.constraint.type}</span>
+        <div className="fade-swap mt-2.5 rounded-[10px] border border-dashed border-purple-400/50 px-3 py-2 text-[12px] text-t1">
+          Nobody speaks for {firstName}. {leftBehind ? `The plan has no step for ${firstName}: left behind.` : `Their needs are not on the table; the checker still watches the facts.`}
+        </div>
+      ) : quiet ? (
+        <p className="mt-2 text-[11.5px] text-t3">Listening. Nothing to object to yet.</p>
+      ) : (
+        <div className="mt-2.5 space-y-1.5">
+          {first && first.stance !== stance?.stance && (
+            <div className="flex items-start gap-2 text-[11.5px]">
+              <span className={`pill ${STANCE_PILL[first.stance]} shrink-0`}>round 1 · {first.stance}</span>
+              <span className="text-t2">{first.reason}</span>
+            </div>
+          )}
+          {stance && (
+            <div className="flex items-start gap-2">
+              <span className={`pill ${STANCE_PILL[stance.stance]} shrink-0`}>{first && first.stance !== stance.stance ? `round 2 · ${stance.stance}` : STANCE_WORD[stance.stance]}</span>
+              <span className="text-[12px] leading-snug text-t1">{stance.reason}</span>
+            </div>
+          )}
+          {stance?.constraint && (
+            <div className="flex items-start gap-1.5 text-[10.5px] text-t3">
+              <span className={`pill ${stance.constraint.type === 'hard' ? 'pill-red' : ''} shrink-0`}>{stance.constraint.type} rule</span>
               <span className="pt-px">{stance.constraint.rule}</span>
             </div>
           )}
-          <Explain agent={id} version={version} />
-          {hosted && <FetchBadge agent={hosted} hostedOn={hostedOn} />}
+          <div className="flex flex-wrap items-center gap-2">
+            {stance && <Source stance={stance} modelInLoop={modelInLoop} thinking={thinking} />}
+            {hosted && <FetchBadge agent={hosted} />}
+            {stance && <Explain agent={id} version={version} />}
+          </div>
         </div>
-      ) : (
-        <p className="mt-2 text-[11px] text-t3">Listening · nothing to say yet</p>
       )}
     </div>
   )
 }
 
+function AgentRow({ id, info, enabled, stance, replay, onToggle, hosted, thinking, modelInLoop, compact }: { id: string; info: AgentInfo; enabled: boolean; stance?: Stance; replay: boolean; onToggle: (on: boolean) => void; hosted?: FetchAgent; thinking?: boolean; modelInLoop: boolean; compact?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const veto = enabled && stance?.stance === 'veto'
+  return (
+    <div data-buds={`agent:${id}`} className={`agent-card glass-card px-3 py-2 ${!enabled ? 'opacity-55' : ''} ${veto ? 'tint-red' : ''}`}>
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${enabled ? 'bg-haven-safe' : 'bg-t3'}`} />
+        <button className="min-w-0 flex-1 text-left" onClick={() => setOpen((v) => !v)}>
+          <span className="text-[12.5px] font-semibold text-t1">{info.label}</span>
+          {!compact && info.description && <span className="ml-2 text-[11px] text-t3">{info.description.length > 80 && !open ? info.description.slice(0, 78) + '…' : info.description}</span>}
+        </button>
+        {enabled && stance && <span className={`pill ${STANCE_PILL[stance.stance]} shrink-0`}>{stance.stance}</span>}
+        {!enabled && <span className="pill shrink-0">off</span>}
+        {!info.fixed && (
+          <label className="switch ml-1 shrink-0" style={{ transform: 'scale(0.78)', transformOrigin: 'right center' }} title={`${info.label}: ${enabled ? 'in' : 'out of'} the negotiation`}>
+            <input type="checkbox" checked={enabled} disabled={replay} onChange={(e) => onToggle(e.target.checked)} />
+            <span className="track" />
+            <span className="knob" />
+          </label>
+        )}
+      </div>
+      {enabled && stance && (
+        <p className={`mt-1 pl-4 text-[11.5px] leading-snug text-t2 ${open ? '' : 'line-clamp-2'}`}>{stance.reason}</p>
+      )}
+      {enabled && !stance && !compact && <p className="mt-1 pl-4 text-[11px] text-t3">Listening · nothing to say yet</p>}
+      {!enabled && <p className="mt-1 pl-4 text-[11px] text-t3">Out of the negotiation: nobody speaks for this constraint.</p>}
+      {open && enabled && stance && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-4">
+          {stance.constraint && (
+            <span className="text-[10.5px] text-t3">
+              <span className={`pill ${stance.constraint.type === 'hard' ? 'pill-red' : ''} mr-1`}>{stance.constraint.type} rule</span>
+              {stance.constraint.rule}
+            </span>
+          )}
+          <Source stance={stance} modelInLoop={modelInLoop} thinking={thinking} />
+          {hosted && <FetchBadge agent={hosted} />}
+          <Explain agent={id} version={0} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Where a stance came from. Shown only when a model is in the loop; the rule function is the silent default. */
+function Source({ stance, modelInLoop, thinking }: { stance: Stance; modelInLoop: boolean; thinking?: boolean }) {
+  const src = stance.source ?? 'rules'
+  if (!modelInLoop && src === 'rules') return null
+  return (
+    <span className="mono flex items-center gap-1.5 text-[9.5px] text-t3">
+      <span className={`pill ${src !== 'rules' ? 'pill-purple' : ''}`} title={src === 'fetch:claude' ? "Reasoned with Claude inside this resident's Fetch.ai agent; signed; logged as an input event" : src === 'claude' ? 'Reasoned with Claude; logged as an input event' : 'The deterministic rule function (the model has not answered yet)'}>
+        {src === 'fetch:claude' ? 'Claude via Fetch.ai' : src === 'claude' ? 'Claude' : 'rule-based'}
+      </span>
+      {thinking && <span className="text-haven-purple haven-pulse">reasoning…</span>}
+    </span>
+  )
+}
 
 /** This resident's agent on Fetch.ai: its address, and whether what it said on the network matches the plan. */
-function FetchBadge({ agent, hostedOn }: { agent: FetchAgent; hostedOn?: 'local' | 'agentverse' }) {
+function FetchBadge({ agent }: { agent: FetchAgent }) {
   const r2 = agent.receipts['2'] ?? agent.receipts['1']
-  const short = `${agent.address.slice(0, 10)}…${agent.address.slice(-4)}`
+  const short = `${agent.address.slice(0, 8)}…${agent.address.slice(-4)}`
   return (
-    <div className="mono mt-1.5 flex flex-wrap items-center gap-1.5 text-[9px] text-t3" title={agent.address}>
+    <span className="mono flex items-center gap-1.5 text-[9.5px] text-t3" title={`${agent.address} · hosted ${agent.hosted}`}>
       <span className="pill pill-blue">fetch.ai</span>
       <span>{short}</span>
-      {r2 ? (
-        <span className={r2.verified && r2.agrees ? 'text-haven-safe' : 'text-haven-amber'}>
-          {r2.verified && r2.agrees ? `✓ said ${r2.stance} on the network` : `said ${r2.stance}${r2.verified ? '' : ' (unverified)'}`}
-        </span>
-      ) : (
-        <span>awaiting its reply…</span>
-      )}
-      {hostedOn === 'agentverse' && <span className="text-t3">· agentverse</span>}
-    </div>
+      {r2 ? <span className={r2.verified && r2.agrees ? 'text-haven-safe' : 'text-haven-amber'}>{r2.verified && r2.agrees ? `✓ signed ${r2.stance}` : `said ${r2.stance}${r2.verified ? '' : ' (unverified)'}`}</span> : <span>awaiting its reply…</span>}
+    </span>
   )
 }
 
@@ -335,17 +370,17 @@ function Explain({ agent, version }: { agent: string; version: number }) {
   }
   if (text) {
     return (
-      <div className="enter mt-2 rounded-[10px] bg-white/[0.04] px-2.5 py-2 text-[11px] leading-snug text-t1">
+      <div className="enter w-full rounded-[10px] bg-black/[0.03] px-2.5 py-2 text-[11.5px] leading-snug text-t1 dark:bg-white/[0.04]">
         <span className="text-t2">“</span>
         {text}
         <span className="text-t2">”</span>
-        <span className="mono ml-2 text-[9px] text-t3">{source === 'llm' ? 'claude' : 'template'}</span>
+        <span className="mono ml-2 text-[9px] text-t3">{source === 'llm' ? 'Claude' : 'template'}</span>
       </div>
     )
   }
   return (
-    <button className="mt-1.5 text-[10px] text-haven-blue hover:underline disabled:opacity-40" onClick={ask} disabled={busy}>
-      {busy ? '…' : 'Explain'}
+    <button className="text-[10.5px] text-haven-blue hover:underline disabled:opacity-40" onClick={ask} disabled={busy}>
+      {busy ? '…' : 'In its own words'}
     </button>
   )
 }

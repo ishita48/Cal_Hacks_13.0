@@ -58,7 +58,10 @@ def attack(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> Verdict:
     out: list[Attack] = []
     steps = [s.model_copy(deep=True) for s in steps]
     by_id = ctx.roster.by_id()
-    cut = next((s.at_s for s in steps if s.kind == "isolate" and s.target == "ats_eq"), None)
+    # The cut that matters is the one that stops the lifts (the plan's lift feeder); any isolate step otherwise.
+    cut = next((s.at_s for s in steps if s.kind == "isolate" and s.target == sit.lift_feeder), None)
+    if cut is None:
+        cut = next((s.at_s for s in steps if s.kind == "isolate"), None)
     eta_cut_s = None
 
     # 1. A faster leak than forecast: does the lift hold still end before the water reaches the switchgear?
@@ -100,11 +103,14 @@ def attack(ctx: WorldContext, sit: Situation, steps: list[PlanStep]) -> Verdict:
         lo, end = window(s)
         if busy_until is not None and lo < busy_until - 1e-6:
             r = by_id.get(s.people[0]) if s.people else None
-            candidates = ([f"ra_{r.level[1:]}"] if r else []) + [f"ra_{lv[1:]}" for lv in sit.dark_planned] +                          [f"ra_{lv[1:]}" for lv in ctx.level_order if lv.startswith("L")]
+            # The person's own RA first, then the RAs of the dark floors, then any RA in the building.
+            levels = ([r.level] if r else []) + list(sit.dark_planned) + [lv for lv in ctx.level_order if ctx.is_upstairs(lv)]
+            candidates = [rid for lv in levels for rid in [ctx.ra_for(lv)] if rid]
             ra = next((c for c in dict.fromkeys(candidates) if c in by_id and free(c, lo, end)), None)
             if ra:
+                who = f"RA {by_id[ra].name.split()[0]} ({ctx.spec.level(by_id[ra].level).name.lower()})"
                 s.actor = ra
-                s.title = s.title.replace("Two staff", f"RA floor {ra[3:]}").replace("Staff", f"RA floor {ra[3:]}")
+                s.title = s.title.replace("Two staff", who).replace("Staff", who)
                 reassigned.append(f"{s.id} → {ra}")
                 continue
             unfixed.append(s.id)

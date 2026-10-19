@@ -14,8 +14,8 @@ from ..integrations.tiger import TigerSink
 
 from ..world.engine import ReplayActiveError, WorldEngine
 from ..agents.negotiation import Negotiator
+from ..agents.registry import agent_info
 from ..world.events import ActionEvent, AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading
-from ..world.state import agent_label
 from ..world.store import EventStore
 
 
@@ -179,8 +179,8 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
                 raise HTTPException(404, "unknown agent")
             return await _submit(AgentToggle(agent=p["agent"], enabled=bool(p.get("enabled", True))))
         if body.kind == "approve":
-            return await _submit(PlanDecision(plan_version=int(p.get("plan_version", engine.state.plan.version)),
-                                              decision="approve", actor=body.actor))
+            # The person approved "the plan" out loud a moment ago: the plan on the table now is the one they mean.
+            return await _submit(PlanDecision(plan_version=engine.state.plan.version, decision="approve", actor=body.actor))
         if body.kind == "rule":
             return await _submit(ManagerRule(text=str(p.get("text", "")), code=str(p.get("code", "")), actor=body.actor))
         if body.kind == "leak":
@@ -262,7 +262,7 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         if verdict == "yes":
             await engine.submit(ActionEvent(step_id=step.id, status="done", actor="plumber",
                                             detail=f"{who} said yes on the phone (vendor {vendor + 1})"))
-            return Response(content="<Response><Say>Thank you. Facilities will meet you at the Dana Street service door.</Say></Response>",
+            return Response(content=f"<Response><Say>Thank you. Facilities will meet you at the service door of {engine.ctx.spec.name}.</Say></Response>",
                             media_type="application/xml")
         nxt = vendor + 1
         vendors = tw.vendors()
@@ -336,8 +336,9 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
 
     @app.get("/api/agents")
     async def get_agents():
-        return [{"id": a, "label": agent_label(engine.ctx, a), "enabled": on}
-                for a, on in engine.state.agents.items()]
+        """Every agent in the society with its label, kind and description (from the roster); the live
+        on/off state is in the state frame, this is who they are."""
+        return [agent_info(engine.ctx, a, on) for a, on in engine.state.agents.items()]
 
     @app.post("/api/agent")
     async def post_agent(toggle: AgentToggle):
@@ -373,6 +374,11 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
 
     @app.post("/api/plan/decision")
     async def post_decision(decision: PlanDecision):
+        """The human gate. A decision names the plan version the person saw; if the agents have re-planned
+        since, say so instead of logging a rejected decision nobody notices."""
+        current = engine.state.plan.version
+        if decision.plan_version != current:
+            raise HTTPException(409, f"The plan changed while you looked: v{decision.plan_version} is gone, v{current} is on the table. Approve again.")
         return await _submit(decision)
 
     @app.get("/api/plan/brief")
@@ -383,7 +389,7 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         st = engine.state
         plan = st.approved_plan or st.plan
         if plan.status == "none":
-            return {"text": "No incident. Blackwell Hall is quiet.", "source": "template"}
+            return {"text": f"No incident. {engine.ctx.short_name} is quiet.", "source": "template"}
         m = plan.metrics
         summary = (f"{plan.headline} {int(m.get('residents_affected', 0))} residents affected, "
                    f"{int(m.get('relocated', 0))} relocated on campus, {int(m.get('escorted', 0))} escorted, "

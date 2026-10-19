@@ -21,6 +21,14 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     equipment floods at its `flood_height`. One `step()` drives the live world and the forecast.
   - `haven/world/cascade.py` consequences: `assess` (per-resident impact; needs are hard facts, not
     weights), `describe` (chain events with causes), `forecast` (runs the water forward ~60 min).
+  - `haven/world/narrative.py` the story so far in plain words: `state.narrative` (stage, headline, detail, next,
+    ask, the people named, `contact_at_s`, affected-if-nothing-done vs affected-by-plan). A pure function of
+    (context, state, clock) recomputed on every rederive and once a simulated minute; the dashboard's story
+    strip, the phone and the story page read it, nobody re-derives those sentences.
+  - `haven/agents/registry.py` who the agents are: `agent_label` / `agent_info` (label, kind, description, named,
+    fixed) from the roster; `GET /api/agents` serves it and the frontend never names an agent.
+  - Performance: `physics._spill` only visits openings that touch a space holding water (`ctx.links_by_space`),
+    in spec order so every replay stays bit-identical; a rederive (forecast + plan) costs ~0.5 s, not 6 s.
   - `haven/world/engine.py` the single mutator: clock loop, persistence, broadcast, replay.
   - `haven/world/store.py` append-only event log (SQLite locally).
   - `haven/api/app.py` HTTP + `/ws` (every client receives identical state frames).
@@ -77,11 +85,15 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     `POST /api/twilio/answer/{step_id}` is the Gather webhook (yes = done, no/silence = next vendor, end = failed).
     `GET /api/graph` serves the dependency graph for the Connections overlay and the Inspector.
   - No building facts in code: `WorldContext` derives `story_order` (residents with a story, role resident),
-    `assembly_point` (space tagged `main_entrance`), `sensor_ids`, `fridges`, `egress_stairs`, `ground`, and
-    `is_electrical` / `powers_lifts` / `hops_to_lift` from the graph; `BuildingSpec.external_destinations`
-    carries the off-site options; the planner's isolate steps come from `sit.at_risk` (electrical equipment
-    the forecast floods before the valve closes) and `sit.lift_feeder`. The frontend reads `storyIds` and
-    `sensorId` from the building store. Keep it that way: a new building must need no code change.
+    `assembly_point` (space tagged `main_entrance`), `sensor_ids`, `fridges`, `egress_stairs`, `ground`,
+    `below_ground`, `top_level`, `main_switchboard` (kind), `ras` (level -> RA resident id), `short_name`,
+    `links_by_space`, and `is_electrical` / `powers_lifts` / `hops_to_lift` / `valve_for` / `is_upstairs` /
+    `level_short` from the graph and the spec; `Level.short` is how a floor is said ("3 and 4"); a space tagged
+    `no_overflow` is never a destination; `BuildingSpec.external_destinations` carries the off-site options; the
+    planner's isolate steps come from `sit.at_risk` (electrical equipment the forecast floods before the valve
+    closes) and `sit.lift_feeder`. The frontend reads `storyIds`, `heroId`/`heroLevel`, `ground`, `topLevel`,
+    `sensorId` and the agent registry from the building store. `tests/test_no_hardcoding.py` greps the backend
+    for this building's ids. Keep it that way: a new building must need no code change.
   - `haven/agents/buds.py` (Phase 8): the on-screen companion. `answer()` is a deterministic intent router over
     the state (where is X, why the hold, forecast, left behind, counts, messages, plumber, agents) returning
     `Reply{speech, focus[], actions[]}`; `answer_llm()` is the Claude fallback that may only point at `pointable`
@@ -90,11 +102,16 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
 - `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;
-  `src/state/building.ts` caches the static spec + roster (not world state). Components: `FloorPlan`
-  (SVG from the spec, coloured only by world state), `ImpactLedger`, `CascadePanel` (forecast + timeline), `Controls`,
-  `AgentConsole`, `PlanPanel`, `VoiceRule`, `MessagesPanel`, and `Building3D` (R3F twin, lazy-loaded; loads the GLBs
-  from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` / `level_index` per
-  `blender/README.md`, and reads nothing but the world store). 2D plan is the default; the toggle is in the centre panel.
+  `src/state/building.ts` caches the static spec + roster + agent registry (not world state). Components:
+  `StoryStrip` (the narrative, the stage rail, the facts, Approve and the hero agent switch), `FloorPlan`
+  (SVG from the spec, view fitted to the level, coloured only by world state, labels laid out apart),
+  `ImpactLedger`, `CascadePanel` (forecast + timeline), `Controls`, `AgentConsole` (hero card, specialists,
+  residents with a need, the rest folded, always-on agents; `Negotiation.tsx` holds the transcript and the hard
+  rules), `PlanPanel`, `VoiceRule`, `MessagesPanel`, and `Building3D` (R3F twin, lazy-loaded; loads the
+  meshopt GLBs from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` /
+  `level_index` and `win_<space_id>` names per `blender/README.md`, a night rig when the world clock says
+  night, DOM labels projected over the canvas, and reads nothing but the world store). 3D is the default view;
+  the 2D plan opens on the hero's floor.
   `Buds` (the companion: `src/lib/companion.ts` is a DOM cursor that rides next to the mouse, bobs, wears a mood
   ring, carries the speech bubble and flies to `[data-buds="kind:id"]` elements on `buds:point`; hold Ctrl+Alt to
   talk, Alt+B on/off, Alt+C chat, Alt+Shift+V hands-free; App listens for `haven:focus` to switch tab/floor).

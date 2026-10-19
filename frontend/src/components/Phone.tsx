@@ -58,7 +58,10 @@ function whoAmI(): string {
 
 function PhoneBody({ world, clock, connection }: { world: WorldState; clock: Clock; connection: string }) {
   const roster = useBuilding((b) => b.residents)
+  const buildingName = useBuilding((b) => b.spec?.name ?? '')
   const me = whoAmI()
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   if (me !== 'manager') return <ResponderBody world={world} clock={clock} me={me} />
   const approved = world.approved_plan
   const plan: Plan = approved ?? world.plan
@@ -71,15 +74,14 @@ function PhoneBody({ world, clock, connection }: { world: WorldState; clock: Clo
   const nameOf = (id: string) => roster[id]?.name ?? id
   const isApproved = approved != null && world.approved_plan_version === approved.version
   const replay = world.mode === 'replay'
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
   const decide = (decision: 'approve' | 'reject') => {
     setBusy(true)
     setError(null)
+    const version = useWorld.getState().world?.plan.version ?? plan.version
     api
-      .decidePlan(plan.version, decision)
-      .catch((e: Error) => setError(e.message))
+      .decidePlan(version, decision)
+      .catch((e: Error) => setError(e.message.replace(/^.*→ \d+: /, '').replace(/^\{"detail":"|"\}$/g, '')))
       .finally(() => setBusy(false))
   }
 
@@ -87,7 +89,7 @@ function PhoneBody({ world, clock, connection }: { world: WorldState; clock: Clo
     <>
       <header className="glass sticky top-0 z-10 flex items-center gap-3 rounded-none border-x-0 border-t-0 px-4 py-3">
         <span className="text-[13px] font-semibold tracking-[0.18em] text-t1">HAVEN</span>
-        <span className="text-[11px] text-t3">Blackwell Hall</span>
+        <span className="truncate text-[11px] text-t3">{buildingName}</span>
         <span className="mono ml-auto text-[15px] font-semibold text-t1">{formatTimeOfDay(clock.time_of_day)}</span>
         <span
           className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-haven-amber' : 'bg-haven-danger'}`}
@@ -102,7 +104,8 @@ function PhoneBody({ world, clock, connection }: { world: WorldState; clock: Clo
             <span className="eyebrow">{approved ? `Plan v${plan.version} · ${plan.status}` : incident ? `Plan v${plan.version} · draft` : 'Status'}</span>
             {replay && <span className="pill pill-amber pill-mono">REPLAY</span>}
           </div>
-          <p className="mt-1.5 text-[17px] leading-snug font-semibold text-t1">{incident ? plan.headline || 'Working out the plan…' : 'No incident. Blackwell Hall is quiet.'}</p>
+          <p className="mt-1.5 text-[17px] leading-snug font-semibold text-t1">{incident ? plan.headline || 'Working out the plan…' : world.narrative.headline || 'No incident.'}</p>
+          {incident && world.narrative.detail && <p className="mt-1 text-[12px] leading-snug text-t2">{world.narrative.detail}</p>}
           <div className="mt-3 grid grid-cols-3 gap-2">
             <Tile n={affected} label="affected" />
             <Tile n={leftBehind} label="left behind" hot={leftBehind > 0} />

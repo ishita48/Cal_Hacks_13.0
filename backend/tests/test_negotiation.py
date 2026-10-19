@@ -87,7 +87,7 @@ def test_the_negotiator_runs_both_rounds_with_a_model_and_replay_needs_none(monk
         if agent == "safety":
             st = _safety(ctx, sit, steps)
         elif agent == "housing":
-            st = _housing(sit, steps)
+            st = _housing(ctx, sit, steps)
         elif agent == "capacity":
             st = _capacity(sit, steps)
         else:

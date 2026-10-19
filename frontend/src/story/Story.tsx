@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { api, formatClockHM, type LoggedEvent } from '../lib/api'
+import { useBuilding } from '../state/building'
 import type { SponsorReport } from '../state/types'
 import { connectWorld, useWorld } from '../state/world'
 import './story.css'
@@ -135,7 +136,9 @@ function Hero() {
   const delays = useMemo(() => [600, 1500, 2100, 2500, 2900, 3300, 3700, 4100, 5200, 6400], [])
   const { step } = useSequence(mounted, delays)
   const world = useWorld((s) => s.world)
-  const wet = !!world?.sensors['basement_mech_1']?.wet
+  const spec = useBuilding((b) => b.spec)
+  const residentCount = useBuilding((b) => Object.keys(b.residents).length)
+  const wet = Object.values(world?.sensors ?? {}).some((s) => s.wet)
   const chainOn = Math.max(0, step - 2)
 
   return (
@@ -146,7 +149,9 @@ function Hero() {
           <Eyebrow>
             <span className={`hero__live ${wet ? 'is-wet' : ''}`} aria-hidden="true" /> {wet ? 'Water in the basement, right now' : 'Tuesday, 23:41 · a $4 water sensor'}
           </Eyebrow>
-          <p className="annot" style={{ textAlign: 'right', maxWidth: '30ch' }}>David Blackwell Hall · 2401 Durant Ave · 250 residents</p>
+          <p className="annot" style={{ textAlign: 'right', maxWidth: '30ch' }}>
+            {spec ? `${spec.name} · ${spec.address.split(',')[0]} · ${residentCount} residents` : 'one building · every resident'}
+          </p>
         </div>
 
         <RevealLines as="h1" id="hero-title" className="hero__title" show={mounted} lines={['A building', 'fails as', 'one system.']} />
@@ -358,7 +363,7 @@ function LiveState() {
       <p className="ls-surface__k mono">{kind === 'phone' ? 'Manager · phone (/phone)' : 'Facilities · dashboard (/)'}</p>
       <div className={`ls-inc ${plan?.status === 'approved' || plan?.status === 'executing' || plan?.status === 'done' ? 'is-v' : ''}`}>
         <p className="ls-inc__id mono">{world ? `run ${world.run_id} · v${world.version}` : 'not connected'}</p>
-        <p className="ls-inc__t">{plan?.headline || 'No incident. Blackwell Hall is quiet.'}</p>
+        <p className="ls-inc__t">{plan?.headline || world?.narrative.headline || 'No incident.'}</p>
         <span className={`pill ${plan?.status === 'none' ? '' : plan?.status === 'draft' ? 'pill--agent' : 'pill--live'}`}>
           <i /> {plan?.status ?? 'offline'}
         </span>
@@ -463,6 +468,11 @@ function Final() {
 
 export function Story() {
   useEffect(() => connectWorld(), [])
+  const loadBuilding = useBuilding((b) => b.load)
+  useEffect(() => {
+    loadBuilding().catch(() => {})
+  }, [loadBuilding])
+  const buildingName = useBuilding((b) => b.spec?.name ?? 'one building')
   return (
     <div className="argus argus-page">
       <Nav />
@@ -475,7 +485,7 @@ export function Story() {
         <Final />
       </main>
       <footer>
-        <span>HAVEN · Cal Hacks 2026 · David Blackwell Hall, UC Berkeley</span>
+        <span>HAVEN · Cal Hacks 2026 · {buildingName}</span>
         <span className="mono">one world state · the Maya moment is sacred · logic first, beauty last</span>
       </footer>
     </div>

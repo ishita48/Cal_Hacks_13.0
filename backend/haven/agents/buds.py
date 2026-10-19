@@ -75,10 +75,12 @@ def _find_resident(ctx: WorldContext, text: str):
     for r in ctx.roster.residents:
         if re.search(rf"\b{re.escape(r.name.lower())}\b", t):
             return r
-    m = re.search(r"\bra\s*(?:floor|for floor|on floor)?\s*(\d)\b|\bra_(\d)\b", t)
+    m = re.search(r"\bra\s*(?:floor|for floor|on floor)?\s*(\w+)\b", t)
     if m:
-        lv = m.group(1) or m.group(2)
-        return ctx.roster.by_id().get(f"ra_{lv}")
+        wanted = m.group(1)
+        lv = next((lv for lv in ctx.level_order if ctx.level_short(lv) == wanted or lv.lower() == wanted), None)
+        rid = ctx.ra_for(lv) if lv else None
+        return ctx.roster.by_id().get(rid) if rid else None
     return None
 
 
@@ -87,7 +89,7 @@ def _where(ctx: WorldContext, state: WorldState, rid: str) -> tuple[str, str]:
     r = ctx.roster.by_id()[rid]
     moved = state.moved.get(rid)
     if moved == "outside":
-        return "in another building (relocated off site)", "L1"
+        return "in another building (relocated off site)", ctx.ground
     if moved:
         sp = ctx.spec.space(moved)
         return f"in the {sp.name} on {sp.level} (moved there by the plan)", sp.level
@@ -205,15 +207,18 @@ def answer(ctx: WorldContext, state: WorldState, text: str, clock_tod: float = 0
 
     if re.search(r"\bwhy\b.*\b(hold|held|lift|lifts|power|wait|delay)\b|\bhold the lifts\b", t):
         hold = steps.get("hold_power")
-        maya = next((s for s in state.plan.stances if s.agent == "resident:maya"), None)
+        # The person the hold is for: whoever the hold step satisfies (the first wheelchair user escorted).
+        escorted = next((a for a in (hold.satisfies if hold else []) if a.startswith("resident:")), None)
+        voice = next((s for s in state.plan.stances if s.agent == escorted), None) if escorted else None
         if hold:
             speech = (f"The lifts stay energised for {hold.deadline_s / 60:.0f} more minutes so the escorts finish before the cut: "
                       f"{hold.reason}")
-            if maya:
-                speech += f" Maya's agent: {maya.reason}"
-            return Reply(speech=speech, focus=[Focus(kind="step", id="hold_power", label=hold.title),
-                                               Focus(kind="agent", id="resident:maya", label="Maya's agent")], intent="why_hold")
-        cut = steps.get("isolate_ats_eq")
+            focus = [Focus(kind="step", id="hold_power", label=hold.title)]
+            if voice:
+                speech += f" {voice.label}: {voice.reason}"
+                focus.append(Focus(kind="agent", id=voice.agent, label=voice.label))
+            return Reply(speech=speech, focus=focus, intent="why_hold")
+        cut = next((s for s in plan.steps if s.kind == "isolate"), None)
         if cut:
             return Reply(speech=f"There is no hold: the switchgear is cut at +{cut.at_s / 60:.0f} min. {cut.reason}",
                          focus=[Focus(kind="step", id=cut.id, label=cut.title)], intent="why_hold")

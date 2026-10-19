@@ -70,11 +70,11 @@ export function Controls({ world }: Props) {
       </div>
 
       <div className="flex gap-2">
-        <button disabled={replay} className="btn-primary flex-1" onClick={act(() => api.sensor(SENSOR, 0.85))}>
-          Simulate leak
+        <button disabled={replay} className="btn-primary flex-1" onClick={act(() => api.sensor(SENSOR, 0.85))} title="The reading the ESP32 sends when the probe is wet">
+          Probe wet
         </button>
-        <button disabled={replay} className="btn-secondary flex-1" onClick={act(() => api.sensor(SENSOR, 0.02))}>
-          Dry
+        <button disabled={replay} className="btn-secondary flex-1" onClick={act(() => api.sensor(SENSOR, 0.02))} title="The probe reads dry again (the riser stops leaking)">
+          Probe dry
         </button>
       </div>
 
@@ -97,14 +97,9 @@ export function Controls({ world }: Props) {
         />
       </div>
 
-      <div className="flex gap-2">
-        <button className="btn-secondary btn-sm flex-1" onClick={act(api.reset)}>
-          New run
-        </button>
-        <button className="btn-secondary btn-sm" onClick={act(api.loadDemo)} title="Replays the recorded canonical run at 5×: leak, Maya off/on, spoken rule, approve, HAVEN acts">
-          Replay demo
-        </button>
-        <button className="btn-secondary btn-sm mono" onClick={() => setShowRuns((v) => !v)}>
+      <div className="flex items-center gap-2">
+        <span className="eyebrow flex-1">Event log</span>
+        <button className="btn-secondary btn-sm mono" onClick={() => setShowRuns((v) => !v)} title="Every run is an append-only log of input events; replay any of them">
           runs · {runs.length}
         </button>
       </div>

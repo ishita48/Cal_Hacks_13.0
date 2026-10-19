@@ -8,7 +8,18 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    // FastAPI puts the reason in {"detail": ...}; surface that sentence, not the envelope.
+    const text = await res.text()
+    let detail = text
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      if (typeof parsed.detail === 'string') detail = parsed.detail
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(detail || `${method} ${path} → ${res.status}`)
+  }
   return res.json() as Promise<T>
 }
 

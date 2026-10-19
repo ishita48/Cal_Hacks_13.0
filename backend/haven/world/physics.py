@@ -104,7 +104,13 @@ def step(h: Hydraulics, ctx: WorldContext, dt: float) -> list[Happening]:
 def _spill(h: Hydraulics, ctx: WorldContext, dt: float) -> None:
     vols = h.volumes
     moves: list[tuple[str, str, float]] = []
-    for link in ctx.door_links:
+    # Only openings that touch a space holding water can carry any; visiting them in spec order keeps
+    # the arithmetic (and so every replay) identical to a walk over every link.
+    touched: set[int] = set()
+    for sp in vols:
+        touched.update(ctx.links_by_space.get(sp, ()))
+    for i in sorted(touched):
+        link = ctx.door_links[i]
         va, vb = vols.get(link.a, 0.0), vols.get(link.b, 0.0)
         if va <= 0.0 and vb <= 0.0:
             continue

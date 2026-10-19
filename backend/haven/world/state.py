@@ -16,11 +16,14 @@ from pydantic import BaseModel, Field
 
 from ..agents.models import Constraint, Plan
 from ..agents.planner import compute_plan
+from ..agents.registry import agent_label  # noqa: F401 - re-exported: the API and older callers import it from here
 from ..building.graph import POWER_RELS, powered_levels
 from .cascade import Forecast, Impact, assess, describe, forecast
 from .context import WorldContext
 from .events import (ActionEvent, AgentStance, AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision,
                      SensorReading)
+from .narrative import Narrative
+from .narrative import narrate as tell_story
 from .physics import Happening, Hydraulics, step
 
 # Fixed simulation step, in simulated seconds.
@@ -30,6 +33,7 @@ SCENARIO_START_TOD = 23 * 3600 + 41 * 60 + 30
 
 WET_THRESHOLD = 0.5
 DEFAULT_VALVE_SECONDS = 60.0
+NARRATIVE_EVERY = int(60 / DT)     # the story's "in N min" is rewritten once a simulated minute
 
 EquipmentStatus = Literal["online", "offline", "flooded", "isolated", "closing", "closed"]
 
@@ -151,6 +155,7 @@ class WorldState(BaseModel):
     impact: Impact = Field(default_factory=Impact)
     forecast: Forecast = Field(default_factory=Forecast)
     plan: Plan = Field(default_factory=Plan)
+    narrative: Narrative = Field(default_factory=Narrative)     # the story so far, in plain words
 
     @property
     def sim_time(self) -> float:
@@ -228,6 +233,9 @@ def advance(state: WorldState, ctx: WorldContext) -> bool:
         _store_water(state, h, ctx)
         if happenings or changed:
             _rederive(state, ctx, happenings, h)
+        elif state.step % NARRATIVE_EVERY == 0:
+            # Nothing physical happened, but the minutes in the story have moved on.
+            state.narrative = tell_story(ctx, state, (SCENARIO_START_TOD + state.step * DT) % 86400, DT)
         changed = True
 
     if changed:
@@ -382,14 +390,6 @@ def _place(ctx: WorldContext, target: str | None, kind: str) -> str | None:
     return "outside"
 
 
-def agent_label(ctx: WorldContext, agent: str) -> str:
-    if agent.startswith("resident:"):
-        r = ctx.roster.by_id().get(agent.split(":", 1)[1])
-        return f"{r.name.split()[0]}'s agent" if r else agent
-    return {"safety": "Safety agent", "housing": "Housing agent", "capacity": "Capacity agent",
-            "redteam": "Red team", "checker": "Checker agent"}.get(agent, agent)
-
-
 def _complete_command(state: WorldState, p: PendingCommand, ctx: WorldContext) -> None:
     eq = ctx.equipment[p.equipment_id]
     if p.command == "close":
@@ -453,6 +453,7 @@ def _rederive(state: WorldState, ctx: WorldContext, happenings: list[Happening],
         state.forecast = forecast(h, ctx, state.impact, state.step, moved=state.moved)
     state.plan = compute_plan(ctx, state)
     state.actors = derive_actors(state, ctx)
+    state.narrative = tell_story(ctx, state, (SCENARIO_START_TOD + state.step * DT) % 86400, DT)
 
 
 # ---- responders -----------------------------------------------------------------------------
@@ -464,11 +465,9 @@ PHYSICAL_ACTORS = ("facilities", "staff", "plumber")
 
 def actor_home(ctx: WorldContext, actor: str) -> tuple[str, str | None]:
     """(label, home space) for a responder id; home None = off site until a step brings them in."""
-    if actor.startswith("ra_"):
-        ra = ctx.roster.by_id().get(actor)
-        level = actor[3:]
-        name = f" ({ra.name.split()[0]})" if ra else ""
-        return f"RA floor {level}{name}", (ra.room if ra else None)
+    ra = ctx.roster.by_id().get(actor)
+    if ra is not None and ra.role == "ra":
+        return f"RA {ctx.spec.level(ra.level).name.lower()} ({ra.name.split()[0]})", ra.room
     if actor == "facilities":
         tech = ctx.staff_by_role("facilities")
         return (f"Facilities ({tech.name.split()[0]})" if tech else "Facilities"), (tech.location if tech else ctx.assembly_point)
@@ -512,7 +511,7 @@ def _step_sites(ctx: WorldContext, state: "WorldState", step: Any) -> tuple[str 
 def derive_actors(state: "WorldState", ctx: WorldContext) -> dict[str, ActorState]:
     plan = state.approved_plan
     actors: dict[str, ActorState] = {}
-    ids = [f"ra_{lv[1:]}" for lv in ctx.level_order if lv.startswith("L") and f"ra_{lv[1:]}" in ctx.roster.by_id()]
+    ids = [ctx.ras[lv] for lv in sorted(ctx.ras, key=lambda lv: ctx.level_order[lv])]
     ids += list(PHYSICAL_ACTORS)
     for a in ids:
         label, home = actor_home(ctx, a)
@@ -545,38 +544,6 @@ def derive_actors(state: "WorldState", ctx: WorldContext) -> dict[str, ActorStat
                 cur.status, cur.heading, cur.step_id, cur.since_step = "moving", go, step.id, act.step
                 if cur.at is None:          # the plumber appears at the door when dispatched
                     cur.at = go
-    return actors
-    # The latest reported step per responder wins; "assigned" means on the way, "done" means arrived.
-    latest: dict[str, tuple[int, int, Any, ActionState]] = {}
-    for step in plan.steps:
-        act = state.actions.get(step.id)
-        if act is None:
-            continue
-        for a in step.actor.split(","):
-            a = a.strip()
-            if a not in actors:
-                continue
-            key = (act.step, step.order)
-            if a not in latest or key >= latest[a][:2]:
-                latest[a] = (act.step, step.order, step, act)
-    for a, (_, _, step, act) in latest.items():
-        cur = actors[a]
-        site = _step_site(ctx, state, step)
-        if act.status == "assigned":
-            cur.status, cur.heading = "moving", site
-            if cur.at is None:          # the plumber appears at the door when dispatched
-                cur.at = site
-        elif act.status == "done":
-            cur.status, cur.heading = "done", None
-            if step.kind in ("escort", "relocate", "shelter") and step.people:
-                cur.at = _place(ctx, step.target, step.kind) if step.kind != "shelter" else site
-                if cur.at == "outside":
-                    cur.at = ctx.assembly_point
-            elif site:
-                cur.at = site
-        else:
-            cur.status, cur.heading = "idle", None
-        cur.step_id, cur.since_step = step.id, act.step
     return actors
 
 

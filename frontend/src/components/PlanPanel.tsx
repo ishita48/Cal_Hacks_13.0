@@ -3,6 +3,7 @@ import { api, formatClockHM, formatCountdown, formatTimeOfDay } from '../lib/api
 import { speak, stopSpeaking } from '../lib/speak'
 import { useBuilding } from '../state/building'
 import type { ActionState, Clock, PlanStep, Stance, StepKind, WorldState } from '../state/types'
+import { useWorld } from '../state/world'
 
 interface Props {
   world: WorldState
@@ -27,20 +28,6 @@ const STANCE_PILL: Record<Stance['stance'], string> = {
   support: 'pill-green',
   critique: 'pill-amber',
   veto: 'pill-red',
-}
-
-const METRIC_LABEL: Record<string, string> = {
-  relocated: 'relocated',
-  escorted: 'escorted',
-  stranded: 'stranded',
-  left_behind: 'left behind',
-  window_min: 'lift window (min)',
-  capacity_used: 'capacity used',
-  capacity_total: 'capacity total',
-  notified: 'notified',
-  steps: 'steps',
-  vetoes: 'vetoes',
-  rounds: 'rounds',
 }
 
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -111,7 +98,8 @@ export function PlanPanel({ world, clock }: Props) {
   for (const g of [...ghosts].sort((a, b) => a.index - b.index)) rows.splice(Math.min(g.index, rows.length), 0, { step: g.step, ghost: true })
 
   const approvedThis = executing !== null
-  const adviceDiffers = executing !== null && live.version !== executing.version
+  // The live plan keeps re-deriving while the approved one runs; only say so when it changes who is safe.
+  const adviceDiffers = executing !== null && live.version !== executing.version && (live.left_behind.length > 0 || Number(live.metrics.violations ?? 0) > Number(executing.metrics.violations ?? 0))
   const base = plan.computed_step * clock.dt
   const replay = world.mode === 'replay'
   const doneCount = plan.steps.filter((s) => world.actions[s.id]?.status === 'done').length
@@ -119,10 +107,22 @@ export function PlanPanel({ world, clock }: Props) {
 
   const decide = (decision: 'approve' | 'reject') => {
     setError(null)
-    api.decidePlan(live.version, decision).catch((e: Error) => setError(e.message))
+    // The version the backend has now, not the one this render closed over: a re-plan a second ago must not strand the click.
+    const version = useWorld.getState().world?.plan.version ?? live.version
+    api.decidePlan(version, decision).catch((e: Error) => setError(e.message.replace(/^.*→ \d+: /, '').replace(/^\{"detail":"|"\}$/g, '')))
   }
 
   const nameOf = (id: string) => roster[id]?.name ?? id
+  // Actors and agents by their spoken names: "RA floor 4 (Marcus)", "Maya", not ids.
+  const who = (id: string): string => {
+    const a = id.trim()
+    if (a.startsWith('resident:')) return nameOf(a.slice('resident:'.length)).split(' ')[0]
+    const actor = world.actors[a]
+    if (actor) return actor.label
+    const r = roster[a]
+    if (r) return r.name.split(' ')[0]
+    return { haven: 'HAVEN', housing: 'Housing', manager: 'the manager', staff: 'desk staff', facilities: 'facilities', plumber: 'the plumber' }[a] ?? a
+  }
 
   // The left-behind block keeps its last names while it slides closed.
   const lastLeftBehind = useRef<string[]>(plan.left_behind)
@@ -206,22 +206,6 @@ export function PlanPanel({ world, clock }: Props) {
 
       {plan.checks.length > 0 && <Checks checks={plan.checks} />}
 
-      {false && Object.keys(plan.metrics).length > 0 && (
-        <div className="grid grid-cols-4 gap-2">
-          {Object.entries(plan.metrics).map(([k, v]) => {
-            const hot = (k === 'stranded' || k === 'left_behind') && v > 0
-            return (
-              <div key={k} className="glass-card px-2.5 py-2">
-                <div key={String(v)} className={`num fade-swap text-[22px] leading-none ${hot ? 'text-haven-danger glow-red' : 'text-t1'}`}>
-                  {Number.isInteger(v) ? v : v.toFixed(1)}
-                </div>
-                <div className="label mt-1 leading-tight">{METRIC_LABEL[k] ?? k.replace(/_/g, ' ')}</div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
       <ol className="min-h-0 flex-1 overflow-y-auto pr-1">
         {rows.map(({ step, ghost }) => (
           <StepRow
@@ -232,6 +216,7 @@ export function PlanPanel({ world, clock }: Props) {
             base={base}
             clock={clock}
             action={executing ? world.actions[step.id] : undefined}
+            who={who}
             rowRef={(el) => {
               if (ghost) return
               if (el) rowRefs.current.set(step.id, el)
@@ -289,6 +274,7 @@ function StepRow({
   base,
   clock,
   action,
+  who,
   rowRef,
 }: {
   step: PlanStep
@@ -297,6 +283,7 @@ function StepRow({
   base: number
   clock: Clock
   action?: ActionState
+  who: (id: string) => string
   rowRef: (el: HTMLLIElement | null) => void
 }) {
   const glyph = KIND_GLYPH[step.kind] ?? '•'
@@ -323,14 +310,14 @@ function StepRow({
           </span>
         </div>
         <div className="mt-0.5 text-[11px] leading-snug text-t2">{step.reason}</div>
-        <div className="mono mt-1 flex flex-wrap gap-x-2 text-[10px] text-t3">
-          <span className="text-t2">{step.actor}</span>
+        <div className="mt-1 flex flex-wrap gap-x-2 text-[10.5px] text-t3">
+          <span className="text-t2">{step.actor.split(',').map(who).join(', ')}</span>
           {deadlineAt != null && deadlineIn != null && (
-            <span className={deadlineIn < 120 ? 'text-haven-danger' : 'text-haven-amber'}>
+            <span className={`mono ${deadlineIn < 120 ? 'text-haven-danger' : 'text-haven-amber'}`}>
               by {formatClockHM(clock.time_of_day + deadlineIn)} · {formatCountdown(deadlineIn)} left
             </span>
           )}
-          {step.satisfies.length > 0 && <span className="truncate">for {step.satisfies.map((a) => a.replace('resident:', '')).join(', ')}</span>}
+          {step.satisfies.length > 0 && <span className="truncate">for {step.satisfies.map(who).join(', ')}</span>}
         </div>
         {action && (
           <div key={status} className={`mono fade-swap mt-1 text-[10px] ${status === 'done' ? 'text-haven-safe' : status === 'failed' ? 'text-haven-danger' : 'text-haven-power'}`}>

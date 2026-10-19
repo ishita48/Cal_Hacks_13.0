@@ -27,7 +27,12 @@ def _message_for(plan: Plan, to: str) -> str | None:
     return next((m.text for m in plan.messages if m.to == to), None)
 
 
-async def perform(run_id: str, step: PlanStep, plan: Plan, default_detail: str) -> str:
+def _first_critical(plan: Plan):
+    """The first critical resident message (the plan lists the named people first)."""
+    return next((m for m in plan.messages if m.priority == "critical" and m.role == "resident"), None)
+
+
+async def perform(run_id: str, step: PlanStep, plan: Plan, default_detail: str, building: str = "HAVEN") -> str:
     """Run the outward effect of a step once and describe what happened."""
     key = (run_id, step.id)
     if key in _done:
@@ -49,7 +54,7 @@ async def perform(run_id: str, step: PlanStep, plan: Plan, default_detail: str) 
         if step.kind == "ticket":
             body = _message_for(plan, "dean") or step.reason
             if linear.configured():
-                issue = await linear.create_issue(f"Blackwell Hall: {step.title}",
+                issue = await linear.create_issue(f"{building}: {step.title}",
                                                   f"{plan.headline}\n\n{body}\n\nOpened by HAVEN on approval of plan v{plan.version}.")
                 if issue:
                     return f"ticket {issue['identifier']} opened in Linear ({issue['url']})"
@@ -58,11 +63,11 @@ async def perform(run_id: str, step: PlanStep, plan: Plan, default_detail: str) 
         if step.kind == "notify" and step.id == "notify_each":
             to = twilio.demo_sms_number()
             if twilio.configured() and to:
-                text = _message_for(plan, "maya") or next((m.text for m in plan.messages if m.priority == "critical"), None)
-                if text:
-                    sid = await twilio.sms(to, text)
+                m = _first_critical(plan)
+                if m is not None:
+                    sid = await twilio.sms(to, m.text)
                     if sid:
-                        return f"{default_detail}; Maya's message also texted to the demo phone via Twilio ({sid})"
+                        return f"{default_detail}; {m.name.split()[0]}'s message also texted to the demo phone via Twilio ({sid})"
             return f"{default_detail} (on screen; set TWILIO_* and HAVEN_SMS_TO to text one for real)"
     except Exception:  # noqa: BLE001 - a provider must never stall the world loop
         log.exception("action %s failed", step.id)

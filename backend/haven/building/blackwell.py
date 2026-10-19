@@ -197,12 +197,13 @@ def build_blackwell_hall() -> BuildingSpec:
     b = _Builder()
 
     # ---- levels ------------------------------------------------------------------------
-    b.levels.append(Level(id="B1", index=-1, name="Basement", elevation=-BASEMENT_DEPTH, height=BASEMENT_DEPTH))
-    b.levels.append(Level(id="L1", index=1, name="Ground", elevation=0.0, height=GROUND_HEIGHT))
+    b.levels.append(Level(id="B1", index=-1, name="Basement", short="basement", elevation=-BASEMENT_DEPTH,
+                          height=BASEMENT_DEPTH))
+    b.levels.append(Level(id="L1", index=1, name="Ground", short="ground", elevation=0.0, height=GROUND_HEIGHT))
     for i, lv in enumerate(RESIDENTIAL_LEVELS):
         b.levels.append(
-            Level(id=lv, index=i + 2, name=f"Floor {i + 2}", elevation=GROUND_HEIGHT + i * FLOOR_TO_FLOOR,
-                  height=FLOOR_TO_FLOOR)
+            Level(id=lv, index=i + 2, name=f"Floor {i + 2}", short=str(i + 2),
+                  elevation=GROUND_HEIGHT + i * FLOOR_TO_FLOOR, height=FLOOR_TO_FLOOR)
         )
 
     _basement(b)
@@ -343,7 +344,9 @@ def _ground(b: _Builder) -> None:
     b.add(lv, "office", "Residential Life office", Rect(x0=0, y0=22, x1=6, y1=30), sid="L1-rl_office", capacity=8)
     b.add(lv, "bathroom", "Ground restrooms", Rect(x0=0, y0=30, x1=6, y1=36), sid="L1-restrooms")
     b.add(lv, "study", "Group study rooms", Rect(x0=0, y0=36, x1=6, y1=50), sid="L1-study", capacity=24)
-    b.add(lv, "amenity", "Music practice", Rect(x0=0, y0=50, x1=6, y1=58), sid="L1-music", capacity=8)
+    # A practice room with instruments is not somewhere to sleep: never an overflow destination.
+    b.add(lv, "amenity", "Music practice", Rect(x0=0, y0=50, x1=6, y1=58), sid="L1-music", capacity=8,
+          tags=["no_overflow"])
     b.add(lv, "laundry", "Main laundry", Rect(x0=0, y0=58, x1=6, y1=66), sid="L1-laundry", capacity=12)
     b.add(lv, "storage", "Bike storage", Rect(x0=0, y0=66, x1=6, y1=76), sid="L1-bikes")
     b.add(lv, "retail", "Bancroft & Dana retail", Rect(x0=0, y0=76, x1=6, y1=84), sid="L1-retail_bancroft")

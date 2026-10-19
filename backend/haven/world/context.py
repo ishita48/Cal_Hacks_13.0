@@ -47,9 +47,42 @@ class WorldContext:
     fridges: dict[str, str]                   # level -> fridge equipment id
     egress_stairs: dict[str, tuple[str, ...]] # level -> stair space ids on that level that reach the ground floor
     ground: str                               # the ground floor level id
+    below_ground: tuple[str, ...]             # basement levels (index below the ground floor)
+    top_level: str                            # the highest level id (the roof sits on it)
+    main_switchboard: str | None              # the building's main switchboard (kind "switchboard"), if any
+    ras: dict[str, str]                       # level -> the resident id of that floor's RA (role "ra")
+    links_by_space: dict[str, tuple[int, ...]]  # space id -> indices into door_links that touch it
+    short_name: str                           # the building as people say it ("Blackwell Hall")
 
     def space_level(self, space_id: str) -> str:
         return self.spec.space(space_id).level
+
+    def level_short(self, level_id: str) -> str:
+        """The level in a sentence: '4' for Floor 4, 'ground', 'basement'."""
+        return self.spec.level(level_id).short
+
+    def is_upstairs(self, level_id: str) -> bool:
+        """Above the ground floor: a lift or a stair is needed to get out."""
+        return self.level_order[level_id] > self.level_order[self.ground]
+
+    def ra_for(self, level_id: str) -> str | None:
+        """The RA living on this level, if the roster has one."""
+        return self.ras.get(level_id)
+
+    def valve_for(self, equipment_id: str) -> str | None:
+        """The shut-off valve upstream of a piece of water equipment (the first one found)."""
+        valves = self.upstream_valves.get(equipment_id, ())
+        return valves[0] if valves else None
+
+    def place_level(self, target: str | None) -> str | None:
+        """The level a plan target refers to: a space id, a level id, or something external (None)."""
+        if target is None:
+            return None
+        if target in self.level_order:
+            return target
+        if target in self.areas:
+            return self.space_level(target)
+        return None
 
     def staff_by_role(self, keyword: str):
         """The first staff member whose role mentions `keyword` (facilities, desk, dean, coordinator)."""
@@ -160,6 +193,18 @@ def make_context(spec: BuildingSpec, graph: nx.MultiDiGraph, roster: Roster) -> 
             continue
         for lv, sid in v.spaces.items():
             egress.setdefault(lv, []).append(sid)
+    ground_index = level_order[ground]
+    below = tuple(lv.id for lv in sorted(spec.levels, key=lambda lv: lv.index) if lv.index < ground_index)
+    top = max(spec.levels, key=lambda lv: lv.index).id
+    ras: dict[str, str] = {}
+    for r in roster.residents:
+        if r.role == "ra":
+            ras.setdefault(r.level, r.id)
+    by_space: dict[str, list[int]] = {}
+    for i, link in enumerate(links):
+        by_space.setdefault(link.a, []).append(i)
+        by_space.setdefault(link.b, []).append(i)
+    words = spec.name.split()
     return WorldContext(
         spec=spec, graph=graph, roster=roster, areas=areas, door_links=tuple(links),
         equipment=equipment, equipment_in_space={k: tuple(v) for k, v in in_space.items()},
@@ -172,4 +217,10 @@ def make_context(spec: BuildingSpec, graph: nx.MultiDiGraph, roster: Roster) -> 
         fridges=fridges,
         egress_stairs={lv: tuple(v) for lv, v in egress.items()},
         ground=ground,
+        below_ground=below,
+        top_level=top,
+        main_switchboard=next((e.id for e in spec.equipment if e.kind == "switchboard"), None),
+        ras=ras,
+        links_by_space={k: tuple(v) for k, v in by_space.items()},
+        short_name=" ".join(words[-2:]) if len(words) > 2 else spec.name,
     )

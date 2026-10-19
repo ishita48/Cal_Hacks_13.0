@@ -131,7 +131,7 @@ def _resident_impacts(ctx: WorldContext, r: Resident, live: set[str], dark: set[
         return []
     level_here = ctx.space_level(here)
     in_building = r.presence != "away"
-    upstairs = ctx.level_order[level_here] > ctx.level_order["L1"]
+    upstairs = ctx.is_upstairs(level_here)
     # Someone already moved to a powered space has what they need tonight.
     sleeps_dark = (level_here if moved_to else r.level) in dark
 

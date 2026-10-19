@@ -201,14 +201,10 @@ def validate(ctx: WorldContext, agent: str, steps: list[PlanStep], data: dict[st
     from .models import Constraint
 
     constraint = Constraint(type=c[0], rule=c[1], code=c[2], source=agent) if c else None
-    label = {"safety": "Safety agent", "housing": "Housing agent", "capacity": "Capacity agent"}.get(agent)
-    resident = None
-    if agent.startswith("resident:"):
-        resident = agent.split(":", 1)[1]
-        r = ctx.roster.by_id().get(resident)
-        label = f"{r.name.split()[0]}'s agent" if r else agent
-    return Stance(agent=agent, label=label or agent, stance=stance, reason=reason, constraint=constraint,
-                  step_ids=step_ids, resident=resident, source="claude")
+    from .registry import agent_label, resident_id
+
+    return Stance(agent=agent, label=agent_label(ctx, agent), stance=stance, reason=reason, constraint=constraint,
+                  step_ids=step_ids, resident=resident_id(agent), source="claude")
 
 
 def to_event(st: Stance, situation: str, round_n: int, source: str) -> AgentStance:

@@ -99,7 +99,7 @@ def facts_for(ctx: WorldContext, state: WorldState) -> dict[str, Any]:
     """The slice of the planner's Situation a resident agent reasons from (see planner._resident)."""
     sit = _situation(ctx, state)
     return {"flagged": {k: list(v) for k, v in sit.flagged.items()}, "dark_planned": list(sit.dark_planned),
-            "lifts_up": sit.lifts_up, "eta_cut_s": sit.eta_cut_s}
+            "lifts_up": sit.lifts_up, "eta_cut_s": sit.eta_cut_s, "moved": dict(sit.moved)}
 
 
 def negotiation_situation(sit: Situation, facts: dict[str, Any]) -> Situation:
@@ -115,7 +115,8 @@ def situation_from(facts: dict[str, Any]) -> Situation:
     return Situation(now_step=0, lifts_up=bool(facts.get("lifts_up", True)), eta_lifts_s=None,
                      eta_cut_s=facts.get("eta_cut_s"), dark_now=[], dark_planned=list(facts.get("dark_planned", [])),
                      valve_closed_at_s=None, stage2_averted=False, movers=[], away=[],
-                     flagged={k: list(v) for k, v in facts.get("flagged", {}).items()}, rules=set(), enabled=set())
+                     flagged={k: list(v) for k, v in facts.get("flagged", {}).items()}, rules=set(), enabled=set(),
+                     moved=dict(facts.get("moved", {})))
 
 
 def resident_stance(ctx: WorldContext, resident_id: str, facts: dict[str, Any], steps: list[dict[str, Any]]) -> Stance | None:
@@ -313,7 +314,8 @@ class Society:
         facts = {"flagged": {a: list(v) for a, v in sit.flagged.items()}, "dark_planned": list(sit.dark_planned),
                  "lifts_up": sit.lifts_up, "eta_cut_s": sit.eta_cut_s, "eta_lifts_s": sit.eta_lifts_s,
                  "valve_closed_at_s": sit.valve_closed_at_s, "rules": sorted(sit.rules),
-                 "dests": [list(d) for d in sit.dests], "movers": len(sit.movers), "away": len(sit.away)}
+                 "dests": [list(d) for d in sit.dests], "movers": len(sit.movers), "away": len(sit.away),
+                 "moved": dict(sit.moved)}
         self._ask_queue.append((ua.address, Ask(situation=key, round=round_n, resident=rid, facts=facts,
                                                 steps=[s.model_dump() for s in steps])))
         try:

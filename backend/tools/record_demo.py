@@ -32,15 +32,20 @@ async def main() -> None:
             advance(eng.state, eng.ctx)
             await eng._execute_due()
 
+    ctx = eng.ctx
+    hero = ctx.story_order[0]                 # the first named resident: the one whose agent the demo toggles
+    sensor = ctx.sensor_ids[0]
+    valve = next(v for eq in ctx.sensor_targets[sensor] for v in [ctx.valve_for(eq)] if v)
+
     await run(5)
-    await eng.submit(SensorReading(sensor_id="basement_mech_1", value=0.85, source="esp32"))
+    await eng.submit(SensorReading(sensor_id=sensor, value=0.85, source="esp32"))
     print("leak at", eng.state.step, "forecast events", len(eng.state.forecast.events))
     await run(20)
-    await eng.submit(AgentToggle(agent="resident:maya", enabled=False))          # the Maya moment
-    print("maya off:", eng.state.plan.headline)
+    await eng.submit(AgentToggle(agent=f"resident:{hero}", enabled=False))          # the Maya moment
+    print(f"{hero} off:", eng.state.plan.headline)
     await run(15)
-    await eng.submit(AgentToggle(agent="resident:maya", enabled=True))
-    print("maya on: ", eng.state.plan.headline)
+    await eng.submit(AgentToggle(agent=f"resident:{hero}", enabled=True))
+    print(f"{hero} on: ", eng.state.plan.headline)
     await run(10)
     parsed = parse_rule(RULE)
     await eng.submit(ManagerRule(text=RULE, code=parsed.code))
@@ -55,8 +60,8 @@ async def main() -> None:
         if ap is not None and ap.status == "done":
             break
     st = eng.state
-    print("done:", st.approved_plan.status, "| moved", len(st.moved), "| maya at", st.moved.get("maya"),
-          "| left behind", st.approved_plan.left_behind, "| valve", st.equipment["main_valve"].status,
+    print("done:", st.approved_plan.status, "| moved", len(st.moved), f"| {hero} at", st.moved.get(hero),
+          "| left behind", st.approved_plan.left_behind, "| valve", st.equipment[valve].status,
           "| sim min", round(st.step * DT / 60, 1))
 
     events = eng.store.events(run_id)

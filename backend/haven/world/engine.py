@@ -227,7 +227,7 @@ class WorldEngine:
                 step = next((s for s in plan.steps if s.id == ev.step_id), None)
                 if step is not None and step.kind in ("call", "ticket", "notify"):
                     # The outward effect (phone call, ticket, text) happens here, once; its result is the detail.
-                    ev.detail = await actions.perform(self.state.run_id, step, plan, ev.detail)
+                    ev.detail = await actions.perform(self.state.run_id, step, plan, ev.detail, self.ctx.short_name)
             await self.submit(ev)
 
     def _apply_due_replay_events(self) -> None:

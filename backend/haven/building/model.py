@@ -82,6 +82,13 @@ class Level(BaseModel):
     name: str
     elevation: float   # finished floor height above grade (m)
     height: float      # floor-to-floor (m)
+    # How people say the level in a sentence ("floors 3 and 4", "the basement"): the number for a
+    # numbered floor, otherwise the name. Defaults to the last word of the name.
+    short: str = ""
+
+    def model_post_init(self, __context) -> None:  # noqa: D401 - pydantic hook
+        if not self.short:
+            self.short = self.name.split()[-1].lower() if self.name else self.id
 
 
 class Space(BaseModel):

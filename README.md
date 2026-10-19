@@ -13,7 +13,7 @@ replays exactly.
 ```bash
 cd backend  && uv run uvicorn haven.api.app:create_app --factory --port 8000
 cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
-cd backend  && uv run pytest -q                  # 64 tests
+cd backend  && uv run pytest -q                  # 71 tests, a few minutes
 ```
 
 Nothing needs a key. Every sponsor integration is optional and key-gated; the header shows which are live
@@ -52,24 +52,40 @@ Judges ask. Here is the honest list.
 - **Nothing about the building is in code.** The planner, the red team, Buds and every panel read the named
   people from the roster (residents with a story), the assembly point from the space tagged `main_entrance`,
   the sensor, valves, fridges and egress stairs from the spec, the off-site destinations from
-  `external_destinations`, and the switchgear to isolate from the forecast (electrical equipment that floods
-  before the valve can close). Swap the spec and roster and the same code plans a different building.
-- **Reading the screen.** The lifecycle rail across the top of the stage says where the system is (Detect,
-  Trace, Negotiate, Govern, Approve, Act, Done), each stage lit by a fact in the world state. The Agents dock has
-  three readings of the same plan: the agent cards (switch one off to silence it), the **Transcript** (round 1's
-  proposal, every stance as a bubble with its source: rules, Claude, or Claude inside the agent's Fetch.ai
-  identity, the revised proposal, round 2, the checker), and **Constraints** (every hard rule an agent demanded,
-  whether the plan holds it, and who is silent). Messages is an outbox: each message hangs off a plan step and
+  `external_destinations`, the switchgear to isolate from the forecast (electrical equipment that floods
+  before the valve can close), the shut-off valve from the water graph upstream of the leaking riser, the RAs
+  from the roster (role `ra`), the main switchboard by kind, the ground floor and the basements by level index,
+  and how a floor is said in a sentence from each level's `short` label. `tests/test_no_hardcoding.py` fails the
+  build if any level, room, equipment or resident id of this building appears outside the spec and the roster.
+  Swap the spec and roster and the same code plans, narrates and draws a different building.
+- **Reading the screen.** The **story strip** under the top bar is the backend's own account of the incident
+  (`state.narrative`, `backend/haven/world/narrative.py`): what is happening, what it means and for whom, what the
+  agents propose, and what the person at this screen should do now, with the numbers spelled out (minutes until the
+  water reaches the switchgear, residents affected if nobody acts, people the plan moves or tells, left behind,
+  hard rules broken). The two controls the demo turns live there too: **Approve** and the first named resident's
+  agent switch (the Maya moment). The stage rail above it (Detect, Trace, Negotiate, Govern, Approve, Act, Done) is
+  lit by facts in the world state, never by a timer. The **agents** panel has three readings of the same plan:
+  **Who speaks** (the hero's agent first and large, then the specialists, the residents with a need, everyone
+  else folded into one line, and the two agents that are always on; descriptions come from the backend registry),
+  **How they argued** (round 1's proposal, every stance as a bubble with its source, the revised proposal,
+  round 2, the checker) and **Hard rules** (every hard constraint an agent demanded, whether the plan holds it,
+  who is silent, and the red team's attacks). Messages is an outbox: each message hangs off a plan step and
   shows draft, queued (with the countdown to its step), sending, sent at a time, or failed, with a delivery bar.
-  T and N hide the docks; the stage is the simulation.
-- **The look** is the Sentinel/Argus app language: a floating frosted sidebar and top bar, slate shell, white
-  cards, one blue, colour only where it means something. Light by default; the moon button switches to dark.
+  T and N hide the side columns; the stage is the simulation.
+- **The look** is the Sentinel/Argus app language: a floating top bar, slate shell, white cards, one blue,
+  colour only where it means something. Light by default; the moon button switches to dark. The 3D twin follows
+  the world's clock, not the theme: the scenario runs at 23:41, so it is a night scene in which every window shows
+  whether its room has power (warm when lit, amber and breathing when the forecast says it goes dark, black when
+  it is dark) and who is awake (a room whose resident is in and awake is lit; a sleeper's is dim).
 - **/story** is the editorial page: the sensor-to-plan cascade, the agents, a "one shared state" room that shows
   the real event log of the current run, and the sponsor proofs. Light paper, one blue; the dashboard stays dark.
 - **Live stack**: click the sponsor strip in the header for a round-trip proof per integration (`GET /api/sponsors`):
   a voice name, a model list, a Postgres version, an account, a Linear viewer, the agents' addresses.
 - The 3D twin loads `blackwell_site.glb` when present (streets, neighbours, trees, props, people from the Blender
-  scene) under a daylight environment with shadows. Hard-refresh after the GLBs change; the browser caches them.
+  scene); the four GLBs are meshopt-compressed with WebP textures (31 MB in all, `blender/compress_glbs.py`) and
+  drei registers the decoder. Labels (people, responders, the leak, the switchgear the water is heading for) are
+  DOM nodes projected over the canvas each frame and nudged apart when they would overlap. Hard-refresh after the
+  GLBs change; the browser caches them.
 
 ## Keys to make
 

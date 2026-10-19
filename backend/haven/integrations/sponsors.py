@@ -118,8 +118,8 @@ def checks(engine: Any, society: Any, tiger: Any) -> dict[str, Check]:
     async def hardware() -> str:
         st = engine.state
         readings = [t for t in st.timeline if t.kind == "sensor_wet" or t.kind == "sensor_dry"]
-        src = st.sensors.get("basement_mech_1")
-        if src and src.source == "esp32":
+        src = next((s for s in st.sensors.values() if s.source == "esp32"), None)
+        if src is not None:
             return f"ESP32 reading received this run (value {src.value:.2f})" + (" · token required" if _env("HAVEN_SENSOR_TOKEN") else "")
         if _env("HAVEN_SENSOR_TOKEN"):
             raise RuntimeError("token set; no ESP32 reading yet this run")
