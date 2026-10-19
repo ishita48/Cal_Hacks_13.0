@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import { initTheme } from './lib/theme'
 
 // Each page is its own chunk, so the landing page does not download the command centre and vice versa.
 const App = lazy(() => import('./App.tsx'))
@@ -22,6 +23,8 @@ const landing = !phone && !story && !app
 // the command centre and the phones sit behind Clerk and the landing and story pages stay public;
 // without it the demo runs open, as it always has.
 const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
+
+initTheme()
 
 const page = phone ? <Phone /> : story ? <Story /> : landing ? <Landing /> : <App />
 const guarded = clerkKey && !story && !landing

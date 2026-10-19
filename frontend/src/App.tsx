@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity, AudioLines, BellRing, BookOpen, Bot, Box, Building2, Camera, CircleHelp, ClipboardList, Gauge, HeartPulse, Map as MapIcon, Mail, Mic, Moon, MoreHorizontal,
-  MousePointerClick, Play, Radio, RotateCcw, Share2, SlidersHorizontal, Smartphone, Sun, Users, X,
+  MousePointerClick, Play, Radio, RotateCcw, Share2, SlidersHorizontal, Smartphone, Sun, SunMoon, Users, X,
 } from 'lucide-react'
 import { AgentConsole } from './components/AgentConsole'
 import { Buds, useBudsOn } from './components/Buds'
@@ -18,6 +18,8 @@ import { VoiceRule } from './components/VoiceRule'
 import { Glance, SystemHealth, Widget, glanceSummary, servicesLive, type CardId } from './components/Workstation'
 import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
+import { ROLE_LABEL, useMe } from './state/me'
+import { useTheme } from './lib/theme'
 import type { BudsFocus, Clock, Integrations, Level, WorldState } from './state/types'
 import { connectWorld, useWorld } from './state/world'
 import { Panel } from './workstation/Panel'
@@ -543,30 +545,39 @@ function Nav({ mode, setMode, world, clock, connection, buildingName, responder,
           <CircleHelp className="h-4 w-4" />
         </button>
         <ThemeToggle />
+        <Account />
       </div>
     </header>
   )
 }
 
-function ThemeToggle() {
-  const [dark, setDark] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('haven.theme') === 'dark'
-    } catch {
-      return false
-    }
-  })
+/** Who the server says you are: the role chip, plus Clerk's account button when sign-in is on. */
+function Account() {
+  const me = useMe((m) => m.me)
+  const AccountButton = useMe((m) => m.AccountButton)
+  const load = useMe((m) => m.load)
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
-    try {
-      localStorage.setItem('haven.theme', dark ? 'dark' : 'light')
-    } catch {
-      /* ignore */
-    }
-  }, [dark])
+    if (!useMe.getState().me) void load()
+  }, [load])
+  if (!me) return null
+  const who = me.source === 'demo' ? 'Demo mode: no sign-in, every surface is open' : `Signed in as ${me.email ?? me.name ?? 'you'}`
   return (
-    <button className="mac-nav-btn" onClick={() => setDark((d) => !d)} title={dark ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme">
-      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    <>
+      <span className="mac-status" title={who}>
+        {ROLE_LABEL[me.role]}
+        {me.source === 'demo' && <span className="text-t3">· demo</span>}
+      </span>
+      {AccountButton && <AccountButton />}
+    </>
+  )
+}
+
+function ThemeToggle() {
+  const { pref, cycle } = useTheme()
+  const label = { system: 'Theme: follows your device', light: 'Theme: light', dark: 'Theme: dark' }[pref]
+  return (
+    <button className="mac-nav-btn" onClick={cycle} title={`${label} (click to change)`} aria-label={label}>
+      {pref === 'system' ? <SunMoon className="h-4 w-4" /> : pref === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
     </button>
   )
 }

@@ -4,12 +4,12 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
-from ..integrations import actions, cartesia, elevenlabs, fetch
+from ..integrations import actions, cartesia, elevenlabs, fetch, resend
 from ..integrations.sponsors import SponsorHealth
 from ..integrations.tiger import TigerSink
 
@@ -18,6 +18,8 @@ from ..agents.negotiation import Negotiator
 from ..agents.registry import agent_info
 from ..world.events import ActionEvent, AgentToggle, EquipmentCommand, ManagerRule, PlanDecision, SensorReading, WorkOrder
 from ..world.store import EventStore
+from . import auth
+from .auth import Viewer
 
 
 def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAPI:
@@ -56,6 +58,36 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
     @app.get("/api/health")
     async def health():
         return {"ok": True, "run_id": engine.state.run_id, "step": engine.state.step}
+
+    @app.get("/api/me")
+    async def me(v: Viewer = Depends(auth.viewer)):
+        """The viewer as the server sees them: role, account, and the roster person it is linked to, with the
+        floors that are theirs (a resident's own floor, the floors an RA looks after)."""
+        person = engine.ctx.roster.by_id().get(v.person_id) if v.person_id else None
+        levels = sorted({lv for lv, ra in engine.ctx.ras.items() if ra == v.person_id} | ({person.level} if person else set()),
+                        key=lambda lv: engine.ctx.level_order.get(lv, 0))
+        return {**v.public(), "roles": list(auth.ROLES),
+                "person": {"id": person.id, "name": person.name, "room": person.room, "level": person.level,
+                           "role": person.role} if person else None,
+                "levels": levels}
+
+    class NotifyTest(BaseModel):
+        to: str | None = None
+
+    @app.post("/api/notify/test")
+    async def notify_test(body: NotifyTest, v: Viewer = Depends(auth.viewer)):
+        """Admin only: one email through Resend to prove the channel (to the admin's own address by default)."""
+        auth.require(v, "admin")
+        to = body.to or v.email
+        if not resend.configured():
+            raise HTTPException(503, "email is off: set RESEND_API_KEY")
+        if not to:
+            raise HTTPException(400, "no address: pass `to`, or sign in with an email")
+        sent = await resend.send([to], f"HAVEN · {engine.ctx.short_name}: test",
+                                 f"This is a test from HAVEN for {engine.ctx.short_name}. Alerts will arrive like this.")
+        if sent is None:
+            raise HTTPException(502, "Resend refused the message; see the backend log")
+        return {"sent": True, "to": to, "from": resend.sender(), **sent}
 
     @app.get("/api/state")
     async def get_state():
@@ -211,6 +243,8 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
             "llm": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
             "sensor_token": bool(sensor_token),
             "fetch": society.running,
+            "clerk": auth.configured(),
+            "resend": resend.configured(),
             "negotiation": negotiator.enabled,
             "agentverse": fetch.agentverse() and society.running,
             **actions.providers(),

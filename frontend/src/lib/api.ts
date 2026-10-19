@@ -1,11 +1,36 @@
+import type { Me, Role } from '../state/me'
 import type { AgentInfo, BudsReply, BuildingSpec, FetchStatus, Graph, IncidentMemory, Integrations, MemoryRule, NegotiationStatus, OpsSnapshot, Roster, RuleParse, SensorHistory, SponsorReport } from '../state/types'
 
 const base = import.meta.env.VITE_HAVEN_API ?? ''
 
+// Who is asking. Signed in with Clerk, every request carries the session token and the server decides the
+// role; without Clerk the demo declares one (X-Haven-Role, a per-viewer choice), and the server says so.
+let tokenGetter: (() => Promise<string | null>) | null = null
+export function setTokenGetter(getter: (() => Promise<string | null>) | null) {
+  tokenGetter = getter
+}
+
+export function demoRole(): Role | null {
+  try {
+    return (localStorage.getItem('haven.role') as Role | null) || null
+  } catch {
+    return null
+  }
+}
+
+async function identity(): Promise<Record<string, string>> {
+  if (tokenGetter) {
+    const token = await tokenGetter()
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  }
+  const role = demoRole()
+  return role ? { 'X-Haven-Role': role } : {}
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: { ...(await identity()), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
@@ -59,6 +84,8 @@ export const api = {
     request<SensorHistory>('GET', `/api/sensor/${encodeURIComponent(sensorId)}/history?limit=${limit}`),
   agents: () => request<AgentInfo[]>('GET', '/api/agents'),
   integrations: () => request<Integrations>('GET', '/api/integrations'),
+  me: () => request<Me>('GET', '/api/me'),
+  notifyTest: (to?: string) => request<{ sent: boolean; to: string; from: string; id: string }>('POST', '/api/notify/test', { to }),
   fetchStatus: () => request<FetchStatus>('GET', '/api/fetch'),
   negotiation: () => request<NegotiationStatus>('GET', '/api/negotiation'),
   acknowledge: (step_id: string, actor: string, status: 'done' | 'failed' = 'done', detail = '') =>

@@ -315,6 +315,8 @@ export interface Integrations {
   agentverse: boolean
   twilio: boolean
   linear: boolean
+  clerk: boolean
+  resend: boolean
 }
 
 /** One resident agent hosted on Fetch.ai and what it said about the current plan (backend/haven/integrations/fetch.py). */
