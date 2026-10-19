@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { create } from 'zustand'
 import { api } from '../lib/api'
 import { Companion, type Mood } from '../lib/companion'
 import { isSpeaking, speak, stopSpeaking } from '../lib/speak'
@@ -16,6 +17,8 @@ import type { BudsAction, BudsFocus, BudsReply } from '../state/types'
  * button sends.
  *
  * Keys: Alt+B on/off · hold Ctrl+Alt to talk · Alt+C chat panel · Alt+Shift+V hands-free · Esc hush.
+ * Off by default: off, nothing of Buds is on screen, it never listens or speaks, and only Alt+B or the
+ * switch in the top bar / System health (`useBudsOn`) turns it on.
  */
 
 const NAME = 'Buds'
@@ -23,7 +26,28 @@ const ECHO_TAIL_MS = 1500
 const HOLD_MS = 180
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const HOLD_LABEL = IS_MAC ? '⌘+⌥' : 'Ctrl+Alt'
-const ON_KEY = 'haven.buds.on'
+// A new key, so a browser that had Buds on under the old default starts with it off too.
+const ON_KEY = 'haven.buds.enabled'
+
+/** Whether Buds is on: a per-viewer preference shared by the companion and the switches that drive it. */
+export const useBudsOn = create<{ on: boolean; setOn: (on: boolean) => void; toggle: () => void }>((set, get) => ({
+  on: (() => {
+    try {
+      return localStorage.getItem(ON_KEY) === '1'
+    } catch {
+      return false
+    }
+  })(),
+  setOn: (on) => {
+    try {
+      localStorage.setItem(ON_KEY, on ? '1' : '0')
+    } catch {
+      /* a private window: the choice lasts this visit */
+    }
+    set({ on })
+  },
+  toggle: () => get().setOn(!get().on),
+}))
 
 interface Msg {
   id: number
@@ -42,13 +66,7 @@ export function focusKey(f: BudsFocus): string {
 }
 
 export function Buds() {
-  const [active, setActive] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(ON_KEY) !== '0'
-    } catch {
-      return true
-    }
-  })
+  const active = useBudsOn((b) => b.on)
   const [open, setOpen] = useState(false)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [text, setText] = useState('')
@@ -87,11 +105,6 @@ export function Buds() {
   }, [])
   useEffect(() => {
     companion.current?.follow(active)
-    try {
-      localStorage.setItem(ON_KEY, active ? '1' : '0')
-    } catch {
-      /* ignore */
-    }
   }, [active])
 
   const status: Mood = speaking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle'
@@ -102,14 +115,14 @@ export function Buds() {
   // A gentle nudge the first time there is a plan to talk about.
   const nudged = useRef(false)
   useEffect(() => {
-    if (!world || nudged.current || open) return
+    if (!world || nudged.current || open || !active) return
     if (world.plan.status !== 'none') {
       nudged.current = true
       setNudge(`There is a plan. Hold ${HOLD_LABEL} and ask me why the lifts are held.`)
       const t = setTimeout(() => setNudge(null), 9000)
       return () => clearTimeout(t)
     }
-  }, [world, open])
+  }, [world, open, active])
 
   useEffect(() => {
     list.current?.scrollTo?.({ top: list.current.scrollHeight, behavior: 'smooth' })
@@ -255,10 +268,19 @@ export function Buds() {
       stopListening()
     } else {
       setHandsFree(true)
-      setActive(true)
       startListening('converse')
     }
   }, [handsFree, startListening, stopListening])
+
+  // Switched off: stop listening and talking, fold the chat, put the cursor away.
+  useEffect(() => {
+    if (active) return
+    stopListening()
+    setHandsFree(false)
+    setOpen(false)
+    setNudge(null)
+    hush()
+  }, [active, hush, stopListening])
 
   // ---- keys: Alt+B on/off · hold Ctrl+Alt to talk · Alt+C panel · Alt+Shift+V hands-free · Esc --
   useEffect(() => {
@@ -286,9 +308,11 @@ export function Buds() {
       }
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setActive((a) => !a)
+        useBudsOn.getState().toggle()
         return
       }
+      // Off, Buds hears no other key: Ctrl+Alt stays an ordinary chord.
+      if (!activeRef.current) return
       if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
         e.preventDefault()
         setOpen((o) => {
@@ -305,7 +329,6 @@ export function Buds() {
             timer: setTimeout(() => {
               if (!hold.current) return
               hold.current.listening = true
-              setActive(true)
               setHolding(true)
               startRef.current('hold')
             }, HOLD_MS),
@@ -334,7 +357,7 @@ export function Buds() {
   useEffect(() => {
     const onPoint = (e: Event) => {
       const el = (e as CustomEvent<{ el: HTMLElement }>).detail.el
-      companion.current?.pointAt(el)
+      if (activeRef.current) companion.current?.pointAt(el)
     }
     window.addEventListener('buds:point', onPoint)
     return () => window.removeEventListener('buds:point', onPoint)
@@ -357,6 +380,8 @@ export function Buds() {
 
   const lastOffer = [...msgs].reverse().find((m) => m.reply?.actions.length && !m.acted)
   const pendingOffer = !open && lastOffer?.reply?.actions[0]
+
+  if (!active) return null
 
   return (
     <div data-buds-ui="">
@@ -389,6 +414,9 @@ export function Buds() {
               </button>
               <button className={`buds-ib ${muted ? 'is-on' : ''}`} onClick={() => { if (!muted) hush(); setMuted((m) => !m) }} title={muted ? 'Unmute Buds' : 'Mute Buds'}>
                 {muted ? '🔇' : '🔊'}
+              </button>
+              <button className="buds-ib" onClick={() => useBudsOn.getState().setOn(false)} title="Turn Buds off (Alt+B)" aria-label="Turn Buds off">
+                ⏻
               </button>
               <button className="buds-ib" onClick={() => setOpen(false)} title="Hide chat (Alt+C)">
                 ×
@@ -488,14 +516,10 @@ export function Buds() {
         </svg>
       </button>
       <button
-        className={`buds-orb is-${status} ${active ? '' : 'is-off'}`}
-        onClick={() => {
-          if (!active) setActive(true)
-          setOpen((o) => !o)
-        }}
-        title={`${NAME} · ${active ? 'on' : 'off'} (Alt+B) · hold ${HOLD_LABEL} to talk · Alt+C chat`}
+        className={`buds-orb is-${status}`}
+        onClick={() => setOpen((o) => !o)}
+        title={`${NAME} · hold ${HOLD_LABEL} to talk · Alt+C chat · Alt+B off`}
         aria-label={`Open ${NAME}`}
-        aria-pressed={active}
       >
         <BudsGlyph />
         <span className="buds-orb-ring" />

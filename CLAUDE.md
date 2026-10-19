@@ -122,15 +122,42 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   meshopt GLBs from `frontend/public/models/`, keys tints off `userData.space_id` / `equipment_id` /
   `level_index` and `win_<space_id>` names per `blender/README.md`, a night rig when the world clock says
   night, DOM labels projected over the canvas, and reads nothing but the world store). 3D is the default view;
-  the 2D plan opens on the hero's floor. The app has two modes: Operations (`OpsView`, a scrolling page) and
-  Incident (the twin fills the stage, the story strip and the docks float over it as glass); the incident view
-  opens by itself when the narrative stage leaves `quiet`.
+  the 2D plan opens on the hero's floor. The app is barebones by design (the user asked for it to be
+  understandable and demo-ready): a pill nav with only the status chip and a ⋯ menu (demo replay, start over,
+  Operations, flat plan, connections, Buds, phones, story); Overview is two windows: "What's happening" (30%,
+  `src/workstation/Panel.tsx`, facts from the pure `workstation/logic.ts`, tested in `__tests__/workstation.test.tsx`,
+  minimal by request: a greeting, the status (Healthy / Attention needed from `GET /api/ops` / Emergency) and a
+  wing picker (`wingsOf`: the spec has no wings, so each footprint rectangle is named by the side it stands on;
+  it filters the people and the checklist by room position); three widgets (active incidents, steps to approve,
+  people needing help) with Gmail-style red badges for urgent counts, details only on a click; HAVEN response
+  (recommendation, 2-4 phases, Review = phases + checks + the Maya switch + a rule, Approve); a routine check
+  read from sensors, power, lifts, leaks and the audit (`routineCheck`, cleared when the situation changes);
+  today's checklist = the audit's findings (tick = `POST /api/ops/work-order` done, Schedule = open); three
+  emergency actions pinned to the bottom: Call 911 and emergency services confirm, then open the dialer
+  (`tel:`; the services number is `VITE_HAVEN_EMERGENCY_NUMBER`/`_LABEL`, absent by default and said so), and
+  never claim a call was made; Contact an RA lists live RA availability (no RA phone numbers exist in HAVEN).
+  "people left behind" after approval is the plan's own `left_behind`, never inferred from step lists (they hold
+  only a sample of names). An "All details" toggle (D) keeps the collapsible `Widget` cards from
+  `components/Workstation.tsx`: plan, agents, people, messages, timeline, say a rule, controls, glance, system);
+  and "The building" (70%, two tabs in a pill over the view, `haven.render`: "Live animation" and "Photoreal",
+  the latter lazy-loading `components/Building3D.tsx` (the Blender GLBs, owned by the peer session) with the same
+  props; the live animation is `src/twin/` (realistic but generated, no model files: stone-and-glass facade
+  textures with a roughness map, sun or moon with shadows, a procedural `Environment` of Lightformers, fog,
+  streets, plaza, courtyard lawn, trees; night is a readable blue hour; storeys extruded from the spec's outline in `geometry.ts`,
+  every fact derived in `model.ts` and tested in `__tests__/twin.test.tsx`; two tabs, Building and People;
+  the Building tab follows the story by itself (`sceneMode`: at rest when quiet, live status in an incident
+  with whoever the plan leaves behind labelled, the response once approved) with a colour key from `Cards.tsx`; `frameloop="demand"` plus a 30 fps heartbeat only while
+  something moves; labels are plain DOM placed by the scene's `Projector`, not drei `Html`; it selects records
+  and points at the workstation's plan card, it never approves) or the 2D plan, the floor pill and the Key) and Operations (`OpsView` in one window). The overview comes back
+  by itself, plan card open, when the narrative stage leaves `quiet`; `haven:focus` opens the card that holds a
+  target; T / N hide either window; card open state is a per-viewer localStorage convenience (`haven.cards`).
   `Buds` (the companion: `src/lib/companion.ts` is a DOM cursor that rides next to the mouse, bobs, wears a mood
-  ring, carries the speech bubble and flies to `[data-buds="kind:id"]` elements on `buds:point`; hold Ctrl+Alt to
-  talk, Alt+B on/off, Alt+C chat, Alt+Shift+V hands-free; App listens for `haven:focus` to switch tab/floor).
+  ring, carries the speech bubble and flies to `[data-buds="kind:id"]` elements on `buds:point`; off by default
+  (`useBudsOn`, localStorage `haven.buds.enabled`): off, it renders nothing and hears no key but Alt+B; the
+  Buds switch in the top pill and in System health turn it on; hold Ctrl+Alt to talk, Alt+B on/off, Alt+C chat, Alt+Shift+V hands-free; App listens for `haven:focus` to switch tab/floor).
   Theme: `index.css` is the Sentinel app language (tokens on `:root`, `.dark` overrides, `@theme inline` so the
-  `text-t1` / `bg-haven-*` utilities repaint); `App.tsx` is the shell (floating `app-sidebar` + `app-topnav`, stat
-  tiles, three columns). The floor plan reads `--fp-*` variables from `.floorplan`, `src/story/Story.tsx` (+ `story.css`, scoped `.argus`: the editorial page at
+  `text-t1` / `bg-haven-*` utilities repaint); `App.tsx` is the shell, styled by `src/workstation.css` (scoped `.mac-*`,
+  pastel periwinkle/lavender tokens with `.dark` overrides, loaded with the app chunk only). The floor plan reads `--fp-*` variables from `.floorplan`, `src/story/Story.tsx` (+ `story.css`, scoped `.argus`: the editorial page at
   `/story`, live event log + sponsor proofs), `src/lib/speak.ts` (ElevenLabs → Cartesia → browser, interruptible),
   `src/lib/voice.ts` (Web Speech push-to-talk / hands-free with echo guard). Routes in `main.tsx` (each page a lazy chunk): `/` the landing page, `/app` the
   command centre, `/phone`, `/story`. `src/landing/` (scoped `.lp`, `landing.css`) is the public landing: one night in six

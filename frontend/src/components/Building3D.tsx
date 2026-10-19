@@ -1,6 +1,6 @@
 import { Environment, Lightformer, Line, OrbitControls, OrthographicCamera, useGLTF, useProgress } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react'
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
 import { heavy } from '../lib/assets'
 import { STATUS_COLOR } from '../lib/labels'
@@ -123,6 +123,9 @@ export default function Building3D({ level, connections = false }: Props) {
           gl.toneMapping = THREE.ACESFilmicToneMapping
           gl.shadowMap.enabled = true
           gl.shadowMap.type = THREE.PCFShadowMap
+          // The building does not move: draw its shadows when something changes, not 60 times a second.
+          gl.shadowMap.autoUpdate = false
+          gl.shadowMap.needsUpdate = true
         }}
       >
         <Suspense fallback={null}>
@@ -138,7 +141,21 @@ export default function Building3D({ level, connections = false }: Props) {
 /** Streaming progress, outside the canvas so it never fights the renderer. */
 function Loading() {
   const { active, progress, loaded, total } = useProgress()
-  if (!active && progress >= 100) return null
+  const firstDone = useRef(false)
+  if (!active && progress >= 100) {
+    firstDone.current = true
+    return null
+  }
+  // Later files (the neighbourhood, furniture on a floor) stream in behind a small pill, not a modal card.
+  if (firstDone.current) {
+    return (
+      <div className="pointer-events-none absolute right-4 bottom-4 z-[4]">
+        <div className="lg flex items-center gap-2 px-3 py-1.5 text-[11px] text-t2" style={{ borderRadius: 999 }}>
+          <span className="h-1.5 w-1.5 rounded-full bg-haven-blue haven-pulse" /> Adding detail · {Math.round(progress)}%
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
       <div className="glass-card px-4 py-3 text-center">
@@ -250,6 +267,7 @@ function Scene({ level, connections = false, overlay, night }: Props & { overlay
   }, [level, levelIndex, index, topLevel])
 
   const center = useMemo(() => new THREE.Vector3(width / 2, 6, -depth / 2), [width, depth])
+  const siteReady = useAfterFirstPaint()
   // Looking into a basement: the ground plane would hide it and the night sky lights nothing down there.
   const ground = useBuilding((b) => b.ground)
   const belowGrade = level !== 'all' && ground != null && (levelIndex[level] ?? 0) < (levelIndex[ground] ?? 1)
@@ -276,16 +294,23 @@ function Scene({ level, connections = false, overlay, night }: Props & { overlay
       <primitive object={exterior.scene} onClick={(e: { stopPropagation: () => void; object: THREE.Object3D }) => { e.stopPropagation(); pick(e.object) }} />
       <primitive object={interior.scene} onClick={(e: { stopPropagation: () => void; object: THREE.Object3D }) => { e.stopPropagation(); pick(e.object) }} />
       {connections && <Connections index={index} level={level} levelIndex={levelIndex} />}
-      <Optional>
-        <Suspense fallback={null}>
-          <Furniture level={level} levelIndex={levelIndex} />
-        </Suspense>
-      </Optional>
-      <Optional>
-        <Suspense fallback={null}>
-          <Site level={level} levelIndex={levelIndex} night={night} />
-        </Suspense>
-      </Optional>
+      {/* Furniture is only visible looking into one floor; from the whole building it is hidden by the roof. */}
+      {level !== 'all' && (
+        <Optional>
+          <Suspense fallback={null}>
+            <Furniture level={level} levelIndex={levelIndex} />
+          </Suspense>
+        </Optional>
+      )}
+      {/* The neighbourhood is scenery: it streams in after the building is on screen. */}
+      {siteReady && (
+        <Optional>
+          <Suspense fallback={null}>
+            <Site level={level} levelIndex={levelIndex} night={night} />
+          </Suspense>
+        </Optional>
+      )}
+      <ShadowRefresh deps={[level, night, siteReady]} />
 
       <Tinter index={index} night={night} />
       <WaterPlanes level={level} levelIndex={levelIndex} levelElev={levelElev} spaces={spaces} />
@@ -329,13 +354,50 @@ function NightRig({ center }: { center: THREE.Vector3 }) {
       {/* a little warm spill from the street onto the ground floor */}
       <pointLight position={[center.x - 30, 9, center.z + 40]} intensity={180} distance={120} decay={2} color="#ffd9a3" />
       <pointLight position={[center.x + 40, 9, center.z - 50]} intensity={140} distance={110} decay={2} color="#ffd9a3" />
-      <Optional fallback={null}>
-        <Suspense fallback={null}>
-          <Environment files={SKY_URL} background={false} environmentIntensity={0.08} environmentRotation={[0, SUN.envRotationRad, 0]} />
-        </Suspense>
-      </Optional>
+      {/* At night the sky contributes almost nothing: a generated environment instead of the 5 MB HDRI. */}
+      <Environment resolution={32} frames={1} environmentIntensity={0.25}>
+        <Lightformer intensity={1.2} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[14, 14, 1]} color="#3a4a72" />
+        <Lightformer intensity={0.6} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[12, 3, 1]} color="#ffd9a3" />
+      </Environment>
     </>
   )
+}
+
+/** True a moment after the building first paints (idle time, or 1.2 s at the latest). */
+function useAfterFirstPaint(): boolean {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    let idle = 0
+    const raf = requestAnimationFrame(() => {
+      const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (h: number) => void }
+      if (w.requestIdleCallback) idle = w.requestIdleCallback(() => setReady(true), { timeout: 1200 })
+      else idle = window.setTimeout(() => setReady(true), 600)
+    })
+    return () => {
+      cancelAnimationFrame(raf)
+      const w = window as Window & { cancelIdleCallback?: (h: number) => void }
+      if (w.cancelIdleCallback) w.cancelIdleCallback(idle)
+      else clearTimeout(idle)
+    }
+  }, [])
+  return ready
+}
+
+/** Shadows are drawn on demand: for a few frames after anything that moves geometry or light changes. */
+function ShadowRefresh({ deps }: { deps: unknown[] }) {
+  const gl = useThree((s) => s.gl)
+  const frames = useRef(0)
+  useEffect(() => {
+    frames.current = 30 // late-arriving meshes (a GLB that just parsed) land inside this window
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+  useFrame(() => {
+    if (frames.current > 0) {
+      frames.current -= 1
+      gl.shadowMap.needsUpdate = true
+    }
+  })
+  return null
 }
 
 // ---- tinting from state (no React re-render per frame) ----------------------------------------

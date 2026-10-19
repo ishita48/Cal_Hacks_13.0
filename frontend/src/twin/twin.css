@@ -1,0 +1,193 @@
+/* ==========================================================================================
+   The stylized twin's glass: the tab switcher, the floating cards, labels in the scene and the
+   tooltip. Pastel blue / lavender / mint / coral on the workstation's tokens (workstation.css);
+   the stage behind the canvas is a sky that turns to dusk when the world's clock says night.
+   ========================================================================================== */
+
+.tw-stage {
+  position: absolute; inset: 0; overflow: hidden;
+  background: linear-gradient(180deg, #9dbde0 0%, #c6d9ec 38%, #dfe8f2 70%, #e8edf2 100%);
+  transition: background 900ms ease;
+}
+/* night follows the world's clock: a deep blue sky, the fog matches its horizon */
+.tw-stage.is-night { background: linear-gradient(180deg, #16223f 0%, #23345a 40%, #2b3a5c 75%, #33415f 100%); }
+.dark .tw-stage:not(.is-night) { background: linear-gradient(180deg, #7f9fc4 0%, #b4c8de 45%, #dfe8f2 100%); }
+.tw-stage canvas { touch-action: none; }
+.tw-stage.is-pointing canvas { cursor: pointer; }
+
+/* ---- the tab switcher ---- */
+.tw-top { position: absolute; top: 14px; left: 50%; translate: -50% 0; z-index: 10; max-width: calc(100% - 28px); animation: mac-drop 520ms var(--ease-expo) both; }
+.tw-tabs {
+  padding: 4px; background: var(--mac-popover-bg, #fbfbff);
+  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--mac-window-border); box-shadow: 0 14px 36px -16px rgba(40, 50, 120, 0.45);
+  overflow-x: auto; scrollbar-width: none;
+}
+.tw-tabs::-webkit-scrollbar { display: none; }
+.tw-tabs.mac-seg::before { top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / var(--n, 4)); background: var(--mac-grad); box-shadow: 0 6px 16px -8px rgba(111, 141, 255, 0.9); }
+.tw-tabs .mac-seg-item { padding: 7px 14px; font-size: 12.5px; color: var(--ink-2); }
+.tw-tabs .mac-seg-item.is-on { color: #fff; }
+.tw-tab-dot { width: 7px; height: 7px; border-radius: 999px; background: #ff7a6b; box-shadow: 0 0 0 3px rgba(255, 122, 107, 0.22); animation: haven-pulse 1.8s ease-in-out infinite; }
+.tw-tabs .mac-seg-item.is-on .tw-tab-dot { background: #fff; box-shadow: none; }
+
+/* ---- floating cards ---- */
+.tw-left, .tw-right { position: absolute; top: 72px; z-index: 10; max-height: calc(100% - 150px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; animation: tw-in 520ms var(--ease-expo) both; }
+.tw-left::-webkit-scrollbar, .tw-right::-webkit-scrollbar { display: none; }
+.tw-left { left: 14px; width: min(340px, calc(100% - 28px)); }
+.tw-right { right: 14px; width: min(292px, calc(100% - 28px)); }
+@keyframes tw-in { from { opacity: 0; transform: translateY(10px) scale(0.98); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+
+.tw-card {
+  position: relative; padding: 14px 16px 14px; border-radius: 20px;
+  background: rgba(255, 255, 255, 0.86); -webkit-backdrop-filter: blur(26px) saturate(180%); backdrop-filter: blur(26px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 22px 50px -24px rgba(40, 50, 120, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+.dark .tw-card { background: rgba(26, 28, 44, 0.8); border-color: rgba(255, 255, 255, 0.1); box-shadow: 0 22px 50px -24px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+.tw-card::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--lg-angle), rgba(138, 216, 255, 0), rgba(138, 176, 255, 0.95), rgba(190, 168, 255, 0.95), rgba(255, 196, 228, 0.9), rgba(160, 230, 255, 0.95), rgba(138, 216, 255, 0));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity: 0; transition: opacity 600ms var(--ease-expo);
+}
+.tw-card:hover::before { opacity: 0.9; animation: lg-turn 7s linear infinite; }
+.tw-card::after { content: ""; position: absolute; left: 16px; top: 0; width: 34px; height: 3px; border-radius: 0 0 3px 3px; background: var(--mac-grad); }
+.tw-card.is-hot::after { background: linear-gradient(90deg, #ff8a7a, #ff6b8b); }
+.tw-card.is-warm::after { background: linear-gradient(90deg, #ffc56b, #ff9f6b); }
+.tw-card.is-ok::after { background: linear-gradient(90deg, #6fe0b0, #5fc8d8); }
+.tw-card.is-acting::after { background: linear-gradient(90deg, #6fa8ff, #9b87f5); }
+.tw-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.tw-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.tw-title { margin-top: 3px; font-size: 16px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-1); }
+.tw-card-body { margin-top: 10px; }
+.tw-lede { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.tw-hint { margin-top: 8px; font-size: 11px; color: var(--ink-3); }
+
+.tw-rows { display: grid; gap: 2px; }
+.tw-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 12px; text-align: left; transition: background-color 150ms ease, transform 260ms var(--ease-spring); }
+.tw-row.is-link:hover { background: var(--mac-hover); transform: translateX(2px); }
+.tw-row-icon { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 9px; color: var(--mac-accent); background: var(--mac-accent-soft); }
+.tw-row-icon.is-hot { color: #e2513f; background: rgba(255, 122, 107, 0.16); }
+.tw-row-icon.is-warm { color: #c77a12; background: rgba(255, 184, 77, 0.2); }
+.tw-row-icon.is-ok { color: #1f9e6b; background: rgba(95, 212, 160, 0.18); }
+.tw-row-label { display: block; font-size: 10.5px; color: var(--ink-3); }
+.tw-row-value { display: block; font-size: 12.5px; line-height: 1.35; font-weight: 500; color: var(--ink-1); }
+
+.tw-more { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 4px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500; color: var(--mac-accent-ink); }
+.tw-more:hover { background: var(--mac-accent-soft); }
+.tw-floors { margin-top: 4px; display: grid; gap: 1px; }
+.tw-floors button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 9px; font-size: 12px; color: var(--ink-1); }
+.tw-floors button:hover { background: var(--mac-hover); }
+.tw-floors i, .tw-people i { width: 9px; height: 9px; flex-shrink: 0; border-radius: 999px; }
+.tw-floors i.is-water { background: #6cc3ff; } .tw-floors i.is-hot { background: #ff7a6b; } .tw-floors i.is-warm { background: #ffc56b; } .tw-floors i.is-ok { background: #5fd4a0; }
+
+.tw-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--mac-hairline); font-size: 10.5px; color: var(--ink-3); }
+.tw-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.tw-legend i { width: 8px; height: 8px; }
+
+.tw-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tw-stats span { padding: 4px 9px; border-radius: 999px; font-size: 11.5px; color: var(--ink-2); background: var(--mac-well); }
+.tw-stats b { font-weight: 650; color: var(--ink-1); font-variant-numeric: tabular-nums; }
+.tw-stats span.is-hot { background: rgba(155, 107, 255, 0.14); color: #6d3fd6; }
+.tw-stats span.is-hot b { color: #6d3fd6; }
+
+.tw-people { display: grid; gap: 2px; }
+.tw-people button, .tw-person-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 12px; transition: background-color 150ms ease, transform 260ms var(--ease-spring); }
+.tw-people button:hover { background: var(--mac-hover); transform: translateX(2px); }
+.tw-person-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-1); }
+.tw-person-sub { display: block; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tw-person-status { flex-shrink: 0; max-width: 46%; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-align: right; background: var(--mac-well); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tw-person-status.is-critical { background: rgba(255, 122, 107, 0.16); color: #d94a38; }
+.tw-person-status.is-warning { background: rgba(255, 184, 77, 0.2); color: #b46c0c; }
+.tw-person-status.is-left { background: rgba(155, 107, 255, 0.16); color: #6d3fd6; }
+.tw-person-status.is-moved { background: rgba(95, 212, 160, 0.2); color: #1f8f62; }
+
+.tw-callout { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 2px 0 10px; padding: 10px 12px; border-radius: 14px; background: linear-gradient(135deg, rgba(111, 141, 255, 0.1), rgba(155, 135, 245, 0.12)); border: 1px solid rgba(111, 141, 255, 0.2); font-size: 12.5px; line-height: 1.45; color: var(--ink-1); }
+
+.tw-steps { display: grid; gap: 2px; }
+.tw-steps button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 8px; border-radius: 10px; font-size: 12px; color: var(--ink-1); transition: background-color 150ms ease; }
+.tw-steps button:hover { background: var(--mac-hover); }
+.tw-step-n { display: grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: 999px; font-size: 10.5px; font-weight: 700; color: #fff; background: #b49bff; }
+.tw-steps .is-assigned .tw-step-n { background: #5aa8ff; animation: haven-pulse 1.6s ease-in-out infinite; }
+.tw-steps .is-done .tw-step-n { background: #5fd4a0; }
+.tw-steps .is-failed .tw-step-n { background: #ff7a6b; }
+.tw-steps .is-pending .tw-step-n { background: #c9c6e6; }
+.tw-step-state { flex-shrink: 0; font-size: 10.5px; color: var(--ink-3); }
+
+/* ---- the tooltip ---- */
+.tw-tip {
+  position: absolute; left: 0; top: 0; z-index: 12; pointer-events: none; max-width: 240px;
+  display: grid; gap: 1px; padding: 7px 11px; border-radius: 12px; font-size: 11.5px; color: var(--ink-2);
+  background: var(--mac-popover-bg, #fbfbff); border: 1px solid var(--mac-window-border); box-shadow: 0 12px 30px -14px rgba(40, 50, 120, 0.5);
+  opacity: 0; transition: opacity 140ms ease;
+}
+.tw-tip.is-on { opacity: 1; }
+.tw-tip b { font-size: 12.5px; font-weight: 600; color: var(--ink-1); }
+
+/* ---- labels in the scene (drei Html) ---- */
+.tw-label {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 0; padding: 4px 10px; border-radius: 12px; white-space: nowrap;
+  font: 500 11px/1.3 var(--font-sans); color: #2b2d48; background: rgba(255, 255, 255, 0.94);
+  border: 1.5px solid #d6d2f5; box-shadow: 0 8px 20px -10px rgba(40, 50, 120, 0.55);
+  animation: tw-pop 420ms var(--ease-spring) both;
+}
+.tw-label b { font-weight: 650; font-size: 12px; }
+.tw-label span { font-size: 10.5px; color: #6b6f8f; }
+.tw-label.is-critical { border-color: #ff7a6b; } .tw-label.is-critical span { color: #d94a38; }
+.tw-label.is-warning { border-color: #ffb84d; } .tw-label.is-warning span { color: #b46c0c; }
+.tw-label.is-left { border-color: #9b6bff; background: #f6f0ff; } .tw-label.is-left span { color: #6d3fd6; }
+.tw-label.is-moved, .tw-label.is-safe { border-color: #5fd4a0; } .tw-label.is-moved span { color: #1f8f62; }
+.tw-label.is-water { border-color: #6cc3ff; color: #0f5d8f; font-weight: 600; }
+.tw-label.is-actor { border-color: #b9b4f0; }
+.tw-label.is-actor.is-moving { border-color: #5aa8ff; } .tw-label.is-actor.is-moving span { color: #2f7fe0; }
+.tw-label.is-actor.is-done { border-color: #5fd4a0; } .tw-label.is-actor.is-done span { color: #1f8f62; }
+.tw-label.is-actor.is-idle { opacity: 0.82; }
+@keyframes tw-pop { from { opacity: 0; transform: translateY(4px) scale(0.92); } to { opacity: 1; transform: none; } }
+.tw-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font: 500 10.5px/1.4 var(--font-sans); color: #4b4f73; background: rgba(255, 255, 255, 0.85); box-shadow: 0 4px 12px -6px rgba(40, 50, 120, 0.4); white-space: nowrap; }
+.tw-beacon {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; border: 2px solid #fff;
+  font: 700 11.5px/1 var(--font-sans); color: #fff; background: #b49bff; cursor: pointer;
+  box-shadow: 0 8px 18px -8px rgba(40, 50, 120, 0.7); transition: transform 260ms var(--ease-spring);
+  animation: tw-pop 420ms var(--ease-spring) both;
+}
+.tw-beacon:hover { transform: scale(1.18); }
+.tw-beacon.is-assigned { background: #5aa8ff; }
+.tw-beacon.is-done { background: #5fd4a0; }
+.tw-beacon.is-failed { background: #ff7a6b; }
+.tw-beacon.is-pending { background: #c9c6e6; }
+
+@media (max-width: 640px) {
+  .tw-tab-label { display: none; }
+  .tw-left { top: 66px; max-height: 42%; }
+  .tw-right { top: auto; bottom: 70px; }
+}
+
+/* the label layer: plain DOM over the canvas, moved by the scene's projector every rendered frame */
+.tw-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+.tw-anchor { position: absolute; left: 0; top: 0; visibility: hidden; will-change: transform; }
+.tw-anchor.is-interactive { pointer-events: auto; }
+
+/* grid lists keep long titles inside the card */
+.tw-rows, .tw-floors, .tw-people, .tw-steps { grid-template-columns: minmax(0, 1fr); }
+
+/* the Building tab's one small card: a hint at rest, the colour key in an incident */
+.tw-legend-card {
+  display: inline-block; max-width: 100%; padding: 10px 14px; border-radius: 16px; font-size: 12px; color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.86); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.9); box-shadow: 0 16px 40px -22px rgba(40, 50, 120, 0.45);
+}
+.dark .tw-legend-card { background: rgba(26, 28, 44, 0.82); border-color: rgba(255, 255, 255, 0.1); }
+.tw-legend-card.is-hint { padding: 7px 13px; border-radius: 999px; font-size: 11.5px; color: var(--ink-3); }
+.tw-legend-title { font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.tw-legend-card .tw-legend { margin-top: 6px; padding-top: 0; border-top: 0; }
+
+/* "Show everyone": the one switch over the animation (every resident, who needs help, the routes) */
+.tw-everyone { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px 12px 6px 7px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ink-2); background: rgba(255, 255, 255, 0.9); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.95); box-shadow: 0 10px 26px -16px rgba(20, 30, 60, 0.5); transition: color 160ms ease, transform 260ms var(--ease-spring); }
+.tw-everyone:hover { transform: translateY(-1px); color: var(--ink-1); }
+.dark .tw-everyone { background: rgba(26, 28, 44, 0.85); border-color: rgba(255, 255, 255, 0.1); }
+.tw-everyone-track { position: relative; width: 28px; height: 17px; border-radius: 999px; background: rgba(40, 50, 80, 0.2); transition: background 240ms ease; }
+.tw-everyone-track > span { position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 320ms var(--ease-spring); }
+.tw-everyone.is-on { color: var(--mac-accent-ink); }
+.tw-everyone.is-on .tw-everyone-track { background: var(--mac-grad); }
+.tw-everyone.is-on .tw-everyone-track > span { transform: translateX(11px); }
+.tw-left > .tw-everyone + * { display: block; }

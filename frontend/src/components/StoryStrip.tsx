@@ -16,27 +16,7 @@ export function StoryStrip({ world, clock }: { world: WorldState; clock: Clock }
   const heroId = useBuilding((b) => b.heroId)
   const residents = useBuilding((b) => b.residents)
   const [error, setError] = useState<string | null>(null)
-  // Cross-incident memory: how this incident compares with the last one, and what is remembered on a quiet night.
-  const done = world.approved_plan?.status === 'done'
-  const [memory, setMemory] = useState<IncidentMemory | null>(null)
-  useEffect(() => {
-    if (world.mode !== 'live' && !done) return
-    api.incidents().then(setMemory).catch(() => {})
-  }, [done, world.run_id, world.mode])
-  const remembered = (() => {
-    if (!memory) return null
-    if (done && memory.current) {
-      const c = memory.comparison
-      if (!c) return 'First incident remembered: the next one will be compared with it.'
-      const faster = c.minutes_faster >= 0 ? `${c.minutes_faster} min faster` : `${-c.minutes_faster} min slower`
-      return `${faster} than the last incident, ${c.left_behind_delta <= 0 ? 'nobody more' : `${c.left_behind_delta} more`} left behind.`
-    }
-    if (n.stage === 'quiet' && memory.incidents.length > 0) {
-      const last = memory.incidents[0]
-      return `${memory.incidents.length} earlier incident${memory.incidents.length === 1 ? '' : 's'} remembered; the last took ${last.minutes_to_done} min from drip to done${last.rules.length ? ` under the rule "${last.rules[0].replace(/_/g, ' ')}"` : ''}.`
-    }
-    return null
-  })()
+  const remembered = useRemembered(world)
   const heroAgent = heroId ? `resident:${heroId}` : null
   const heroOn = heroAgent && heroAgent in world.agents ? world.agents[heroAgent] : undefined
   const heroName = heroId ? (residents[heroId]?.name.split(' ')[0] ?? heroId) : null
@@ -112,6 +92,28 @@ export function StoryStrip({ world, clock }: { world: WorldState; clock: Clock }
       )}
     </div>
   )
+}
+
+/** Cross-incident memory: how this incident compares with the last one, and what is remembered on a quiet night. */
+export function useRemembered(world: WorldState): string | null {
+  const done = world.approved_plan?.status === 'done'
+  const [memory, setMemory] = useState<IncidentMemory | null>(null)
+  useEffect(() => {
+    if (world.mode !== 'live' && !done) return
+    api.incidents().then(setMemory).catch(() => {})
+  }, [done, world.run_id, world.mode])
+  if (!memory) return null
+  if (done && memory.current) {
+    const c = memory.comparison
+    if (!c) return 'First incident remembered: the next one will be compared with it.'
+    const faster = c.minutes_faster >= 0 ? `${c.minutes_faster} min faster` : `${-c.minutes_faster} min slower`
+    return `${faster} than the last incident, ${c.left_behind_delta <= 0 ? 'nobody more' : `${c.left_behind_delta} more`} left behind.`
+  }
+  if (world.narrative.stage === 'quiet' && memory.incidents.length > 0) {
+    const last = memory.incidents[0]
+    return `${memory.incidents.length} earlier incident${memory.incidents.length === 1 ? '' : 's'} remembered; the last took ${last.minutes_to_done} min from drip to done${last.rules.length ? ` under the rule "${last.rules[0].replace(/_/g, ' ')}"` : ''}.`
+  }
+  return null
 }
 
 /** A number with its meaning. A value that changes on its own every second (a countdown) is not re-animated, or it would flicker. */

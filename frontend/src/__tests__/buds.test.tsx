@@ -1,16 +1,31 @@
 // Buds: renders, asks the backend, shows the answer, offers the action behind the human gate.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Buds, focusKey, point } from '../components/Buds'
+import { Buds, focusKey, point, useBudsOn } from '../components/Buds'
 import { useWorld } from '../state/world'
 import { clock, world } from './fixture'
 
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 describe('Buds', () => {
+  it('is off by default: nothing on screen until it is switched on', () => {
+    localStorage.clear()
+    useBudsOn.setState({ on: false })
+    useWorld.setState({ world, clock, connection: 'open' })
+    const { container } = render(<Buds />)
+    expect(container.innerHTML).toBe('')
+    expect(screen.queryByLabelText('Open Buds')).toBeNull()
+    act(() => useBudsOn.getState().setOn(true))
+    expect(screen.getByLabelText('Open Buds')).toBeTruthy()
+    expect(localStorage.getItem('haven.buds.enabled')).toBe('1')
+    act(() => useBudsOn.getState().setOn(false))
+    expect(screen.queryByLabelText('Open Buds')).toBeNull()
+  })
+
   it('opens from the orb, asks, shows the answer and offers an approval card', async () => {
     useWorld.setState({ world, clock, connection: 'open' })
     const reply = {
@@ -30,6 +45,7 @@ describe('Buds', () => {
         return new Response('', { status: 503 })
       }),
     )
+    useBudsOn.setState({ on: true })
     render(<Buds />)
     fireEvent.click(screen.getByLabelText('Open Buds'))
     const input = screen.getByPlaceholderText(/Ask Buds anything/)

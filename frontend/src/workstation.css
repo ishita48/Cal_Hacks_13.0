@@ -1,0 +1,360 @@
+/* ==========================================================================================
+   The workstation shell (macOS): a floating pill over two windows, the workstation (30%) and the
+   building (70%). Frosted glass, 22px windows, pastel periwinkle + lavender accents, soft depth,
+   an iridescent edge on hover and spring-eased micro-motion. Loaded with the command centre only
+   (App.tsx); everything is scoped to .mac-*, the tokens follow `.dark` like index.css.
+   ========================================================================================== */
+:root {
+  --mac-accent: #5b7cfa;
+  --mac-accent-2: #9b87f5;
+  --mac-accent-ink: #3d5bd9;
+  --mac-grad: linear-gradient(135deg, #6f8dff 0%, #9b87f5 100%);
+  --mac-accent-soft: rgba(91, 124, 250, 0.13);
+  --mac-glass: rgba(255, 255, 255, 0.62);
+  --mac-window-bg: rgba(255, 255, 255, 0.56);
+  --mac-window-border: rgba(255, 255, 255, 0.78);
+  --mac-card-bg: rgba(255, 255, 255, 0.74);
+  --mac-card-border: rgba(255, 255, 255, 0.9);
+  --mac-menu-bg: rgba(250, 250, 255, 0.86);
+  --mac-popover-bg: #fbfbff;
+  --mac-hairline: rgba(40, 50, 110, 0.08);
+  --mac-well: rgba(40, 50, 110, 0.06);
+  --mac-well-soft: rgba(244, 246, 255, 0.7);
+  --mac-thumb: #ffffff;
+  --mac-hover: rgba(40, 50, 110, 0.06);
+  --mac-viewport-bg: #e9eef5;
+  --mac-shadow-window: 0 0 0 0.5px rgba(30, 40, 90, 0.06), 0 30px 70px -30px rgba(50, 60, 140, 0.38), 0 10px 28px -14px rgba(50, 60, 140, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --mac-shadow-card: 0 1px 2px rgba(30, 40, 90, 0.04), 0 8px 22px -14px rgba(30, 40, 90, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --mac-shadow-lift: 0 2px 4px rgba(30, 40, 90, 0.05), 0 18px 36px -18px rgba(70, 80, 190, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+}
+.dark {
+  --mac-accent: #8ea4ff;
+  --mac-accent-2: #b4a5ff;
+  --mac-accent-ink: #b9c6ff;
+  --mac-accent-soft: rgba(142, 164, 255, 0.16);
+  --mac-glass: rgba(28, 30, 44, 0.62);
+  --mac-window-bg: rgba(22, 24, 36, 0.62);
+  --mac-window-border: rgba(255, 255, 255, 0.1);
+  --mac-card-bg: rgba(255, 255, 255, 0.05);
+  --mac-card-border: rgba(255, 255, 255, 0.08);
+  --mac-menu-bg: rgba(30, 32, 46, 0.9);
+  --mac-popover-bg: #1e202e;
+  --mac-hairline: rgba(255, 255, 255, 0.07);
+  --mac-well: rgba(255, 255, 255, 0.07);
+  --mac-well-soft: rgba(255, 255, 255, 0.04);
+  --mac-thumb: rgba(255, 255, 255, 0.16);
+  --mac-hover: rgba(255, 255, 255, 0.07);
+  --mac-viewport-bg: #0a0e17;
+  --mac-shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.5), 0 30px 70px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --mac-shadow-card: 0 8px 22px -14px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --mac-shadow-lift: 0 18px 36px -18px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.mac-shell {
+  position: relative; isolation: isolate;
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 14px; padding: 14px; overflow: hidden;
+  background:
+    radial-gradient(1100px 680px at 6% -12%, rgba(160, 186, 255, 0.55), transparent 62%),
+    radial-gradient(1000px 700px at 104% -6%, rgba(206, 186, 255, 0.5), transparent 60%),
+    radial-gradient(900px 620px at 46% 118%, rgba(176, 218, 255, 0.42), transparent 62%),
+    linear-gradient(180deg, #f4f5fc 0%, #eef0f9 100%);
+}
+.dark .mac-shell {
+  background:
+    radial-gradient(1100px 680px at 6% -12%, rgba(91, 124, 250, 0.2), transparent 62%),
+    radial-gradient(1000px 700px at 104% -6%, rgba(155, 135, 245, 0.17), transparent 60%),
+    radial-gradient(900px 620px at 46% 118%, rgba(56, 140, 220, 0.12), transparent 62%),
+    #0a0b12;
+}
+.mac-shell .btn-primary, .mac-shell .btn-hero, .mac-shell .argus-btn { background: var(--mac-grad); box-shadow: 0 12px 28px -12px rgba(111, 141, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.32); }
+.mac-shell *:focus-visible { outline-color: rgba(91, 124, 250, 0.6); }
+
+/* the iridescent edge: a slow conic ring masked to the border; cards and the pill light up under the pointer */
+.mac-nav::before, .mac-card::before, .mac-window::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 2;
+  background: conic-gradient(from var(--lg-angle), rgba(138, 216, 255, 0), rgba(138, 176, 255, 0.95), rgba(190, 168, 255, 0.95), rgba(255, 196, 228, 0.9), rgba(160, 230, 255, 0.95), rgba(138, 216, 255, 0));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity: 0; transition: opacity 600ms var(--ease-expo);
+}
+.mac-nav:hover::before, .mac-card:hover::before { opacity: 0.9; animation: lg-turn 7s linear infinite; }
+.mac-window:hover::before { opacity: 0.35; animation: lg-turn 14s linear infinite; }
+
+/* ---- the pill ---- */
+.mac-nav {
+  position: relative; z-index: 40; flex-shrink: 0;
+  display: flex; align-items: center; gap: 12px; width: 100%; max-width: 1280px; height: 58px; margin: 0 auto; padding: 0 9px;
+  border-radius: 999px; background: var(--mac-glass);
+  -webkit-backdrop-filter: blur(30px) saturate(190%); backdrop-filter: blur(30px) saturate(190%);
+  border: 1px solid var(--mac-window-border); box-shadow: var(--mac-shadow-window);
+  animation: mac-drop 520ms var(--ease-expo) both;
+}
+.mac-brand { display: flex; align-items: center; gap: 10px; padding: 4px 12px 4px 4px; border-radius: 999px; transition: background-color 180ms ease; }
+.mac-brand:hover { background: var(--mac-hover); }
+.mac-logo { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 999px; background: linear-gradient(145deg, #ffffff, #eef0ff); box-shadow: inset 0 1px 0 #fff, 0 6px 16px -6px rgba(91, 124, 250, 0.55), 0 0 0 0.5px rgba(40, 50, 110, 0.1); }
+.dark .mac-logo { background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 6px 16px -6px rgba(91, 124, 250, 0.6); }
+.mac-logo > span { width: 12px; height: 12px; border-radius: 999px; background: var(--mac-grad); box-shadow: 0 0 0 4px rgba(111, 141, 255, 0.18); transition: transform 400ms var(--ease-spring); }
+.mac-brand:hover .mac-logo > span { transform: scale(1.18); }
+.mac-status { display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 999px; font-size: 12px; background: var(--mac-well); white-space: nowrap; }
+.mac-nav-btn {
+  display: grid; place-items: center; width: 38px; height: 38px; border-radius: 999px; color: var(--ink-2);
+  transition: background-color 160ms ease, color 160ms ease, transform 260ms var(--ease-spring);
+}
+.mac-nav-btn:hover { background: var(--mac-hover); color: var(--ink-1); transform: translateY(-1px); }
+.mac-nav-btn:active { transform: scale(0.94); }
+.mac-nav-btn.is-on { background: var(--mac-accent-soft); color: var(--mac-accent-ink); }
+.mac-cta {
+  display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 16px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; color: #fff; background: var(--mac-grad);
+  box-shadow: 0 10px 24px -10px rgba(111, 141, 255, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 260ms var(--ease-spring), filter 160ms ease, box-shadow 300ms ease;
+}
+.mac-cta:hover { transform: translateY(-1px); filter: brightness(1.05); box-shadow: 0 14px 30px -10px rgba(111, 141, 255, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.mac-cta:active { transform: scale(0.97); }
+.mac-cta:disabled { opacity: 0.45; pointer-events: none; }
+
+/* a segmented control whose thumb slides: --n items, --i the one that is on */
+.mac-seg { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 999px; background: var(--mac-well); box-shadow: inset 0 1px 2px rgba(30, 40, 90, 0.06); }
+.mac-seg::before {
+  content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / var(--n, 2)); border-radius: 999px;
+  background: var(--mac-thumb); box-shadow: 0 1px 3px rgba(30, 40, 90, 0.14), 0 0 0 0.5px rgba(30, 40, 90, 0.06);
+  transform: translateX(calc(var(--i, 0) * 100%)); transition: transform 420ms var(--ease-spring);
+}
+.mac-seg-item { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); white-space: nowrap; transition: color 200ms ease; }
+.mac-seg-item:hover, .mac-seg-item.is-on { color: var(--ink-1); }
+
+/* menus and popovers */
+.mac-menu {
+  position: absolute; right: 0; top: calc(100% + 10px); z-index: 60; width: 272px; padding: 6px; border-radius: 16px;
+  background: var(--mac-popover-bg); -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid var(--mac-window-border); box-shadow: 0 24px 60px -20px rgba(30, 40, 90, 0.4), 0 0 0 0.5px rgba(30, 40, 90, 0.08);
+  transform-origin: top right; animation: mac-pop 220ms var(--ease-expo) both;
+}
+.mac-menu-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 10px; font-size: 12.5px; font-weight: 500; color: var(--ink-1); text-align: left; transition: background-color 120ms ease, color 120ms ease; }
+.mac-menu-item svg { margin-top: 2px; flex-shrink: 0; color: var(--mac-accent); }
+.mac-menu-item small { display: block; font-size: 11px; font-weight: 400; color: var(--ink-3); }
+.mac-menu-item:hover { background: var(--mac-grad); color: #fff; }
+.mac-menu-item:hover svg, .mac-menu-item:hover small { color: rgba(255, 255, 255, 0.85); }
+.mac-menu-sep { border: 0; border-top: 1px solid var(--mac-hairline); margin: 4px 8px; }
+.mac-menu kbd { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 5px; background: var(--mac-well); color: var(--ink-2); }
+.mac-key { width: 232px; padding: 12px 14px; }
+
+/* ---- the windows ---- */
+.mac-main { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.mac-window {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; border-radius: 22px;
+  background: var(--mac-window-bg); -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+  border: 1px solid var(--mac-window-border); box-shadow: var(--mac-shadow-window);
+}
+.mac-workstation, .mac-stage, .mac-ops { position: relative; }
+.mac-workstation { flex: 0 0 30%; min-width: 340px; }
+.mac-stage { flex: 1 1 0; }
+.mac-ops { flex: 1; }
+.mac-main.is-solo-left .mac-workstation { flex: 1 1 auto; }
+.mac-main.is-solo-left .mac-scroll { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); align-items: start; align-content: start; }
+.mac-main.is-solo-left .mac-hero { grid-column: 1 / -1; }
+
+.mac-titlebar { display: flex; align-items: center; gap: 14px; flex-shrink: 0; min-height: 50px; padding: 8px 12px 8px 16px; }
+.mac-lights { display: flex; gap: 8px; flex-shrink: 0; }
+.mac-light { position: relative; width: 12px; height: 12px; border-radius: 999px; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18); transition: transform 200ms var(--ease-spring), filter 150ms ease; }
+.mac-light.is-close { background: #ff5f57; }
+.mac-light.is-min { background: #febc2e; }
+.mac-light.is-zoom { background: #28c840; }
+.mac-light:disabled { background: rgba(40, 50, 110, 0.16); }
+.dark .mac-light:disabled { background: rgba(255, 255, 255, 0.14); }
+.mac-light::after { position: absolute; inset: 0; display: grid; place-items: center; font: 700 9px/1 var(--font-sans); color: rgba(0, 0, 0, 0.55); opacity: 0; transition: opacity 150ms ease; }
+.mac-light.is-close::after { content: "\00d7"; font-size: 11px; }
+.mac-light.is-min::after { content: "\2212"; }
+.mac-light.is-zoom::after { content: "+"; }
+.mac-lights:hover .mac-light:not(:disabled)::after { opacity: 1; }
+.mac-light:not(:disabled):hover { transform: scale(1.15); }
+.mac-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mac-title-main { font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink-1); white-space: nowrap; }
+.mac-title-sub { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mac-toolbar { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.mac-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--ink-2); background: var(--mac-well); transition: background-color 160ms ease, color 160ms ease, transform 260ms var(--ease-spring), box-shadow 200ms ease; }
+.mac-chip:hover { color: var(--ink-1); background: var(--mac-hover); transform: translateY(-1px); }
+.mac-chip.is-on { color: var(--mac-accent-ink); background: var(--mac-accent-soft); box-shadow: inset 0 0 0 1px rgba(91, 124, 250, 0.28); }
+.mac-toolbar .mac-seg-item { padding: 5px 12px; font-size: 12px; }
+.mac-icon-btn { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 999px; color: var(--ink-2); background: var(--mac-well); transition: background-color 150ms ease, color 150ms ease, transform 220ms var(--ease-spring); }
+.mac-icon-btn:hover { background: var(--mac-hover); color: var(--ink-1); transform: scale(1.06); }
+
+/* ---- the workstation: the calm card, then the widget cards ---- */
+.mac-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 14px; overscroll-behavior: contain; }
+.mac-hero {
+  flex-shrink: 0; padding: 18px 18px 16px; border-radius: 18px;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.92) 0%, rgba(244, 244, 255, 0.82) 60%, rgba(238, 242, 255, 0.86) 100%);
+  border: 1px solid var(--mac-card-border); box-shadow: var(--mac-shadow-card);
+  animation: haven-rise 460ms var(--ease-expo) both;
+}
+.dark .mac-hero { background: linear-gradient(150deg, rgba(255, 255, 255, 0.08), rgba(155, 135, 245, 0.06) 60%, rgba(91, 124, 250, 0.06)); }
+.calm-card.is-embedded { width: auto; padding: 0; }
+.calm-card.is-embedded .calm-headline { margin-top: 10px; font-size: 19px; }
+.calm-card.is-embedded .calm-detail { font-size: 13px; }
+.calm-card.is-embedded .calm-facts { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); }
+.calm-card.is-embedded .calm-fact { background: var(--mac-well-soft); border-color: var(--mac-hairline); box-shadow: none; }
+.calm-card.is-embedded .calm-reco { background: linear-gradient(135deg, rgba(111, 141, 255, 0.1), rgba(155, 135, 245, 0.1)); border-color: rgba(111, 141, 255, 0.2); }
+.calm-card.is-embedded .calm-reco-k { color: var(--mac-accent-ink); }
+.calm-card.is-embedded .calm-switch { border-top-color: var(--mac-hairline); }
+.calm-rail { margin-top: 12px; }
+.calm-rail-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.calm-rail-seg { height: 5px; border-radius: 999px; background: var(--mac-well); transition: background 500ms ease, box-shadow 500ms ease; }
+.calm-rail-seg.is-on { background: var(--mac-grad); }
+.calm-rail-seg.is-now { box-shadow: 0 0 0 3px rgba(111, 141, 255, 0.18); animation: haven-pulse 1.8s ease-in-out infinite; }
+.calm-rail-label { display: block; margin-top: 6px; font-size: 11px; color: var(--ink-3); }
+.calm-memory { margin-top: 6px; font-size: 12px; line-height: 1.45; color: #6d5bd0; }
+.dark .calm-memory { color: #c4b5fd; }
+
+.mac-card {
+  position: relative; flex-shrink: 0; border-radius: 16px;
+  background: var(--mac-card-bg); border: 1px solid var(--mac-card-border); box-shadow: var(--mac-shadow-card);
+  transition: box-shadow 360ms var(--ease-expo), background-color 200ms ease;
+  animation: haven-rise 420ms var(--ease-expo) both;
+}
+.mac-scroll > .mac-card:nth-child(2) { animation-delay: 40ms; }
+.mac-scroll > .mac-card:nth-child(3) { animation-delay: 80ms; }
+.mac-scroll > .mac-card:nth-child(4) { animation-delay: 120ms; }
+.mac-scroll > .mac-card:nth-child(5) { animation-delay: 160ms; }
+.mac-scroll > .mac-card:nth-child(n + 6) { animation-delay: 200ms; }
+.mac-card:hover { box-shadow: var(--mac-shadow-lift); }
+.mac-card.is-red { background: linear-gradient(rgba(239, 68, 68, 0.06), rgba(239, 68, 68, 0.06)), var(--mac-card-bg); border-color: rgba(239, 68, 68, 0.26); }
+.mac-card.is-amber { background: linear-gradient(rgba(245, 158, 11, 0.07), rgba(245, 158, 11, 0.07)), var(--mac-card-bg); border-color: rgba(245, 158, 11, 0.3); }
+.mac-card-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border-radius: 15px; text-align: left; transition: background-color 160ms ease; }
+.mac-card-head:hover { background: var(--mac-hover); }
+.mac-card.is-open .mac-card-head:hover { background: transparent; }
+.mac-card-icon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; color: var(--mac-accent); background: linear-gradient(135deg, rgba(111, 141, 255, 0.16), rgba(155, 135, 245, 0.18)); box-shadow: inset 0 0 0 1px rgba(111, 141, 255, 0.16); transition: transform 420ms var(--ease-spring); }
+.mac-card-head:hover .mac-card-icon { transform: scale(1.07) rotate(-4deg); }
+.mac-card-title { display: block; font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink-1); }
+.mac-card-summary { display: block; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mac-card-chev { width: 16px; height: 16px; flex-shrink: 0; color: var(--ink-4); transition: transform 420ms var(--ease-spring), color 160ms ease; }
+.mac-card-head:hover .mac-card-chev { color: var(--ink-2); }
+.mac-card.is-open .mac-card-chev { transform: rotate(180deg); }
+.mac-badge { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mac-badge.is-blue { background: rgba(91, 124, 250, 0.14); color: #3d5bd9; }
+.mac-badge.is-red { background: rgba(239, 68, 68, 0.12); color: #c42b2b; }
+.mac-badge.is-violet { background: rgba(124, 58, 237, 0.12); color: #6d28d9; }
+.mac-badge.is-amber { background: rgba(245, 158, 11, 0.16); color: #b45309; }
+.dark .mac-badge.is-blue { color: #b9c6ff; }
+.dark .mac-badge.is-red { color: #fca5a5; }
+.dark .mac-badge.is-violet { color: #c4b5fd; }
+.dark .mac-badge.is-amber { color: #fcd34d; }
+.mac-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 380ms var(--ease-expo), opacity 260ms ease; }
+.mac-collapse.is-open { grid-template-rows: 1fr; opacity: 1; }
+.mac-collapse > div { min-height: 0; overflow: hidden; }
+.mac-card-body { padding: 4px 14px 14px; }
+.mac-card-body.mac-fixed { height: clamp(340px, 58vh, 620px); display: flex; flex-direction: column; }
+.mac-card-body.mac-fixed > * { flex: 1; min-height: 0; }
+
+.mac-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mac-tile { display: grid; gap: 3px; padding: 12px 13px; border-radius: 14px; background: var(--mac-well-soft); border: 1px solid var(--mac-hairline); transition: transform 300ms var(--ease-spring); }
+.mac-tile:hover { transform: translateY(-1px); }
+.mac-tile-v { font-size: 22px; line-height: 1; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink-1); }
+.mac-tile-k { font-size: 11px; line-height: 1.3; color: var(--ink-3); }
+.mac-tile.is-hot .mac-tile-v { color: var(--c-danger); }
+.mac-tile.is-warm .mac-tile-v { color: var(--c-amber); }
+.mac-tile.is-ok .mac-tile-v { color: var(--c-safe); }
+.mac-rows { display: grid; gap: 2px; padding: 4px; border-radius: 12px; background: var(--mac-well-soft); border: 1px solid var(--mac-hairline); }
+.mac-row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; border-radius: 9px; font-size: 12.5px; color: var(--ink-2); }
+.mac-subhead { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--ink-3); }
+.mac-led { width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px; }
+.mac-led.is-ok { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.55); }
+.mac-led.is-warm { background: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
+.mac-led.is-hot { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.55); }
+.mac-led.is-idle { background: var(--ink-4); opacity: 0.55; }
+
+/* ---- the building window ---- */
+.mac-viewport { position: relative; flex: 1; min-height: 0; margin: 0 8px 8px; border-radius: 16px; overflow: hidden; background: var(--mac-viewport-bg); box-shadow: inset 0 0 0 1px var(--mac-hairline); }
+.mac-floors {
+  position: absolute; left: 50%; bottom: 14px; translate: -50% 0; z-index: 6; max-width: calc(100% - 24px); overflow-x: auto;
+  display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 15px; border-radius: 999px;
+  background: var(--mac-menu-bg); -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--mac-window-border); box-shadow: 0 16px 40px -18px rgba(30, 40, 90, 0.45);
+  animation: haven-rise 520ms var(--ease-expo) 120ms both;
+}
+.mac-floors-label { font-size: 12px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.mac-floor-seg { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--mac-well); }
+.mac-floor { position: relative; min-width: 36px; padding: 5px 10px; border-radius: 999px; font-size: 11.5px; color: var(--ink-3); transition: background-color 200ms ease, color 200ms ease, transform 260ms var(--ease-spring), box-shadow 200ms ease; }
+.mac-floor:hover { color: var(--ink-1); transform: translateY(-1px); }
+.mac-floor.is-on { background: var(--mac-thumb); color: var(--ink-1); box-shadow: 0 1px 3px rgba(30, 40, 90, 0.16); }
+.mac-floor-dot { position: absolute; top: 3px; right: 4px; width: 6px; height: 6px; border-radius: 999px; }
+.mac-hint {
+  position: absolute; top: 14px; left: 50%; translate: -50% 0; z-index: 6; pointer-events: none;
+  display: flex; align-items: center; gap: 9px; width: max-content; max-width: calc(100% - 32px); padding: 8px 15px; border-radius: 999px;
+  font-size: 12px; color: var(--ink-2); background: var(--mac-menu-bg);
+  -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); border: 1px solid var(--mac-window-border); box-shadow: 0 12px 30px -16px rgba(30, 40, 90, 0.4);
+  animation: haven-rise 520ms var(--ease-expo) 200ms both;
+}
+.mac-hint .calm-dot { flex-shrink: 0; }
+
+.mac-ops-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 14px 14px; }
+.mac-ops-body .glass { background: var(--mac-card-bg); border-color: var(--mac-card-border); box-shadow: var(--mac-shadow-card); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+@keyframes mac-drop { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes mac-pop { from { opacity: 0; transform: scale(0.95) translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ---- responsive: below a laptop the windows stack, the building first ---- */
+@media (max-width: 1100px) {
+  .mac-hide-md { display: none; }
+  .mac-workstation { min-width: 320px; }
+}
+@media (max-width: 900px) {
+  .mac-shell { height: auto; min-height: 100dvh; overflow: visible; padding: 10px; gap: 10px; }
+  .mac-nav { height: auto; min-height: 54px; flex-wrap: wrap; row-gap: 6px; padding: 8px; border-radius: 28px; }
+  .mac-main { flex-direction: column; gap: 10px; }
+  .mac-stage { order: -1; flex: none; height: 62vh; min-height: 360px; }
+  .mac-workstation, .mac-main.is-solo-left .mac-workstation { flex: none; min-width: 0; }
+  .mac-main.is-solo-right .mac-stage { height: calc(100dvh - 100px); }
+  .mac-scroll { overflow: visible; }
+  .mac-main.is-solo-left .mac-scroll { display: flex; }
+  .mac-ops { flex: none; }
+  .mac-ops-body { overflow: visible; }
+}
+@media (max-width: 640px) {
+  .mac-hide-sm { display: none; }
+  .mac-titlebar { flex-wrap: wrap; }
+  .mac-toolbar { margin-left: 0; }
+}
+
+/* the Buds switch in the pill: a label and a small track whose knob slides when the voice assistant is on */
+.mac-buds { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 8px 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); transition: background-color 160ms ease, color 160ms ease, transform 260ms var(--ease-spring); }
+.mac-buds:hover { background: var(--mac-hover); color: var(--ink-1); transform: translateY(-1px); }
+.mac-buds.is-on { color: var(--mac-accent-ink); background: var(--mac-accent-soft); }
+.mac-buds-track { position: relative; width: 26px; height: 16px; border-radius: 999px; background: rgba(40, 50, 110, 0.18); transition: background 260ms ease; }
+.dark .mac-buds-track { background: rgba(255, 255, 255, 0.18); }
+.mac-buds-track > span { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 320ms var(--ease-spring); }
+.mac-buds.is-on .mac-buds-track { background: var(--mac-grad); }
+.mac-buds.is-on .mac-buds-track > span { transform: translateX(10px); }
+
+/* ---- barebones: the story card, what happens next, the details behind one toggle ---- */
+.calm-howto { display: grid; gap: 6px; margin-top: 14px; }
+.calm-howto li { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.calm-howto b { display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; border-radius: 999px; font-size: 10.5px; font-weight: 700; color: #fff; background: var(--mac-grad); }
+.calm-more { margin-top: 12px; font-size: 12px; color: var(--ink-3); }
+.calm-more button { color: var(--mac-accent-ink); font-weight: 500; }
+.calm-more button:hover { text-decoration: underline; }
+.calm-more button:disabled { opacity: 0.45; pointer-events: none; }
+
+.mac-next { flex-shrink: 0; padding: 12px 16px 12px; border-radius: 16px; background: var(--mac-card-bg); border: 1px solid var(--mac-card-border); box-shadow: var(--mac-shadow-card); animation: haven-rise 420ms var(--ease-expo) 60ms both; }
+.mac-next-head { font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); }
+.mac-next ol { display: grid; gap: 6px; margin-top: 8px; }
+.mac-next li { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; line-height: 1.4; color: var(--ink-1); }
+.mac-next-time { flex-shrink: 0; min-width: 82px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; color: #c2570c; }
+.dark .mac-next-time { color: #fdba74; }
+.mac-next-msg { min-width: 0; }
+
+.mac-details-toggle { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 11px 16px; border-radius: 16px; text-align: left; font-size: 13px; font-weight: 600; color: var(--ink-1); background: var(--mac-well); transition: background-color 160ms ease; }
+.mac-details-toggle:hover { background: var(--mac-hover); }
+.mac-details-toggle small { display: block; margin-top: 1px; font-size: 11px; font-weight: 400; color: var(--ink-3); }
+.mac-details-toggle svg { flex-shrink: 0; color: var(--ink-3); transition: transform 380ms var(--ease-spring); }
+.mac-details-toggle.is-open svg { transform: rotate(180deg); }
+.mac-details { display: flex; flex-direction: column; gap: 10px; }
+
+.mac-menu-group { padding: 6px 10px 2px; font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-4); }
+
+/* the building window's two views: the live animation and the photoreal Blender model */
+.mac-render { position: absolute; top: 14px; left: 50%; translate: -50% 0; z-index: 12; max-width: calc(100% - 28px); animation: mac-drop 520ms var(--ease-expo) both; }
+.mac-render .mac-seg { padding: 4px; background: var(--mac-popover-bg); -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%); border: 1px solid var(--mac-window-border); box-shadow: 0 14px 36px -16px rgba(20, 30, 60, 0.55); }
+.mac-render .mac-seg::before { top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / var(--n, 2)); background: var(--mac-grad); box-shadow: 0 6px 16px -8px rgba(111, 141, 255, 0.9); }
+.mac-render .mac-seg-item { padding: 7px 16px; font-size: 12.5px; color: var(--ink-2); }
+.mac-render .mac-seg-item.is-on { color: #fff; }
+.mac-render-note { position: absolute; left: 14px; top: 72px; z-index: 10; max-width: min(320px, calc(100% - 28px)); padding: 8px 13px; border-radius: 14px; font-size: 11.5px; line-height: 1.45; color: var(--ink-2); background: var(--mac-popover-bg); border: 1px solid var(--mac-window-border); box-shadow: 0 12px 30px -18px rgba(20, 30, 60, 0.5); }

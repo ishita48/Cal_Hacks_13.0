@@ -1,7 +1,10 @@
-import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Activity, BookOpen, CircleHelp, Droplets, Gauge, Moon, X, PanelLeft, PanelRight, Pause, Play, Radio, RotateCcw, Share2, Smartphone, Sun } from 'lucide-react'
+import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  Activity, AudioLines, BellRing, BookOpen, Bot, Box, Building2, Camera, CircleHelp, ClipboardList, Gauge, HeartPulse, Map as MapIcon, Mail, Mic, Moon, MoreHorizontal,
+  MousePointerClick, Play, Radio, RotateCcw, Share2, SlidersHorizontal, Smartphone, Sun, Users, X,
+} from 'lucide-react'
 import { AgentConsole } from './components/AgentConsole'
-import { Buds } from './components/Buds'
+import { Buds, useBudsOn } from './components/Buds'
 import { CascadePanel } from './components/CascadePanel'
 import { Controls } from './components/Controls'
 import { FloorPlan } from './components/FloorPlan'
@@ -9,33 +12,56 @@ import { Guide, useGuide } from './components/Guide'
 import { ImpactLedger } from './components/ImpactLedger'
 import { Inspector, useSelection } from './components/Inspector'
 import { MessagesPanel } from './components/MessagesPanel'
-import { CalmView } from './components/CalmView'
 import { OpsView } from './components/OpsView'
 import { PlanPanel } from './components/PlanPanel'
-import { StoryStrip } from './components/StoryStrip'
 import { VoiceRule } from './components/VoiceRule'
+import { Glance, SystemHealth, Widget, glanceSummary, servicesLive, type CardId } from './components/Workstation'
 import { api, formatTimeOfDay } from './lib/api'
 import { useBuilding } from './state/building'
-import type { BudsFocus, Integrations, Level, SponsorReport } from './state/types'
+import type { BudsFocus, Clock, Integrations, Level, WorldState } from './state/types'
 import { connectWorld, useWorld } from './state/world'
+import { Panel } from './workstation/Panel'
+import './workstation.css'
 
-// The 3D twin is another view of the same store; it is lazy so the 2D app loads first.
+// Two views of the same store over the building: the live animation (generated from the spec) and the
+// photoreal Blender model (GLBs). Both are lazy, so the workstation loads first and the GLBs only on request.
+const Twin = lazy(() => import('./twin/Twin'))
 const Building3D = lazy(() => import('./components/Building3D'))
+
+type Render = 'live' | 'photo'
+const RENDER_KEY = 'haven.render'
+function loadRender(): Render {
+  try {
+    return localStorage.getItem(RENDER_KEY) === 'photo' ? 'photo' : 'live'
+  } catch {
+    return 'live'
+  }
+}
 
 // Selectors must return stable references: a fresh [] per call makes Zustand's getSnapshot loop.
 const NO_LEVELS: Level[] = []
 
-type RightTab = 'agents' | 'messages' | 'cascade'
-type LeftTab = 'inputs' | 'rule' | 'people' | 'selected'
 type View = '2d' | '3d'
-type Mode = 'calm' | 'incident' | 'ops'
+type Mode = 'overview' | 'ops'
+
+const CARDS_KEY = 'haven.cards'
+const DEFAULT_CARDS: Record<CardId, boolean> = { plan: true, glance: false, cascade: false, agents: false, people: false, messages: false, inputs: false, rule: false, system: false, selected: true }
+
+function loadCards(): Record<CardId, boolean> {
+  try {
+    const raw = localStorage.getItem(CARDS_KEY)
+    return raw ? { ...DEFAULT_CARDS, ...(JSON.parse(raw) as Partial<Record<CardId, boolean>>) } : DEFAULT_CARDS
+  } catch {
+    return DEFAULT_CARDS
+  }
+}
 
 /**
- * The command centre: a top bar (clock, the three buttons that drive the demo, the other surfaces),
- * the story strip (what is happening, in words, with the Maya switch and Approve), then three
- * columns: inputs on the left, the building in the middle, the plan and the agents on the right.
- * Every word and number on screen is read from the one world store; every control sends an input
- * event to the backend. Nothing about the building is named here: it all comes from the spec.
+ * The command centre, barebones: one story card on the left (what is happening, who is at risk, what HAVEN
+ * recommends, one button) and the building on the right, coloured only where something is wrong. Everything
+ * else (the plan step by step, the agents' negotiation, messages, levers, rules, system health) sits behind
+ * "Show details", and the rarely used views live in the ⋯ menu. Every word and number on screen is read from
+ * the one world store; every control sends an input event to the backend.
  */
 export default function App() {
   useEffect(() => connectWorld(), [])
@@ -57,35 +83,47 @@ export default function App() {
   }, [])
   const [level, setLevel] = useState('all')
   const [view, setView] = useState<View>('3d')
-  const [rightTab, setRightTab] = useState<RightTab>('agents')
-  const [leftTab, setLeftTab] = useState<LeftTab>('inputs')
-  // Both docks open on a wide screen; on a narrow one the stage comes first and T / N bring them back.
-  const [docks, setDocks] = useState(() => ({ left: window.innerWidth >= 1280, right: window.innerWidth >= 1100 }))
   const [connections, setConnections] = useState(false)
   const [selection, setSelection] = useSelection()
-  // Operations is the everyday view; the incident view opens by itself when the sensor fires.
-  const [mode, setMode] = useState<Mode>('calm')
+  const [mode, setMode] = useState<Mode>('overview')
+  const [details, setDetails] = useState(false)
+  const [render, setRenderState] = useState<Render>(loadRender)
+  const setRender = (r: Render) => {
+    setRenderState(r)
+    try {
+      localStorage.setItem(RENDER_KEY, r)
+    } catch {
+      /* the choice lasts this visit */
+    }
+  }
+  const [cards, setCards] = useState<Record<CardId, boolean>>(loadCards)
+  useEffect(() => {
+    try {
+      localStorage.setItem(CARDS_KEY, JSON.stringify(cards))
+    } catch {
+      /* a private window: the cards just forget */
+    }
+  }, [cards])
+  const toggleCard = (id: CardId) => setCards((c) => ({ ...c, [id]: !c[id] }))
+  // Open a detail card and bring it into view (the details open first).
+  const openCard = useCallback((id: CardId) => {
+    setMode('overview')
+    setDetails(true)
+    setCards((c) => (c[id] ? c : { ...c, [id]: true }))
+    setTimeout(() => document.getElementById(`card-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 120)
+  }, [])
+
+  // Operations is the everyday view; an incident always brings the building back.
   const stage = world?.narrative.stage ?? 'quiet'
   const prevStage = useRef(stage)
   useEffect(() => {
-    if (prevStage.current === 'quiet' && stage !== 'quiet') setMode((m) => (m === 'ops' ? 'calm' : m))
+    if (prevStage.current === 'quiet' && stage !== 'quiet') setMode('overview')
     prevStage.current = stage
   }, [stage])
   useEffect(() => {
-    if (selection && mode !== 'ops') {
-      setLeftTab('selected')
-      setDocks((d) => ({ ...d, left: true }))
-    }
-  }, [selection, mode])
-  const stripRef = useRef<HTMLElement>(null)
-  const [stripHeight, setStripHeight] = useState(180)
-  useEffect(() => {
-    const el = stripRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setStripHeight(el.getBoundingClientRect().height))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [mode, world != null])
+    if (selection && mode === 'overview' && details) openCard('selected')
+  }, [selection, mode, details, openCard])
+
   const drill = (kind: 'flood' | 'grid' | 'generator') => {
     if (stage !== 'quiet') return
     if (kind === 'flood' && sensorId) api.sensor(sensorId, 0.9).catch(() => {})
@@ -94,80 +132,78 @@ export default function App() {
   }
   const planLevel = level === 'all' ? (heroLevel ?? levels[levels.length - 1]?.id ?? 'all') : level
 
-  // Blender's habit: T hides the tool dock on the left, N the properties dock on the right.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (e.altKey || e.ctrlKey || e.metaKey || (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))) return
-      if (e.key === 't' || e.key === 'T') setDocks((d) => ({ ...d, left: !d.left }))
-      if (e.key === 'n' || e.key === 'N') setDocks((d) => ({ ...d, right: !d.right }))
+      if (e.key === 'd' || e.key === 'D') setDetails((d) => !d)
       if (e.key === '?') guide.setOpen(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Buds points at things: switch to the tab or floor that holds them first.
+  // Buds points at things: open the detail card or floor that holds them first.
   useEffect(() => {
     const onFocus = (e: Event) => {
       for (const f of (e as CustomEvent<BudsFocus[]>).detail ?? []) {
-        if (f.kind === 'tab' && (f.id === 'agents' || f.id === 'messages' || f.id === 'cascade')) {
-          setRightTab(f.id)
-          setDocks((d) => ({ ...d, right: true }))
-        }
-        if (f.kind === 'agent' || f.kind === 'message') {
-          setRightTab(f.kind === 'agent' ? 'agents' : 'messages')
-          setDocks((d) => ({ ...d, right: true }))
-        }
-        if (f.kind === 'step' || (f.kind === 'panel' && f.id === 'plan')) setDocks((d) => ({ ...d, right: true }))
-        if (f.kind === 'panel' && (f.id === 'controls' || f.id === 'voice' || f.id === 'ledger')) {
-          setDocks((d) => ({ ...d, left: true }))
-          setLeftTab(f.id === 'controls' ? 'inputs' : f.id === 'voice' ? 'rule' : 'people')
-        }
-        if (f.kind === 'tab' && (f.id === 'inputs' || f.id === 'rule' || f.id === 'people')) {
-          setLeftTab(f.id)
-          setDocks((d) => ({ ...d, left: true }))
-        }
+        if (f.kind === 'tab' && (f.id === 'agents' || f.id === 'messages' || f.id === 'cascade' || f.id === 'inputs' || f.id === 'rule' || f.id === 'people')) openCard(f.id)
+        if (f.kind === 'agent') openCard('agents')
+        if (f.kind === 'message') openCard('messages')
+        if (f.kind === 'step' || (f.kind === 'panel' && f.id === 'plan')) openCard('plan')
+        if (f.kind === 'panel' && (f.id === 'controls' || f.id === 'voice' || f.id === 'ledger')) openCard(f.id === 'controls' ? 'inputs' : f.id === 'voice' ? 'rule' : 'people')
         if (f.kind === 'level') setLevel(f.id)
       }
+      setMode('overview')
     }
     window.addEventListener('haven:focus', onFocus)
     return () => window.removeEventListener('haven:focus', onFocus)
-  }, [])
+  }, [openCard])
 
   if (!world || !clock) {
     return (
-      <div className="app-shell flex h-full flex-col items-center justify-center gap-3 text-t3">
+      <div className="mac-shell flex h-full flex-col items-center justify-center gap-3 text-t3">
         <span className="h-2 w-2 rounded-full bg-haven-blue haven-pulse" />
-        <span className="text-xs">connecting to the world…</span>
+        <span className="text-xs">connecting to the building…</span>
       </div>
     )
   }
 
-  const darkNow = new Set(world.impact.dark_levels)
-  const darkSoon = new Set(world.forecast.impact.dark_levels)
-  const wetLevels = new Set(world.wet_spaces.map((s) => s.split('-')[0]))
-  const shown = world.approved_plan ?? world.plan
-  const criticalMessages = shown.messages?.filter((m) => m.priority === 'critical').length ?? 0
-  const vetoes = world.plan.stances.filter((s) => s.stance === 'veto').length
-  const leftBehind = world.plan.left_behind.length
-  const quiet = world.narrative.stage === 'quiet'
   // The responder's phone link: the RA with something to do (a moving or done step), else the first RA.
   const actors = Object.values(world.actors)
   const responderActor = actors.find((a) => a.label.startsWith('RA') && a.status !== 'idle' && a.status !== 'offsite') ?? actors.find((a) => a.label.startsWith('RA')) ?? actors[0]
 
   return (
-    <div className={mode !== 'ops' ? 'app-shell flex h-screen flex-col gap-3 overflow-hidden p-3' : 'app-shell grid min-h-screen content-start gap-3 p-3'}>
-      <TopBar mode={mode} setMode={setMode} incident={stage !== 'quiet'} clock={clock} connection={connection} integrations={integrations} buildingName={spec?.name ?? ''} replay={world.mode === 'replay'} sensorId={sensorId} responder={responderActor?.actor ?? 'staff'} responderLabel={responderActor?.label ?? 'A responder'} onGuide={() => guide.setOpen(true)} replayRemaining={clock.replay_remaining} />
+    <div className={`mac-shell ${mode === 'ops' ? 'is-ops' : ''}`}>
+      <Nav
+        mode={mode}
+        setMode={setMode}
+        world={world}
+        clock={clock}
+        connection={connection}
+        buildingName={spec?.name ?? ''}
+        responder={responderActor?.actor ?? 'staff'}
+        responderLabel={responderActor?.label ?? 'A responder'}
+        onGuide={() => guide.setOpen(true)}
+        view={view}
+        setView={setView}
+        connections={connections}
+        setConnections={setConnections}
+      />
 
       {mode === 'ops' ? (
         <>
-          <OpsView world={world} onDrill={(kind) => { drill(kind); setMode('calm') }} />
+          <main className="mac-window mac-ops enter">
+            <TitleBar title="Operations" subtitle={`${spec?.name ?? ''} · an ordinary night`} onClose={() => setMode('overview')} />
+            <div className="mac-ops-body">
+              <OpsView world={world} onDrill={(kind) => { drill(kind); setMode('overview') }} />
+            </div>
+          </main>
           {selection && (
-            <aside className="ops-drawer glass enter" aria-label="Selected record">
+            <aside className="ops-drawer mac-window enter" aria-label="Selected record">
               <div className="flex items-center justify-between px-4 pt-3">
                 <span className="eyebrow">Record</span>
-                <button className="btn-secondary btn-icon" onClick={() => setSelection(null)} aria-label="Close record">
+                <button className="mac-icon-btn" onClick={() => setSelection(null)} aria-label="Close record">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -177,138 +213,50 @@ export default function App() {
             </aside>
           )}
         </>
-      ) : mode === 'calm' ? (
-        <main className="relative min-h-0 flex-1 overflow-hidden rounded-[22px]" data-buds="panel:map">
-          <div className="calm-stage">
-            <ViewErrorBoundary fallback={<FloorPlan world={world} level={planLevel} />}>
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
-                <Building3D level={level} connections={false} />
-              </Suspense>
-            </ViewErrorBoundary>
-          </div>
-          <CalmView world={world} clock={clock} onDetails={() => setMode('incident')} onOps={() => setMode('ops')} onDrill={drill} />
-        </main>
       ) : (
-      <>
-      <main className="relative min-h-0 flex-1 overflow-hidden rounded-[18px]" data-buds="panel:map">
-        {/* the stage: the twin fills the whole area; the 2D plan keeps clear of the docks so it stays legible */}
-        <div className="absolute inset-0" style={view === '2d' ? { paddingLeft: docks.left ? 318 : 12, paddingRight: docks.right ? 458 : 12, paddingTop: stripHeight + 18, paddingBottom: 64 } : undefined}>
-          {view === '3d' ? (
-            <ViewErrorBoundary fallback={<FloorPlan world={world} level={planLevel} />}>
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">streaming the building…</div>}>
-                <Building3D level={level} connections={connections} />
-              </Suspense>
-            </ViewErrorBoundary>
-          ) : (
-            <FloorPlan world={world} level={planLevel} connections={connections} />
-          )}
-        </div>
-        {/* the glass over it: nothing here catches the pointer except the panels themselves */}
-        <div className="pointer-events-none relative z-[6] flex h-full flex-col gap-3 p-3">
-          <section ref={stripRef} data-dock className="glass pointer-events-auto max-h-[46%] overflow-y-auto">
-            <StoryStrip world={world} clock={clock} />
-          </section>
-          <div className="flex min-h-0 flex-1 gap-3">
-        {docks.left && (
-          <aside data-dock className="glass pointer-events-auto flex w-[300px] min-h-0 shrink-0 flex-col overflow-hidden enter">
-            <div className="hairline-b flex items-center px-3 py-2.5">
-              <div className="seg">
-                {(['inputs', 'rule', 'people', 'selected'] as const).map((t) => (
-                  <button key={t} data-buds={`tab:${t}`} onClick={() => setLeftTab(t)} className={`seg-item ${leftTab === t ? 'is-on' : ''}`} title={t === 'inputs' ? 'The sensor and the levers: what can change the world' : t === 'rule' ? 'A rule from the manager, by voice or typed' : t === 'people' ? 'Who is affected, now or if nothing is done' : 'The record of whatever you clicked on the plan or the twin'}>
-                    {t === 'inputs' ? 'Inputs' : t === 'rule' ? 'Say a rule' : t === 'people' ? 'People' : 'Selected'}
-                    {t === 'rule' && world.rules.length > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-blue/15 px-1.5 text-[10px] font-semibold text-haven-blue">{world.rules.length}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {leftTab === 'inputs' ? <Controls world={world} /> : leftTab === 'rule' ? <VoiceRule world={world} /> : leftTab === 'people' ? <ImpactLedger world={world} clock={clock} /> : <Inspector world={world} selection={selection} />}
-            </div>
+        <main className="mac-main">
+          <aside className="mac-window mac-workstation enter" aria-label="What is happening">
+            <TitleBar title="What's happening" subtitle={spec?.name ?? ''} />
+            <Panel world={world} clock={clock} onDrill={drill} onDemo={() => api.loadDemo().catch(() => {})} onOps={() => setMode('ops')} onPlan={() => openCard('plan')} details={details} setDetails={setDetails}>
+              <Details world={world} clock={clock} cards={cards} toggle={toggleCard} connection={connection} integrations={integrations} selection={selection} clearSelection={() => setSelection(null)} />
+            </Panel>
           </aside>
-        )}
-
-
-            <div className="relative min-w-0 flex-1">
-              {quiet && (
-                <div className="stage-empty glass-card">
-                  <div className="text-[13px] font-semibold text-t1">A $4 water sensor sits on the basement floor by the riser.</div>
-                  <div className="mt-0.5 text-[11.5px] text-t2">Press Simulate leak, or trip the grid feed or the generator in Inputs. HAVEN traces what fails, the agents argue a plan, you approve it, and nobody gets left behind.</div>
-                </div>
-              )}
-              <div className="absolute bottom-0 left-0 max-w-full">
-          <div className="glass pointer-events-auto flex flex-wrap items-center gap-2 px-3 py-2" style={{ borderRadius: 14 }}>
-            <span className="eyebrow mr-1">{view === '3d' ? 'Building' : 'Floor'}</span>
-            <div className="seg">
-              {[...levels]
-                .sort((a, b) => b.index - a.index)
-                .map((lv) => {
-                  const now = darkNow.has(lv.id)
-                  const soon = !now && darkSoon.has(lv.id)
-                  const wet = wetLevels.has(lv.id)
-                  const on = view === '3d' ? level === lv.id : planLevel === lv.id
-                  return (
-                    <button key={lv.id} data-buds={`level:${lv.id}`} onClick={() => setLevel(lv.id)} className={`seg-item mono ${on ? 'is-on' : ''}`} title={lv.name}>
-                      {lv.id}
-                      {(now || soon || wet) && <span className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full ${now ? 'bg-haven-danger' : wet ? 'bg-haven-water' : 'bg-haven-amber haven-pulse'}`} />}
-                    </button>
-                  )
-                })}
+          <section className="mac-window mac-stage enter" aria-label="The building">
+            <TitleBar title="The building" subtitle={view === '2d' ? 'floor plan' : ''} />
+            <div className="mac-viewport" data-buds="panel:map">
+              <div className={`absolute inset-0 ${view === '2d' ? 'px-4 pt-4 pb-20' : ''}`}>
+                {view === '3d' ? (
+                  <ViewErrorBoundary key={render} fallback={<FloorPlan world={world} level={planLevel} />}>
+                    {render === 'live' ? (
+                      <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">drawing the building…</div>}>
+                        <Twin level={level} setLevel={setLevel} connections={connections} />
+                      </Suspense>
+                    ) : (
+                      <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-t3">loading the photoreal model…</div>}>
+                        <Building3D level={level} connections={connections} />
+                      </Suspense>
+                    )}
+                  </ViewErrorBoundary>
+                ) : (
+                  <FloorPlan world={world} level={planLevel} connections={connections} />
+                )}
+              </div>
               {view === '3d' && (
-                <button onClick={() => setLevel('all')} className={`seg-item ${level === 'all' ? 'is-on' : ''}`} title="Whole building">
-                  all
-                </button>
-              )}
-            </div>
-            <span className="label">{view === '3d' && level === 'all' ? 'whole building' : levels.find((l) => l.id === planLevel)?.name}</span>
-            <div className="seg seg-xs">
-              {(['3d', '2d'] as const).map((v) => (
-                <button key={v} onClick={() => setView(v)} className={`seg-item ${view === v ? 'is-on' : ''}`}>
-                  {v === '2d' ? '2D plan' : '3D twin'}
-                </button>
-              ))}
-            </div>
-            <button className={`seg-item ${connections ? 'is-on' : ''}`} style={{ background: connections ? undefined : 'var(--chip-bg)' }} onClick={() => setConnections((c) => !c)} title="Draw the dependency graph: what powers, controls and feeds what. Dead edges go grey.">
-              <Share2 className="mr-1 inline h-3 w-3" />
-              Connections
-            </button>
-            <Legend />
-            <div className="ml-auto flex items-center gap-1">
-              <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, left: !d.left }))} title={docks.left ? 'Hide the inputs column (T)' : 'Show the inputs column (T)'} aria-label="Toggle inputs">
-                <PanelLeft className="h-3.5 w-3.5" />
-              </button>
-              <button className="btn-secondary btn-icon" onClick={() => setDocks((d) => ({ ...d, right: !d.right }))} title={docks.right ? 'Hide the plan column (N)' : 'Show the plan column (N)'} aria-label="Toggle plan">
-                <PanelRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-              </div>
-            </div>
-        {docks.right && (
-          <aside data-dock className="pointer-events-auto grid w-[440px] min-h-0 shrink-0 grid-rows-[minmax(0,1.1fr)_minmax(0,1fr)] gap-3 enter">
-            <div className={`glass min-h-0 overflow-hidden p-4 ${leftBehind ? 'tint-red' : ''}`}>
-              <PlanPanel world={world} clock={clock} />
-            </div>
-            <div className="glass flex min-h-0 flex-col overflow-hidden">
-              <div className="hairline-b flex items-center px-4 py-2.5">
-                <div className="seg">
-                  {(['agents', 'messages', 'cascade'] as const).map((t) => (
-                    <button key={t} data-buds={`tab:${t}`} onClick={() => setRightTab(t)} className={`seg-item ${rightTab === t ? 'is-on' : ''}`} title={t === 'agents' ? 'Who is in the negotiation and what each one says' : t === 'messages' ? 'Every person gets their own message, in their language' : 'What fails next and when, then what has happened'}>
-                      {t === 'agents' ? 'The agents' : t === 'messages' ? 'Messages' : 'Cascade'}
-                      {t === 'agents' && vetoes > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-danger px-1.5 text-[10px] font-semibold text-white">{vetoes}</span>}
-                      {t === 'messages' && criticalMessages > 0 && <span className="ml-1.5 inline-block rounded-full bg-haven-blue/15 px-1.5 text-[10px] font-semibold text-haven-blue">{criticalMessages}</span>}
+                <div className="mac-render">
+                  <div className="mac-seg" style={{ ['--n' as string]: 2, ['--i' as string]: render === 'live' ? 0 : 1 }} role="tablist" aria-label="How the building is drawn">
+                    <button role="tab" aria-selected={render === 'live'} className={`mac-seg-item ${render === 'live' ? 'is-on' : ''}`} onClick={() => setRender('live')} title="Generated from the building's plans: water, power, people and responders animated live">
+                      <Activity className="h-3.5 w-3.5" /> Live animation
                     </button>
-                  ))}
+                    <button role="tab" aria-selected={render === 'photo'} className={`mac-seg-item ${render === 'photo' ? 'is-on' : ''}`} onClick={() => setRender('photo')} title="The photorealistic model built in Blender from the same spec, tinted by the same world state">
+                      <Camera className="h-3.5 w-3.5" /> Photoreal
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-hidden p-4">{rightTab === 'agents' ? <AgentConsole world={world} /> : rightTab === 'messages' ? <MessagesPanel world={world} clock={clock} /> : <CascadePanel world={world} clock={clock} />}</div>
+              )}
+              <Floors world={world} levels={levels} level={level} setLevel={setLevel} planLevel={planLevel} view={view} />
             </div>
-          </aside>
-        )}
-
-          </div>
-        </div>
-      </main>
-      </>
+          </section>
+        </main>
       )}
       {guide.open && <Guide world={world} onClose={guide.close} />}
       <Buds />
@@ -316,98 +264,286 @@ export default function App() {
   )
 }
 
-function TopBar({ mode, setMode, incident, clock, connection, integrations, buildingName, replay, sensorId, responder, responderLabel, onGuide, replayRemaining }: { mode: Mode; setMode: (m: Mode) => void; incident: boolean; clock: NonNullable<ReturnType<typeof useWorld.getState>['clock']>; connection: string; integrations: Integrations | null; buildingName: string; replay: boolean; sensorId: string | null; responder: string; responderLabel: string; onGuide: () => void; replayRemaining: number }) {
+/* ---- the details: every card the full workstation had, folded ---------------------------------------- */
+
+function Details({ world, clock, cards, toggle, connection, integrations, selection, clearSelection }: {
+  world: WorldState
+  clock: Clock
+  cards: Record<CardId, boolean>
+  toggle: (id: CardId) => void
+  connection: string
+  integrations: Integrations | null
+  selection: ReturnType<typeof useSelection>[0]
+  clearSelection: () => void
+}) {
+  const agentInfo = useBuilding((b) => b.agents)
+  const live = world.plan
+  const approved = world.approved_plan
+  const shown = approved ?? live
+  const quiet = world.narrative.stage === 'quiet'
+  const leftBehind = live.left_behind.length
+  const vetoes = live.stances.filter((s) => s.stance === 'veto').length
+  const criticalMessages = shown.messages?.filter((m) => m.priority === 'critical').length ?? 0
+  const messages = shown.messages?.length ?? 0
+  const doneSteps = approved ? approved.steps.filter((s) => world.actions[s.id]?.status === 'done').length : 0
+  const agentIds = Object.keys(world.agents)
+  const speaking = agentIds.filter((a) => world.agents[a]).length
+  const needs = world.impact.residents.length
+  const coming = world.forecast.events.length
+  const happened = world.timeline.filter((t) => t.severity !== 'info').length
+  const [live_, total] = servicesLive(integrations)
+  const icon = (I: typeof Bot) => <I className="h-4 w-4" />
+  const planSummary = shown.status === 'none'
+    ? 'No plan needed right now'
+    : approved
+      ? approved.status === 'done' ? `Done · all ${approved.steps.length} steps complete` : `Approved · ${doneSteps} of ${approved.steps.length} steps done`
+      : `Draft v${live.version} · ${live.steps.length} steps · waiting for you`
+
+  return (
+    <div className="mac-details enter">
+      {selection && (
+        <Widget id="selected" icon={icon(MousePointerClick)} title="Selected" summary="What you clicked on the building" open={cards.selected} onToggle={() => toggle('selected')}>
+          <Inspector world={world} selection={selection} />
+          <button className="btn-secondary btn-sm mt-3" onClick={clearSelection}>
+            <X className="h-3 w-3" /> Clear selection
+          </button>
+        </Widget>
+      )}
+      <Widget id="plan" icon={icon(ClipboardList)} title="The plan" summary={planSummary} badge={leftBehind ? `${leftBehind} left behind` : null} badgeTone="violet" tone={leftBehind ? 'red' : undefined} open={cards.plan} onToggle={() => toggle('plan')} bodyClass="mac-fixed">
+        <PlanPanel world={world} clock={clock} />
+      </Widget>
+      <Widget id="agents" icon={icon(Bot)} title="How the agents decided" summary={`${speaking} of ${agentIds.length || Object.keys(agentInfo).length} agents speaking${quiet ? '' : vetoes ? ` · ${vetoes} object` : ' · in agreement'}`} badge={vetoes || null} badgeTone="red" open={cards.agents} onToggle={() => toggle('agents')} bodyClass="mac-fixed" buds="tab:agents">
+        <AgentConsole world={world} />
+      </Widget>
+      <Widget id="people" icon={icon(Users)} title="People" summary={needs ? `${needs} need help now or soon` : 'Everyone is fine'} badge={needs || null} badgeTone="amber" open={cards.people} onToggle={() => toggle('people')} bodyClass="mac-fixed" buds="tab:people">
+        <ImpactLedger world={world} clock={clock} />
+      </Widget>
+      <Widget id="messages" icon={icon(Mail)} title="Messages" summary={messages ? `${messages} ready, each in its reader's language` : 'Nothing to send'} badge={criticalMessages || null} open={cards.messages} onToggle={() => toggle('messages')} bodyClass="mac-fixed" buds="tab:messages">
+        <MessagesPanel world={world} clock={clock} />
+      </Widget>
+      <Widget id="cascade" icon={icon(BellRing)} title="Timeline" summary={quiet ? 'Nothing to report' : `${coming} expected if nobody acts · ${happened} so far`} open={cards.cascade} onToggle={() => toggle('cascade')} bodyClass="mac-fixed" buds="tab:cascade">
+        <CascadePanel world={world} clock={clock} />
+      </Widget>
+      <Widget id="rule" icon={icon(Mic)} title="Say a rule" summary={world.rules.length ? `${world.rules.length} rule${world.rules.length === 1 ? '' : 's'} in force` : 'Tell HAVEN a constraint, by voice or typed'} badge={world.rules.length || null} open={cards.rule} onToggle={() => toggle('rule')} buds="tab:rule">
+        <VoiceRule world={world} />
+      </Widget>
+      <Widget id="inputs" icon={icon(SlidersHorizontal)} title="Controls" summary="The sensor, the valves and the breakers" open={cards.inputs} onToggle={() => toggle('inputs')} buds="tab:inputs">
+        <Controls world={world} />
+      </Widget>
+      <Widget id="glance" icon={icon(Building2)} title="Building at a glance" summary={glanceSummary(world)} open={cards.glance} onToggle={() => toggle('glance')}>
+        <Glance world={world} />
+      </Widget>
+      <Widget id="system" icon={icon(HeartPulse)} title="System" summary={`${connection === 'open' ? 'Connected' : connection}${integrations ? ` · ${live_} of ${total} services live` : ''}${world.mode === 'replay' ? ' · replay' : ''}`} tone={connection !== 'open' ? 'amber' : undefined} open={cards.system} onToggle={() => toggle('system')}>
+        <SystemHealth world={world} clock={clock} connection={connection} integrations={integrations} />
+      </Widget>
+    </div>
+  )
+}
+
+/* ---- the floor picker under the building ---------------------------------------------------------- */
+
+function Floors({ world, levels, level, setLevel, planLevel, view }: { world: WorldState; levels: Level[]; level: string; setLevel: (l: string) => void; planLevel: string; view: View }) {
+  const darkNow = new Set(world.impact.dark_levels)
+  const darkSoon = new Set(world.forecast.impact.dark_levels)
+  const wetLevels = new Set(world.wet_spaces.map((s) => s.split('-')[0]))
+  return (
+    <div className="mac-floors" data-dock>
+      <span className="mac-floors-label">{view === '3d' && level === 'all' ? 'Whole building' : levels.find((l) => l.id === planLevel)?.name}</span>
+      <div className="mac-floor-seg" role="group" aria-label="Floors">
+        {view === '3d' && (
+          <button onClick={() => setLevel('all')} className={`mac-floor ${level === 'all' ? 'is-on' : ''}`} title="Whole building">
+            All
+          </button>
+        )}
+        {[...levels]
+          .sort((a, b) => b.index - a.index)
+          .map((lv) => {
+            const now = darkNow.has(lv.id)
+            const soon = !now && darkSoon.has(lv.id)
+            const wet = wetLevels.has(lv.id)
+            const on = view === '3d' ? level === lv.id : planLevel === lv.id
+            return (
+              <button key={lv.id} data-buds={`level:${lv.id}`} onClick={() => setLevel(lv.id)} className={`mac-floor mono ${on ? 'is-on' : ''}`} title={`${lv.name}${now ? ' · dark now' : soon ? ' · dark if nothing is done' : ''}${wet ? ' · water' : ''}`}>
+                {lv.id}
+                {(now || soon || wet) && <span className={`mac-floor-dot ${wet ? 'bg-haven-water' : now ? 'bg-haven-danger' : 'bg-haven-amber haven-pulse'}`} />}
+              </button>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+
+/* ---- window chrome --------------------------------------------------------------------------------- */
+
+function TitleBar({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose?: () => void; children?: ReactNode }) {
+  return (
+    <header className="mac-titlebar">
+      <div className="mac-lights" aria-hidden={!onClose}>
+        <button className="mac-light is-close" onClick={onClose} disabled={!onClose} title={onClose ? 'Close' : undefined} aria-label="Close" />
+        <span className="mac-light is-min" />
+        <span className="mac-light is-zoom" />
+      </div>
+      <div className="mac-title">
+        <span className="mac-title-main">{title}</span>
+        {subtitle && <span className="mac-title-sub">{subtitle}</span>}
+      </div>
+      {children && <div className="mac-toolbar">{children}</div>}
+    </header>
+  )
+}
+
+function Nav({ mode, setMode, world, clock, connection, buildingName, responder, responderLabel, onGuide, view, setView, connections, setConnections }: {
+  mode: Mode
+  setMode: (m: Mode) => void
+  world: WorldState
+  clock: Clock
+  connection: string
+  buildingName: string
+  responder: string
+  responderLabel: string
+  onGuide: () => void
+  view: View
+  setView: (v: View) => void
+  connections: boolean
+  setConnections: (f: (c: boolean) => boolean) => void
+}) {
   const [error, setError] = useState<string | null>(null)
+  const [menu, setMenu] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const budsOn = useBudsOn((b) => b.on)
+  const toggleBuds = useBudsOn((b) => b.toggle)
+  useEffect(() => {
+    if (!menu) return
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(false)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(false)
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
   const act = (fn: () => Promise<unknown>) => () => {
     setError(null)
+    setMenu(false)
     fn().catch((e: Error) => setError(e.message))
   }
+  const quiet = world.narrative.stage === 'quiet'
+  const done = world.approved_plan?.status === 'done'
+  const replay = world.mode === 'replay'
+  const status = quiet ? 'All quiet' : done ? 'Resolved' : world.approved_plan ? 'HAVEN is acting' : 'Incident'
+  const dot = quiet ? 'is-calm' : done ? 'is-ok' : world.approved_plan ? 'is-acting' : 'is-hot'
   return (
-    <header className="app-topnav flex h-14 items-center gap-3 px-4">
-      <a href="/story" className="flex items-center gap-2.5 transition-opacity hover:opacity-80" title="The story: how HAVEN works">
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/[0.06] bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_24px_-8px_rgba(15,98,254,0.45)] dark:border-white/10 dark:bg-white/[0.06]">
-          <span className="h-2.5 w-2.5 rounded-full bg-haven-blue" style={{ boxShadow: '0 0 0 4px rgba(15,98,254,0.18)' }} />
+    <header className="mac-nav">
+      <a href="/story" className="mac-brand" title="The story: how HAVEN works">
+        <span className="mac-logo">
+          <span />
         </span>
-        <span className="text-left leading-tight">
-          <span className="block text-[14px] font-semibold tracking-[0.14em] text-t1">HAVEN</span>
-          <span className="argus-eyebrow block">{buildingName || 'command centre'}</span>
+        <span className="leading-tight">
+          <span className="block text-[13.5px] font-semibold tracking-[0.12em] text-t1">HAVEN</span>
+          <span className="mac-hide-sm block max-w-[200px] truncate text-[10.5px] text-t3">{buildingName || 'command centre'}</span>
         </span>
       </a>
-      <div className="seg ml-2" role="tablist" aria-label="View">
-        <button role="tab" aria-selected={mode === 'calm'} className={`seg-item ${mode === 'calm' ? 'is-on' : ''}`} onClick={() => setMode('calm')} title="The building and one card: what is happening, the risk, the recommendation, the action">
-          Overview
-        </button>
-        <button role="tab" aria-selected={mode === 'ops'} className={`seg-item flex items-center gap-1.5 ${mode === 'ops' ? 'is-on' : ''}`} onClick={() => setMode('ops')} title="Energy, plant health and the resilience audit: the building on an ordinary day">
-          <Gauge className="h-3.5 w-3.5" /> Operations
-        </button>
-        <button role="tab" aria-selected={mode === 'incident'} className={`seg-item flex items-center gap-1.5 ${mode === 'incident' ? 'is-on' : ''}`} onClick={() => setMode('incident')} title="The live incident: the building, the plan, the agents">
-          <Activity className="h-3.5 w-3.5" /> Details
-          {incident && <span className="h-1.5 w-1.5 rounded-full bg-haven-danger haven-pulse" />}
-        </button>
+
+      <div className="mac-status" title={world.narrative.headline}>
+        <span className={`calm-dot ${dot}`} />
+        <span className="font-medium text-t1">{status}</span>
+        <span className="mac-hide-sm mono text-t3">{formatTimeOfDay(clock.time_of_day)}</span>
+        {replay && <span className="pill pill-amber pill-mono">replay · {clock.replay_remaining}</span>}
+        {connection !== 'open' && <span className="pill pill-red">{connection}</span>}
       </div>
-      {mode === 'calm' ? (
-        <div className="ml-auto flex items-center gap-2">
-          {replay && <span className="pill pill-amber pill-mono">REPLAY · {replayRemaining} left</span>}
-          <span className="flex items-center gap-1.5 text-[11px] text-t2" title={connection}>
-            <span className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-haven-amber' : 'bg-haven-danger'}`} style={{ boxShadow: connection === 'open' ? '0 0 8px rgba(34,197,94,0.6)' : undefined }} />
-            {connection === 'open' ? 'live' : connection}
-          </span>
-          <button className="btn-secondary btn-icon" onClick={onGuide} title="Guide (?)" aria-label="Guide">
-            <CircleHelp className="h-3.5 w-3.5" />
+
+      <div className="ml-auto flex items-center gap-1.5">
+        {error && <span className="mac-hide-sm max-w-[220px] truncate text-[11px] text-haven-danger" title={error}>{error}</span>}
+        {mode === 'ops' && (
+          <button className="mac-chip" onClick={() => setMode('overview')}>
+            <Building2 className="h-3.5 w-3.5" /> Back to the building
           </button>
-          <ThemeToggle />
+        )}
+        <div className="relative" ref={menuRef}>
+          <button className={`mac-nav-btn ${menu ? 'is-on' : ''}`} onClick={() => setMenu((m) => !m)} title="More" aria-label="More" aria-expanded={menu} aria-haspopup="menu">
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+          {menu && (
+            <div className="mac-menu" role="menu">
+              <div className="mac-menu-group">Demo</div>
+              <button role="menuitem" className="mac-menu-item" onClick={act(api.loadDemo)}>
+                <Play className="h-3.5 w-3.5" />
+                <span>
+                  Watch the recorded demo<small>Leak, the Maya moment, a rule, approval, done, at 5×</small>
+                </span>
+              </button>
+              <button role="menuitem" className="mac-menu-item" onClick={act(api.reset)}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>
+                  Start over<small>A quiet building, a new run</small>
+                </span>
+              </button>
+              <hr className="mac-menu-sep" />
+              <div className="mac-menu-group">Views</div>
+              <button role="menuitem" className="mac-menu-item" onClick={() => { setMode(mode === 'ops' ? 'overview' : 'ops'); setMenu(false) }}>
+                <Gauge className="h-3.5 w-3.5" />
+                <span>
+                  {mode === 'ops' ? 'Back to the building' : 'Operations'}
+                  <small>Energy, plant health, the resilience audit</small>
+                </span>
+              </button>
+              <button role="menuitemcheckbox" aria-checked={view === '2d'} className="mac-menu-item" onClick={() => { setView(view === '3d' ? '2d' : '3d'); setMenu(false) }}>
+                {view === '3d' ? <MapIcon className="h-3.5 w-3.5" /> : <Box className="h-3.5 w-3.5" />}
+                <span>
+                  {view === '3d' ? 'Flat floor plan' : '3D building'}
+                  <small>{view === '3d' ? 'One floor, drawn like a map' : 'Back to the 3D view'}</small>
+                </span>
+              </button>
+              <button role="menuitemcheckbox" aria-checked={connections} className="mac-menu-item" onClick={() => { setConnections((c) => !c); setMenu(false) }}>
+                <Share2 className="h-3.5 w-3.5" />
+                <span>
+                  {connections ? 'Hide connections' : 'Show connections'}
+                  <small>What powers and feeds what</small>
+                </span>
+              </button>
+              <button role="menuitemcheckbox" aria-checked={budsOn} className="mac-menu-item" onClick={() => { toggleBuds(); setMenu(false) }}>
+                <AudioLines className="h-3.5 w-3.5" />
+                <span>
+                  {budsOn ? 'Turn Buds off' : 'Turn on Buds'}
+                  <small>{budsOn ? 'The voice assistant is on (Alt+B)' : 'Ask about the building by voice (Alt+B)'}</small>
+                </span>
+              </button>
+              <hr className="mac-menu-sep" />
+              <div className="mac-menu-group">Other screens</div>
+              <a role="menuitem" className="mac-menu-item" href="/phone" target="_blank" rel="noreferrer" onClick={() => setMenu(false)}>
+                <Smartphone className="h-3.5 w-3.5" />
+                <span>
+                  Manager's phone<small>Approve from a phone</small>
+                </span>
+              </a>
+              <a role="menuitem" className="mac-menu-item" href={`/phone?as=${responder}`} target="_blank" rel="noreferrer" onClick={() => setMenu(false)}>
+                <Radio className="h-3.5 w-3.5" />
+                <span>
+                  Responder's phone<small>{responderLabel} confirms steps</small>
+                </span>
+              </a>
+              <a role="menuitem" className="mac-menu-item" href="/story">
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>
+                  The story<small>How HAVEN works</small>
+                </span>
+              </a>
+              <hr className="mac-menu-sep" />
+              <p className="px-3 pt-1 pb-1.5 text-[10.5px] text-t3">
+                <kbd>D</kbd> details · <kbd>?</kbd> guide
+              </p>
+            </div>
+          )}
         </div>
-      ) : (
-      <>
-      <div className="ml-3 flex items-center gap-2.5">
-        <span className="mono num text-[24px] leading-none text-t1" title="Simulated time of day">
-          {formatTimeOfDay(clock.time_of_day)}
-        </span>
-        <button className="btn-secondary btn-icon" onClick={act(() => api.clock({ playing: !clock.playing }))} title={clock.playing ? 'Pause the clock' : 'Play'} aria-label={clock.playing ? 'Pause' : 'Play'}>
-          {clock.playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-        </button>
-        <div className="seg seg-xs" title="Simulation speed">
-          {[1, 5, 20, 60].map((s) => (
-            <button key={s} className={`seg-item mono ${clock.speed === s ? 'is-on' : ''}`} onClick={act(() => api.clock({ speed: s }))}>
-              {s}×
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="ml-auto flex items-center gap-2">
-        {error && <span className="text-[11px] text-haven-danger">{error}</span>}
-        {replay && <span className="pill pill-amber pill-mono">REPLAY · {replayRemaining} left</span>}
-        <button onClick={act(() => (sensorId ? api.sensor(sensorId, 0.9) : Promise.resolve()))} disabled={replay || !sensorId} className="argus-btn flex items-center gap-2 rounded-full px-3.5 py-2 text-[12.5px] font-semibold text-white disabled:opacity-40" title="Send the reading the ESP32 would send: the first input event of the incident" data-buds="panel:simulate">
-          <Droplets className="h-3.5 w-3.5" /> Simulate leak
-        </button>
-        <button className="btn-secondary btn-sm" onClick={act(api.reset)} title="A quiet building, a new run in the event log">
-          <RotateCcw className="h-3 w-3" /> New run
-        </button>
-        <button className="btn-secondary btn-sm" onClick={act(api.loadDemo)} title="Replay the recorded run at 5×: leak, the Maya moment, a spoken rule, approval, HAVEN acting">
-          Replay demo
-        </button>
-        <span className="mx-1 h-6 w-px bg-black/10 dark:bg-white/10" />
-        <a className="btn-secondary btn-icon" href="/phone" target="_blank" rel="noreferrer" title="The manager's phone: approve from a phone" aria-label="Manager's phone">
-          <Smartphone className="h-3.5 w-3.5" />
-        </a>
-        <a className="btn-secondary btn-icon" href={`/phone?as=${responder}`} target="_blank" rel="noreferrer" title={`A responder's phone: ${responderLabel} confirms steps`} aria-label="Responder's phone">
-          <Radio className="h-3.5 w-3.5" />
-        </a>
-        <a className="btn-secondary btn-icon" href="/story" title="The story: how it works" aria-label="The story">
-          <BookOpen className="h-3.5 w-3.5" />
-        </a>
-        {integrations && <IntegrationStrip flags={integrations} />}
-        <span className="flex items-center gap-1.5 text-[11px] text-t2" title={connection}>
-          <span className={`h-2 w-2 rounded-full ${connection === 'open' ? 'bg-haven-safe' : connection === 'connecting' ? 'bg-haven-amber' : 'bg-haven-danger'}`} style={{ boxShadow: connection === 'open' ? '0 0 8px rgba(34,197,94,0.6)' : undefined }} />
-          {connection === 'open' ? 'live' : connection}
-        </span>
-        <button className="btn-secondary btn-icon" onClick={onGuide} title="Guide (?)" aria-label="Guide">
-          <CircleHelp className="h-3.5 w-3.5" />
+        <button className="mac-nav-btn" onClick={onGuide} title="Guide (?)" aria-label="Guide">
+          <CircleHelp className="h-4 w-4" />
         </button>
         <ThemeToggle />
       </div>
-      </>
-      )}
     </header>
   )
 }
@@ -429,8 +565,8 @@ function ThemeToggle() {
     }
   }, [dark])
   return (
-    <button className="btn-secondary btn-icon" onClick={() => setDark((d) => !d)} title={dark ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme">
-      {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+    <button className="mac-nav-btn" onClick={() => setDark((d) => !d)} title={dark ? 'Light mode' : 'Dark mode'} aria-label="Toggle theme">
+      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
     </button>
   )
 }
@@ -446,97 +582,4 @@ class ViewErrorBoundary extends Component<{ fallback: ReactNode; children: React
   render() {
     return this.state.failed ? this.props.fallback : this.props.children
   }
-}
-
-function Legend() {
-  const item = (color: string, label: string, round = false) => (
-    <span className="flex items-center gap-1.5">
-      <span className={`inline-block h-2 w-2 ${round ? 'rounded-full' : 'rounded-[3px]'}`} style={{ background: color }} />
-      {label}
-    </span>
-  )
-  return (
-    <div className="hidden items-center gap-3 text-[10px] text-t3 xl:flex">
-      {item('#0284c7', 'water')}
-      {item('rgba(220,38,38,0.6)', 'dark now')}
-      {item('rgba(217,119,6,0.7)', 'dark if nothing is done')}
-      {item('#16a34a', 'step-free route')}
-      {item('#dc2626', 'person at risk', true)}
-      {item('#7c3aed', 'left behind', true)}
-      {item('#0284c7', 'responder')}
-    </div>
-  )
-}
-
-/** Which sponsor integrations are live in this backend (key-gated; dim = simulated). Click for the proof. */
-function IntegrationStrip({ flags }: { flags: Integrations }) {
-  const [open, setOpen] = useState(false)
-  const [report, setReport] = useState<SponsorReport | null>(null)
-  const [checking, setChecking] = useState(false)
-  const check = (fresh: boolean) => {
-    setChecking(true)
-    api
-      .sponsors(fresh)
-      .then(setReport)
-      .catch(() => {})
-      .finally(() => setChecking(false))
-  }
-  useEffect(() => {
-    if (open && !report) check(false)
-  }, [open, report])
-  const items: [string, boolean, string][] = [
-    ['fetch.ai', flags.fetch, flags.agentverse ? 'resident agents on Agentverse' : flags.fetch ? 'resident agents as local uAgents' : 'HAVEN_FETCH=0'],
-    ['claude', flags.llm, flags.negotiation ? 'agents reason with Claude; Buds' : flags.llm ? 'rule parsing fallback + explanations + Buds' : 'set ANTHROPIC_API_KEY'],
-    ['elevenlabs', flags.elevenlabs, flags.elevenlabs ? (flags.voice_agent ? 'voice + live voice agent' : "HAVEN's voice") : 'set ELEVENLABS_API_KEY (next: Cartesia, then browser)'],
-    ['cartesia', flags.cartesia, flags.cartesia ? 'second voice' : 'set CARTESIA_API_KEY'],
-    ['tiger', flags.tiger, flags.tiger ? 'sensor time-series' : 'set TIGER_DATABASE_URL (event log used)'],
-    ['twilio', flags.twilio, flags.twilio ? 'real plumber call + demo text' : 'set TWILIO_* (call simulated)'],
-    ['linear', flags.linear, flags.linear ? 'real facilities ticket' : 'set LINEAR_API_KEY (ticket simulated)'],
-  ]
-  const live = items.filter((i) => i[1]).length
-  return (
-    <span className="relative flex items-center">
-      <button className="flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white/70 px-3 py-1.5 text-[11px] font-medium text-t2 hover:bg-white dark:border-white/[0.08] dark:bg-white/[0.05] dark:hover:bg-white/[0.1]" onClick={() => setOpen((o) => !o)} title="Sponsor integrations: click for live proof">
-        <span className={`h-2 w-2 rounded-full ${live ? 'bg-haven-safe' : 'bg-t4'}`} />
-        Live stack · {live}/{items.length}
-      </button>
-      {open && (
-        <div className="glass absolute top-10 right-0 z-50 w-[460px] p-3 text-left" style={{ borderRadius: 14 }}>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="eyebrow">Live stack · round-trip proof</span>
-            <span className="flex items-center gap-2">
-              {report && (
-                <span className="mono text-[10px] text-t3">
-                  {report.live}/{report.sponsors.length} live
-                </span>
-              )}
-              <button className="btn-secondary btn-sm" disabled={checking} onClick={() => check(true)}>
-                {checking ? 'checking…' : 'Re-check'}
-              </button>
-            </span>
-          </div>
-          {!report ? (
-            <p className="text-[11px] text-t3">checking every sponsor…</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {report.sponsors.map((s) => (
-                <li key={s.id} className="flex items-start gap-2 text-[11px]">
-                  <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${s.state === 'live' ? 'bg-haven-safe' : s.state === 'error' ? 'bg-haven-danger' : 'bg-t4'}`} style={s.state === 'live' ? { boxShadow: `0 0 8px ${s.color}` } : undefined} />
-                  <span className="w-24 shrink-0 font-semibold text-t1">{s.name}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-t2">{s.role}</span>
-                    <span className={`mono block text-[10px] ${s.state === 'live' ? 'text-haven-safe' : s.state === 'error' ? 'text-haven-danger' : 'text-t3'}`}>
-                      {s.proof}
-                      {s.latency_ms != null ? ` · ${s.latency_ms} ms` : ''}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-2 text-[10px] text-t3">A read-only request per service whose answer only the live service could give. Keys: backend/.env (see README).</p>
-        </div>
-      )}
-    </span>
-  )
 }
