@@ -19,7 +19,7 @@ or by hand:
 
 ```bash
 cd backend  && uv run --env-file .env uvicorn haven.api.app:create_app --factory --port 8000   # --env-file once backend/.env exists
-cd frontend && npm install && npm run dev        # http://localhost:5173 (proxies /api and /ws)
+cd frontend && npm install && npm run dev        # http://localhost:5173 landing, /app command centre (proxies /api and /ws)
 cd backend  && uv run pytest -q                  # 74 tests, a few minutes
 cd frontend && npx tsc -b && npx vitest run      # typecheck + 14 tests
 ```
@@ -101,6 +101,9 @@ Judges ask. Here is the honest list.
   the world's clock, not the theme: the scenario runs at 23:41, so it is a night scene in which every window shows
   whether its room has power (warm when lit, amber and breathing when the forecast says it goes dark, black when
   it is dark) and who is awake (a room whose resident is in and awake is lit; a sleeper's is dim).
+- **/** is the landing page: one night at Blackwell Hall in six scroll-driven chapters over the live 3D building
+  (the same GLBs, dressed as pastel clay and glass), then what it does, who it is for, and the way in. The command
+  centre lives at **/app**. The landing reads no world state and runs without the backend.
 - **/story** is the editorial page: the sensor-to-plan cascade, the agents, a "one shared state" room that shows
   the real event log of the current run, and the sponsor proofs. Light paper, one blue; the dashboard stays dark.
 - **Live stack**: click the sponsor strip in the header for a round-trip proof per integration (`GET /api/sponsors`):

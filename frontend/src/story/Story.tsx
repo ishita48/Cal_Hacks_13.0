@@ -107,7 +107,7 @@ function Nav() {
           <a href="#live">One shared state</a>
           <a href="#hood">Under the hood</a>
         </nav>
-        <a href="/" className="btn btn--primary nav__cta">
+        <a href="/app" className="btn btn--primary nav__cta">
           Open the command centre <span className="btn__arrow">→</span>
         </a>
         <span className="nav__progress" aria-hidden="true">
@@ -195,7 +195,7 @@ function Hero() {
             on approval. Every surface is a view of one event-sourced world.
           </p>
           <div className="hero__ctas">
-            <a href="/" className="btn btn--primary">
+            <a href="/app" className="btn btn--primary">
               Open the command centre <span className="btn__arrow">→</span>
             </a>
             <a href="#how" className="btn btn--ghost">
@@ -458,7 +458,7 @@ function Final() {
       <div className="container">
         <RevealLines className="h2" lines={['Connected failure,', <span className="serif" key="s">connected response.</span>, 'Nobody left behind.']} />
         <div className="fin__ctas">
-          <a href="/" className="btn btn--primary">Open the command centre <span className="btn__arrow">→</span></a>
+          <a href="/app" className="btn btn--primary">Open the command centre <span className="btn__arrow">→</span></a>
           <a href="/phone" className="btn btn--ghost">The manager’s phone</a>
         </div>
       </div>

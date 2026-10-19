@@ -130,7 +130,12 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   `text-t1` / `bg-haven-*` utilities repaint); `App.tsx` is the shell (floating `app-sidebar` + `app-topnav`, stat
   tiles, three columns). The floor plan reads `--fp-*` variables from `.floorplan`, `src/story/Story.tsx` (+ `story.css`, scoped `.argus`: the editorial page at
   `/story`, live event log + sponsor proofs), `src/lib/speak.ts` (ElevenLabs → Cartesia → browser, interruptible),
-  `src/lib/voice.ts` (Web Speech push-to-talk / hands-free with echo guard). Routes in `main.tsx`: `/`, `/phone`, `/story`.
+  `src/lib/voice.ts` (Web Speech push-to-talk / hands-free with echo guard). Routes in `main.tsx` (each page a lazy chunk): `/` the landing page, `/app` the
+  command centre, `/phone`, `/story`. `src/landing/` (scoped `.lp`, `landing.css`) is the public landing: one night in six
+  chapters (calm, leak, ripple, people, plan, together) told by one number, `progress.ts` `storyT` (-1 hero … 5 last chapter),
+  that drives both the horizontal-scroll chapter cards (motion + lenis) and `Scene3D` (a fixed R3F canvas that dresses the same
+  GLBs as pastel clay: lit windows, an x-ray shell, water in the glass basement, coral runs to the plant, Maya's window, the mint
+  route). It reads no world state and needs no backend; the bento below it is illustrative micro-demos (the Maya switch, approve).
 - `firmware/haven_sensor/haven_sensor.ino` — ESP32 + resistive probe → `POST /api/sensor` with
   `X-Haven-Token`; posts on every wet/dry crossing and a 15 s heartbeat. Calibrate DRY_RAW / WET_RAW from Serial.
 - `blender/` — scripted exterior built from the same building spec (Phase 3). `haven_live.py` is the live link:
