@@ -29,7 +29,7 @@
 .argus *, .argus *::before, .argus *::after { box-sizing: border-box; }
 .argus h1, .argus h2, .argus h3, .argus p, .argus ul, .argus ol, .argus figure { margin: 0; }
 .argus ul, .argus ol { padding: 0; list-style: none; }
-.argus button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.argus button:where(:not([class*="cl-"])) { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 .argus a { color: inherit; text-decoration: none; }
 .argus ::selection { background: var(--blue); color: #fff; }
 .argus .container { width: 100%; max-width: var(--max); margin-inline: auto; padding-inline: var(--gutter); }
@@ -77,6 +77,8 @@
 .argus .nav__links { display: flex; gap: 4px; margin-inline: auto; }
 .argus .nav__links a { padding: 8px 12px; border-radius: var(--r-pill); font-size: .9rem; color: var(--ink-2); }
 .argus .nav__links a:hover { background: rgba(16,17,20,.05); color: var(--ink); }
+.argus .nav__signin { padding: 8px 14px; border-radius: var(--r-pill); font-size: .9rem; font-weight: 550; color: var(--ink); white-space: nowrap; }
+.argus .nav__signin:hover { background: rgba(16,17,20,.05); }
 .argus .nav__cta { min-height: 42px; padding: 0 18px; font-size: .9rem; }
 .argus .nav__progress { position: absolute; left: 24px; right: 24px; bottom: 0; height: 1.5px; overflow: hidden; border-radius: 2px; }
 .argus .nav__progress span { display: block; height: 100%; background: var(--blue); transform-origin: left; transform: scaleX(0); }

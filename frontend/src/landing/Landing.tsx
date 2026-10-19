@@ -22,6 +22,8 @@ const Scene3D = lazy(() => import('./Scene3D'))
  */
 
 const APP_URL = '/app'
+// With Clerk on, /app opens on the sign-in card; the nav says so.
+const SIGN_IN = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY)
 
 type Tone = 'blue' | 'water' | 'coral' | 'lavender' | 'mint' | 'peach'
 interface Chapter {
@@ -253,6 +255,7 @@ function Nav({ go }: { go: (id: string) => (e: React.MouseEvent) => void }) {
         <a href="#teams" onClick={go('teams')}>Who it’s for</a>
         <a href="/story">Deep dive</a>
       </nav>
+      {SIGN_IN && <a href={APP_URL} className="lp-nav__signin">Sign in</a>}
       <Magnetic href={APP_URL} className="lp-btn--primary lp-btn--sm">Open HAVEN <ArrowUpRight size={15} /></Magnetic>
     </motion.header>
   )

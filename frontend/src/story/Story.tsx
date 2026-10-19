@@ -107,6 +107,11 @@ function Nav() {
           <a href="#live">One shared state</a>
           <a href="#hood">Under the hood</a>
         </nav>
+        {import.meta.env.VITE_CLERK_PUBLISHABLE_KEY && (
+          <a href="/app" className="nav__signin">
+            Sign in
+          </a>
+        )}
         <a href="/app" className="btn btn--primary nav__cta">
           Open the command centre <span className="btn__arrow">→</span>
         </a>
