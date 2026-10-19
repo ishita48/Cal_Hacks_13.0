@@ -1,0 +1,12 @@
+{
+  "name": "haven-glb-tools",
+  "private": true,
+  "type": "module",
+  "description": "Derived GLBs for the web (see landing.mjs). npm install here, then node landing.mjs.",
+  "dependencies": {
+    "@gltf-transform/core": "^4.2.1",
+    "@gltf-transform/extensions": "^4.2.1",
+    "@gltf-transform/functions": "^4.2.1",
+    "meshoptimizer": "^0.25.0"
+  }
+}

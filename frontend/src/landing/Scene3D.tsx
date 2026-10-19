@@ -2,6 +2,7 @@ import { ContactShadows, Environment, Lightformer, Line, useGLTF } from '@react-
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { heavy } from '../lib/assets'
 import { moods, pointer, prefersReducedMotion, smooth, storyT, tags } from './progress'
 
 /**
@@ -14,8 +15,10 @@ import { moods, pointer, prefersReducedMotion, smooth, storyT, tags } from './pr
  * glTF is y-up: x east, z south, y up.
  */
 
-const EXTERIOR_URL = '/models/blackwell.glb'
-const INTERIOR_URL = '/models/blackwell_interior.glb'
+// Landing-only cuts of the same GLBs (blender/glb_optimize.mjs): no textures or UVs, since every material is
+// replaced here; the interior keeps only the equipment. 1.4 MB (0.4 MB gzipped) instead of 7.7 MB.
+const EXTERIOR_URL = heavy('/landing/landing_exterior.glb')
+const INTERIOR_URL = heavy('/landing/landing_equipment.glb')
 useGLTF.preload(EXTERIOR_URL)
 useGLTF.preload(INTERIOR_URL)
 

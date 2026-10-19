@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 from ..integrations import actions, cartesia, elevenlabs, fetch
@@ -49,6 +50,8 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # The spec, the roster and the graph are a few hundred KB of JSON each; gzip makes them ~10x smaller.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
     @app.get("/api/health")
     async def health():
@@ -56,7 +59,7 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
 
     @app.get("/api/state")
     async def get_state():
-        return engine.snapshot()
+        return engine.snapshot(full=True)
 
     @app.get("/api/building")
     async def get_building():
@@ -539,7 +542,7 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         try:
             while True:
                 msg = await q.get()
-                await socket.send_json(msg)
+                await socket.send_text(msg)
         except (WebSocketDisconnect, asyncio.CancelledError, RuntimeError):
             pass
         finally:

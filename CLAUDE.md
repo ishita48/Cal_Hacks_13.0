@@ -40,7 +40,9 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     in spec order so every replay stays bit-identical; a rederive (forecast + plan) costs ~0.5 s, not 6 s.
   - `haven/world/engine.py` the single mutator: clock loop, persistence, broadcast, replay.
   - `haven/world/store.py` append-only event log (SQLite locally).
-  - `haven/api/app.py` HTTP + `/ws` (every client receives identical state frames).
+  - `haven/api/app.py` HTTP + `/ws` (every client receives identical state frames: `engine.frame()` encodes each one
+    once for all subscribers and leaves out `FRAME_EXCLUDE`, i.e. `spoken`, which only the planner reads; `GET /api/state`
+    is complete). HTTP responses are gzipped (`GZipMiddleware`): the spec and roster go from ~200 KB to ~15 KB.
     Inputs: `POST /api/sensor` (reading) and `POST /api/command` (valve close/open, breaker off/on).
   - `haven/agents/models.py` + `planner.py` the negotiation (Phase 3): a `Plan` is a derived view, a pure function of
     (impact, forecast, `state.agents`, `state.rules`). Round 1 is the naive proposal, every enabled agent evaluates
@@ -162,7 +164,14 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   logged as inputs — replay re-derives them. `state.impact` is what is true now; `state.forecast` is what the
   same physics says will happen if nobody acts. Both are views, recomputed on every physical change.
 - State frames must stay small (≈45 KB at the worst point): flagged residents are objects, everyone else is an
-  id resolved against the cached roster on the client.
+  id resolved against the cached roster on the client. A field no client reads goes in `FRAME_EXCLUDE`.
+- Heavy public files (`public/models`, `public/landing`, `public/env`) are fetched through `heavy(path)`
+  (`src/lib/assets.ts`): `vite.assets.ts` versions them by content (`?v=<hash>`) so the host caches them for a year
+  (`vercel.json`, `vite preview`), and a build writes `.glb.gz` beside each GLB, served with `Content-Encoding: gzip`
+  (CDNs do not compress `model/gltf-binary`; meshopt GLBs shrink to 30-70 %). The landing loads its own cuts
+  (`blender/glb/landing.mjs`: no textures or UVs, interior equipment only), 1.4 MB instead of 7.7 MB. Pages and
+  Clerk are lazy chunks. In three.js, a transparent `DoubleSide` material re-selects its program on every draw
+  (two passes, `needsUpdate` each): give it `forceSinglePass = true`.
 - Building geometry lives in one spec (`backend/haven/building/`); graph, nav grids, 3D and Blender all derive from it.
   Coordinates are metres: x east, y north, z up; origin at the SW corner (Dana St × Durant Ave).
 - Work phase by phase; test before moving on; commit after each checkpoint.

@@ -78,3 +78,17 @@ def test_responders_start_at_home_and_are_in_every_frame():
     # A leak alone moves nobody: responders move only on approved, executed steps.
     asyncio.run(eng.submit(SensorReading(sensor_id="basement_mech_1", value=0.9)))
     assert all(a.status in ("idle", "offsite") for a in eng.state.actors.values())
+
+
+def test_frame_is_encoded_once_and_leaves_out_what_clients_never_read():
+    """A /ws frame is one JSON string shared by every subscriber; `spoken` stays server-side (GET /api/state)."""
+    import json
+
+    eng = WorldEngine(EventStore())
+    q = eng.subscribe()
+    text = q.get_nowait()
+    assert isinstance(text, str)
+    frame = json.loads(text)
+    assert frame["type"] == "state" and "spoken" not in frame["state"]
+    assert frame["state"]["actors"] == eng.snapshot()["state"]["actors"]
+    assert "spoken" in eng.snapshot(full=True)["state"]

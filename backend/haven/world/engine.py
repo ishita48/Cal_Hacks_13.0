@@ -8,6 +8,7 @@
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 from typing import Any, Callable
@@ -23,6 +24,9 @@ from .store import EventStore
 log = logging.getLogger("haven.engine")
 
 TICK_SECONDS = 0.1  # real seconds between loop iterations / broadcasts
+# What clients never read leaves the frame: `spoken` (every stance logged for the last situations) is the
+# planner's input, kept in the state and served whole by GET /api/state, but it is a third of a frame.
+FRAME_EXCLUDE = {"spoken"}
 MAX_STEPS_PER_TICK = 60  # = MAX_SPEED * TICK_SECONDS / DT; if a tick runs late the sim slows, it never jumps
 STEP_FRAME_HZ = 2.0  # frames per second when only the clock advanced (every version change is sent at once)
 MAX_SPEED = 120.0
@@ -44,7 +48,7 @@ class WorldEngine:
         self.playing = True
         self.speed = 1.0
         self._step_budget = 0.0
-        self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._subscribers: set[asyncio.Queue[str]] = set()
         self._replay_queue: list[LoggedEvent] = []
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
@@ -116,17 +120,22 @@ class WorldEngine:
 
     # ---- subscriptions ---------------------------------------------------------------
 
-    def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
-        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=8)
+    def subscribe(self) -> asyncio.Queue[str]:
+        q: asyncio.Queue[str] = asyncio.Queue(maxsize=8)
         self._subscribers.add(q)
-        q.put_nowait(self.snapshot())
+        q.put_nowait(self.frame())
         return q
 
-    def unsubscribe(self, q: asyncio.Queue[dict[str, Any]]) -> None:
+    def unsubscribe(self, q: asyncio.Queue[str]) -> None:
         self._subscribers.discard(q)
 
-    def snapshot(self) -> dict[str, Any]:
-        return {"type": "state", "clock": self.clock(), "state": self.state.model_dump(mode="json")}
+    def snapshot(self, full: bool = False) -> dict[str, Any]:
+        state = self.state.model_dump(mode="json", exclude=None if full else FRAME_EXCLUDE)
+        return {"type": "state", "clock": self.clock(), "state": state}
+
+    def frame(self) -> str:
+        """The state frame as text, encoded once and shared by every subscriber."""
+        return json.dumps(self.snapshot(), ensure_ascii=False, separators=(",", ":"))
 
     def clock(self) -> dict[str, Any]:
         sim_time = self.state.sim_time
@@ -260,7 +269,9 @@ class WorldEngine:
                     fn(self.state)
                 except Exception:  # a listener (the agent network) must never break the world
                     log.exception("plan listener failed")
-        msg = self.snapshot()
+        if not self._subscribers:
+            return
+        msg = self.frame()
         for q in list(self._subscribers):
             if q.full():  # slow client: drop its stale frame, keep the newest
                 with contextlib.suppress(asyncio.QueueEmpty):

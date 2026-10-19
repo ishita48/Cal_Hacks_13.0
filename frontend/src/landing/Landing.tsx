@@ -8,6 +8,7 @@ import {
   useTransform, type MotionValue,
 } from 'motion/react'
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { heavy } from '../lib/assets'
 import { CountUp, EASE, Glass, Magnetic, Reveal, ScrubText, SplitWords } from './parts'
 import { CHAPTER_COUNT, clamp01, dwell, moods, pointer, prefersReducedMotion, storyT, tags } from './progress'
 import './landing.css'
@@ -197,7 +198,7 @@ function PersonTag() {
 }
 
 function StillBuilding() {
-  return <div className="lp-still" style={{ backgroundImage: 'url(/landing/aerial.webp)' }} />
+  return <div className="lp-still" style={{ backgroundImage: `url(${heavy('/landing/aerial.webp')})` }} />
 }
 
 function Loader() {
@@ -438,7 +439,7 @@ function RippleCard() {
       <CardHead icon={<Waves size={18} />} title="See the ripple before it spreads" tone="water">
         One leak touches pipes, power, lifts and people. HAVEN follows the whole chain, so you see what’s next.
       </CardHead>
-      <div className="lp-ripple__art" aria-hidden="true"><img src="/landing/cutaway.webp" alt="" loading="lazy" decoding="async" /></div>
+      <div className="lp-ripple__art" aria-hidden="true"><img src={heavy('/landing/cutaway.webp')} alt="" loading="lazy" decoding="async" /></div>
       <ol className="lp-ripple" aria-label="How one leak spreads">
         {RIPPLE.map((n, i) => (
           <li key={n.label} className={i < step ? 'is-hit' : ''}>
@@ -611,7 +612,7 @@ function PlaceCard() {
   const y = useTransform(scrollYProgress, [0, 1], ['-12%', '12%'])
   return (
     <Glass className="lp-card lp-place" ref={ref}>
-      <motion.img src="/landing/street.webp" alt="David Blackwell Hall, a seven-storey residence hall on Durant Avenue in Berkeley, rendered in 3D" style={{ y }} loading="lazy" decoding="async" />
+      <motion.img src={heavy('/landing/street.webp')} alt="David Blackwell Hall, a seven-storey residence hall on Durant Avenue in Berkeley, rendered in 3D" style={{ y }} loading="lazy" decoding="async" />
       <div className="lp-place__cap">
         <span className="lp-chip tone-blue"><Building2 size={14} /> Rehearsed on a real building</span>
         <p>David Blackwell Hall, Berkeley. Seven floors, 250 residents.</p>
@@ -669,7 +670,7 @@ function Finale() {
     <section ref={ref} className="lp-finale" aria-labelledby="finale-title">
       <motion.div className="lp-finale__frame" style={{ scale, rotateX: rot }}>
         <Glass className="lp-finale__card" tilt>
-          <img src="/landing/aerial.webp" alt="" loading="lazy" decoding="async" />
+          <img src={heavy('/landing/aerial.webp')} alt="" loading="lazy" decoding="async" />
           <div className="lp-finale__veil" />
           <div className="lp-finale__copy">
             <p className="lp-pill"><span className="lp-dot lp-dot--mint" /> Calm by default</p>

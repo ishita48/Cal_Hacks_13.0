@@ -7,6 +7,14 @@
     { "source": "/api/:path*", "destination": "https://YOUR-RAILWAY-APP.up.railway.app/api/:path*" }
   ],
   "headers": [
-    { "source": "/models/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
+    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
+    { "source": "/(models|landing|env)/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
+    {
+      "source": "/(models|landing)/(.*)\.glb\.gz",
+      "headers": [
+        { "key": "Content-Type", "value": "model/gltf-binary" },
+        { "key": "Content-Encoding", "value": "gzip" }
+      ]
+    }
   ]
 }
