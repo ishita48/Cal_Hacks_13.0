@@ -67,7 +67,9 @@ If the tab is missing after reopening the file (Blender's "Auto Run Python Scrip
 `haven_live.py` (also embedded in the .blend) adds a **HAVEN: live world** panel to the same HAVEN tab (N in the
 3D viewport). Open `blackwell.blend`, press Connect with the backend at `http://127.0.0.1:8000`, and the panel
 mirrors the world state into a `Live` collection: water sheets per space, dark / soon floor tints, equipment
-status, `person_<id>` figures (violet = left behind), `agent_<actor>` responders, routes and a HUD. Its buttons
+status, `person_<id>` figures (violet = left behind), `agent_<actor>` responders, routes and a HUD that reads
+`state.narrative` (stage, headline, what comes next; the panel also shows the ask) so Blender tells the same
+story as the dashboard. Its buttons
 POST inputs back to the backend (start the leak, toggle Maya's agent, approve the plan, speak a rule, speed).
 Headless snapshot of the live state:
 

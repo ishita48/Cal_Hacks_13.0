@@ -536,9 +536,13 @@ def apply_state(frame, index, snap=False):
 
     plan = state.get("approved_plan") or state.get("plan", {})
     m = plan.get("metrics", {})
-    headline = plan.get("headline") or "No incident. Blackwell Hall is quiet."
-    hud = (f"{_hm(clock.get('time_of_day', 0))}   ·   " + "\n".join(_wrap(headline, 72)) + "\n"
-           f"{int(m.get('residents_affected', 0))} affected  ·  {int(m.get('left_behind', len(left)))} left behind"
+    story = state.get("narrative") or {}              # the story so far, derived by the backend (Phase 12)
+    headline = story.get("headline") or plan.get("headline") or "No incident. Blackwell Hall is quiet."
+    stage = story.get("stage")
+    hud = ((f"[{stage.upper()}]   " if stage else "") + f"{_hm(clock.get('time_of_day', 0))}   ·   "
+           + "\n".join(_wrap(headline, 72)) + "\n"
+           + ("\n".join(_wrap(story["next"], 72)) + "\n" if story.get("next") else "")
+           + f"{int(m.get('residents_affected', 0))} affected  ·  {int(m.get('left_behind', len(left)))} left behind"
            f"  ·  plan {plan.get('status', 'none')} v{plan.get('version', 0)}"
            + ("  ·  REPLAY" if state.get("mode") == "replay" else ""))
     roof = max(lv["elevation"] + lv["height"] for lv in index.levels.values())
@@ -777,8 +781,16 @@ class HAVEN_PT_live(bpy.types.Panel):
             box.label(text=f"{_hm(ck.get('time_of_day', 0))}  ·  {st['mode']}  ·  step {st['step']}  ·  v{st['version']}",
                       icon="TIME")
             plan = st.get("approved_plan") or st["plan"]
-            for line in _wrap(plan.get("headline") or "No incident."):
+            story = st.get("narrative") or {}
+            if story.get("stage"):
+                box.label(text=story["stage"].upper(), icon="INFO")
+            for line in _wrap(story.get("headline") or plan.get("headline") or "No incident."):
                 box.label(text=line)
+            for line in _wrap(story.get("next") or ""):
+                box.label(text=line)
+            if story.get("ask"):
+                for line in _wrap(story["ask"]):
+                    box.label(text=line, icon="QUESTION")
             m = plan.get("metrics", {})
             if plan.get("status", "none") != "none":
                 box.label(text=f"{int(m.get('residents_affected', 0))} affected · {int(m.get('left_behind', 0))} left behind"
