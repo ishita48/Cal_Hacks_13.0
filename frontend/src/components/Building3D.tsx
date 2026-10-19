@@ -2,6 +2,7 @@ import { Environment, Lightformer, Line, OrbitControls, OrthographicCamera, useG
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
+import { heavy } from '../lib/assets'
 import { STATUS_COLOR } from '../lib/labels'
 import { useBuilding } from '../state/building'
 import { useWorld } from '../state/world'
@@ -21,14 +22,14 @@ import { select } from './Inspector'
  * glTF is y-up: a spec point (x, y, z) in metres lands at three.js (x, z, -y).
  */
 
-const EXTERIOR_URL = '/models/blackwell.glb'
-const INTERIOR_URL = '/models/blackwell_interior.glb'
+const EXTERIOR_URL = heavy('/models/blackwell.glb')
+const INTERIOR_URL = heavy('/models/blackwell_interior.glb')
 // Optional files: furniture split out so the shell and interior stream first; the site (streets,
 // neighbours, trees, props, people) exported by blender/build_blackwell.py --glb-site. Missing = fine.
-const FURNITURE_URL = '/models/blackwell_furniture.glb'
-const SITE_URL = '/models/blackwell_site.glb'
+const FURNITURE_URL = heavy('/models/blackwell_furniture.glb')
+const SITE_URL = heavy('/models/blackwell_site.glb')
 // The exact HDRI the Blender scene uses (blender/build_blackwell.py); light formers stand in when it is absent.
-const SKY_URL = '/env/sky_2k.hdr'
+const SKY_URL = heavy('/env/sky_2k.hdr')
 
 /**
  * The sun as Blender has it, so daytime shadows and highlights fall where the renders put them. Spec
@@ -79,6 +80,21 @@ export interface Label {
   priority: number // lower = placed first (keeps its spot in a crowd)
   buds?: string
   select?: { kind: 'resident' | 'equipment' | 'space'; id: string }
+}
+
+/**
+ * three.js draws a transparent double-sided material in two passes (back faces, then front) and flips its
+ * `side` with `needsUpdate` each time, so every such draw re-selects a shader program: thousands of times a
+ * second with the Blender glass, which is all double-sided. One pass looks the same for thin glass.
+ */
+function singlePass(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if (m.transparent && m.side === THREE.DoubleSide) m.forceSinglePass = true
+    }
+  })
 }
 
 /** Walk up from a clicked mesh to the first object that names a space or a piece of equipment. */
@@ -219,6 +235,8 @@ function Scene({ level, connections = false, overlay, night }: Props & { overlay
     }
     visit(exterior.scene)
     visit(interior.scene)
+    singlePass(exterior.scene)
+    singlePass(interior.scene)
     return out
   }, [exterior.scene, interior.scene])
 
@@ -559,7 +577,7 @@ const REL_COLOR_3D: Record<string, string> = { powers: '#2f7bff', backs_up: '#a7
 function Connections({ index, level, levelIndex }: { index: Indexed; level: string; levelIndex: Record<string, number> }) {
   const graph = useBuilding((b) => b.graph)
   const equipment = useBuilding((b) => b.equipment)
-  const live = useWorld((s) => s.world?.power.live)
+  const live = useStable(useWorld((s) => s.world?.power.live))
   const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
   const liveSet = useMemo(() => new Set(live ?? []), [live])
   const lines = useMemo(() => {
@@ -609,8 +627,20 @@ function FlowLine({ a, b, color, dead, water }: { a: THREE.Vector3; b: THREE.Vec
 
 // ---- routes and stranded rings -----------------------------------------------------------------
 
+/**
+ * The previous value while its content is unchanged. Every state frame (1-5 a second) is fresh JSON, so without
+ * this a frame that changed nothing still rebuilt every line's geometry, and a shifted key remounted them all:
+ * unmounting the last LineMaterial frees its shader, and every line then recompiled (~50 ms a frame).
+ */
+function useStable<T>(value: T): T {
+  const ref = useRef<{ key: string; value: T } | null>(null)
+  const key = JSON.stringify(value ?? null)
+  if (!ref.current || ref.current.key !== key) ref.current = { key, value }
+  return ref.current.value
+}
+
 function Routes({ level, levelIndex, levelElev, spaces }: { level: string; levelIndex: Record<string, number>; levelElev: Record<string, number>; spaces: Record<string, Space> }) {
-  const routes = useWorld((s) => s.world?.impact.routes)
+  const routes = useStable(useWorld((s) => s.world?.impact.routes))
   const residents = useWorld((s) => s.world?.impact.residents)
   const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)
 
@@ -620,8 +650,9 @@ function Routes({ level, levelIndex, levelElev, spaces }: { level: string; level
       if (!path) continue
       let cur: [number, number, number][] = []
       let curLevel: string | null = null
+      let n = 0 // per resident, so one route changing does not shift (and remount) everyone else's lines
       const flush = () => {
-        if (cur.length > 1 && curLevel && (levelIndex[curLevel] ?? 0) <= focus) out.push({ key: `${rid}-${out.length}`, points: cur })
+        if (cur.length > 1 && curLevel && (levelIndex[curLevel] ?? 0) <= focus) out.push({ key: `${rid}-${n++}`, points: cur })
         cur = []
       }
       for (const sid of path) {
@@ -992,6 +1023,7 @@ function Furniture({ level, levelIndex }: { level: string; levelIndex: Record<st
       const li = Number(o.userData?.level_index)
       if (!Number.isNaN(li) && o.userData?.level_index !== undefined) out.push({ mesh: o, index: li })
     })
+    singlePass(furniture.scene)
     return out
   }, [furniture.scene])
   useEffect(() => {
@@ -1043,6 +1075,7 @@ function Site({ level, levelIndex, night }: { level: string; levelIndex: Record<
         }
       }
     })
+    singlePass(site.scene)
   }, [site.scene, night])
   useEffect(() => {
     const focus = level === 'all' ? Infinity : (levelIndex[level] ?? Infinity)

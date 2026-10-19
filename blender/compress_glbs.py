@@ -6,6 +6,7 @@ Defaults to the four files in frontend/public/models, rewritten in place. Runs g
 Node) with only name-preserving passes: dedup, resize, webp, meshopt. No join / flatten / optimize, because
 those merge nodes and would lose win_<space_id>, eq_<id>, floor_<id> names and the level_index extras the
 frontend keys on. The loader needs MeshoptDecoder registered (three/examples/jsm/libs/meshopt_decoder.module.js).
+Then run the web passes in blender/glb (optimize.mjs, landing.mjs); see blender/README.md.
 """
 
 import argparse

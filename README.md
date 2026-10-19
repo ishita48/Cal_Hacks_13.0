@@ -108,7 +108,7 @@ Judges ask. Here is the honest list.
   texture-free cut of the GLBs, 0.4 MB gzipped); the command centre about 0.5 MB. GLBs, the HDRI and the renders are
   fetched by content-versioned URLs and cached for a year, GLBs as precompressed `.glb.gz` (`frontend/vite.assets.ts`,
   `vercel.json`); the API is gzipped and `/ws` frames leave out what no client reads. After the Blender GLBs change,
-  run `blender/compress_glbs.py`, then `cd blender/glb && npm install && node landing.mjs`.
+  run `blender/compress_glbs.py`, then `cd blender/glb && npm install && node optimize.mjs && node landing.mjs`.
 - **/story** is the editorial page: the sensor-to-plan cascade, the agents, a "one shared state" room that shows
   the real event log of the current run, and the sponsor proofs. Light paper, one blue; the dashboard stays dark.
 - **Live stack**: click the sponsor strip in the header for a round-trip proof per integration (`GET /api/sponsors`):

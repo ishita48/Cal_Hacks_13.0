@@ -2,11 +2,12 @@
   "name": "haven-glb-tools",
   "private": true,
   "type": "module",
-  "description": "Derived GLBs for the web (see landing.mjs). npm install here, then node landing.mjs.",
+  "description": "Web passes over the GLBs: optimize.mjs (after compress_glbs.py), then landing.mjs.",
   "dependencies": {
     "@gltf-transform/core": "^4.2.1",
     "@gltf-transform/extensions": "^4.2.1",
     "@gltf-transform/functions": "^4.2.1",
-    "meshoptimizer": "^0.25.0"
+    "meshoptimizer": "^0.25.0",
+    "sharp": "0.35.5"
   }
 }

@@ -159,6 +159,11 @@ and brick; without the fetched textures the GLBs carry base colours only.
 - `compress_glbs.py` — post-export pass over the four GLBs (needs Node): dedup, textures to 1k WebP, meshopt geometry
   (`EXT_meshopt_compression` + `KHR_mesh_quantization`), names and extras untouched; ~100 MB becomes ~20 MB. The
   loader must register `MeshoptDecoder` from `three/examples/jsm/libs/meshopt_decoder.module.js`.
+- `glb/` — the web passes, run after `compress_glbs.py` (`cd blender/glb && npm install && node optimize.mjs && node
+  landing.mjs`). `optimize.mjs` shrinks flat-colour textures to 4x4 in all four files and, in `blackwell_site.glb` only,
+  instances repeated props, simplifies the street tree and joins the rest per material (489 -> 66 draw calls, 4.2 -> 1.6 M
+  triangles); names and extras of the other three files are untouched. `landing.mjs` writes the landing page's cuts
+  (`frontend/public/landing/landing_*.glb`: no textures or UVs, interior equipment only).
 - `run_build.py` — runs the build with Python output captured to `renders/last_build.log` (the Store
   `blender-launcher.exe` does not pass its console to a redirected shell).
 - `render_cycles.py` — path-traced stills from the saved .blend in a second headless Blender.
