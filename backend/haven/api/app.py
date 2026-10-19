@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..integrations import actions, cartesia, elevenlabs, fetch, resend
@@ -46,6 +47,44 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
 
     app = FastAPI(title="HAVEN world-state service", lifespan=lifespan)
     app.state.engine = engine
+    from .portal import install as install_portal, socket_viewer
+    install_portal(app, engine)
+
+    @app.middleware("http")
+    async def authorize_legacy(request: Request, call_next):
+        # The existing command centre is an administrator surface. New role-scoped
+        # routes authorize individual operations themselves. Deny unknown legacy routes.
+        path = request.url.path
+        # The building's geometry names no one (the landing ships the same model), so the public story can read it.
+        # Everything that holds people, plans or logs stays admin-only.
+        public = {"/api/health", "/api/me", "/api/integrations", "/api/building"}
+        if request.method != "OPTIONS" and path.startswith("/api/") and path not in public and not path.startswith("/api/portal/"):
+            machine = path == "/api/sensor" and sensor_token and request.headers.get("x-haven-token") == sensor_token
+            webhook = path.startswith("/api/twilio/answer/")
+            try:
+                if webhook and auth.configured():
+                    import base64
+                    import hashlib
+                    import hmac
+                    secret = os.environ.get("TWILIO_AUTH_TOKEN", "")
+                    base = os.environ.get("HAVEN_PUBLIC_URL", "").rstrip("/")
+                    if not secret or not base:
+                        raise HTTPException(403, "Webhook not configured")
+                    # Parse cached bytes rather than consuming the downstream form stream.
+                    from urllib.parse import parse_qs
+                    form = parse_qs((await request.body()).decode())
+                    url = base + path + (f"?{request.url.query}" if request.url.query else "")
+                    signed = url + "".join(k + value for k in sorted(form) for value in sorted(set(form[k])))
+                    expected = base64.b64encode(hmac.new(secret.encode(), signed.encode(), hashlib.sha1).digest()).decode()
+                    if not hmac.compare_digest(expected, request.headers.get("x-twilio-signature", "")):
+                        raise HTTPException(403, "Invalid webhook signature")
+                elif not machine:
+                    v = await auth.viewer(authorization=request.headers.get("authorization"),
+                                          x_haven_role=request.headers.get("x-haven-role"), x_haven_person=request.headers.get("x-haven-person"))
+                    auth.require(v, "admin")
+            except HTTPException as exc:
+                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        return await call_next(request)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=os.environ.get("HAVEN_CORS_ORIGINS", "*").split(","),
@@ -456,6 +495,8 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
         current = engine.state.plan.version
         if decision.plan_version != current:
             raise HTTPException(409, f"The plan changed while you looked: v{decision.plan_version} is gone, v{current} is on the table. Approve again.")
+        if decision.decision == "approve" and any(not c.ok for c in engine.state.plan.checks):
+            raise HTTPException(409, "Resolve all hard safety checks before approving this plan")
         return await _submit(decision)
 
     @app.get("/api/plan/brief")
@@ -571,11 +612,32 @@ def create_app(store: EventStore | None = None, run_loop: bool = True) -> FastAP
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
-        await socket.accept()
+        credentials = None
+        try:
+            if auth.configured():
+                v, credentials = await socket_viewer(socket)
+            else:
+                # Demo clients can authenticate with their selected identity in the first frame.
+                if socket.query_params.get("identity") == "1":
+                    v, credentials = await socket_viewer(socket)
+                else:
+                    await socket.accept()
+                    v = await auth.viewer(authorization=None, x_haven_role=socket.headers.get("x-haven-role"), x_haven_person=None)
+            auth.require(v, "admin")
+        except (HTTPException, ValueError, KeyError, asyncio.TimeoutError):
+            await socket.close(code=4403)
+            return
         q = engine.subscribe()
         try:
             while True:
                 msg = await q.get()
+                if auth.configured() and credentials:
+                    try:
+                        v = await auth.viewer(authorization=f"Bearer {credentials.get('token', '')}", x_haven_role=None, x_haven_person=None)
+                        auth.require(v, "admin")
+                    except HTTPException:
+                        await socket.close(code=4403)
+                        break
                 await socket.send_text(msg)
         except (WebSocketDisconnect, asyncio.CancelledError, RuntimeError):
             pass

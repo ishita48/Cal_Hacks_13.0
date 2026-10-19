@@ -431,11 +431,11 @@ function LiveState() {
   )
 }
 
-function UnderTheHood() {
+function UnderTheHood({ live }: { live: boolean }) {
   const [report, setReport] = useState<SponsorReport | null>(null)
   useEffect(() => {
-    api.sponsors().then(setReport).catch(() => {})
-  }, [])
+    if (live) api.sponsors().then(setReport).catch(() => {})
+  }, [live])
   return (
     <section id="hood" className="section">
       <div className="container">
@@ -472,12 +472,20 @@ function Final() {
 }
 
 export function Story() {
-  useEffect(() => connectWorld(), [])
-  const loadBuilding = useBuilding((b) => b.load)
+  // The story is public; the live world is not. Only a signed-in admin (or the open demo) gets the live log,
+  // the event stream and the sponsor proofs. Everyone else reads the story with its built-in examples.
+  const [live, setLive] = useState(false)
   useEffect(() => {
-    loadBuilding().catch(() => {})
-  }, [loadBuilding])
-  const buildingName = useBuilding((b) => b.spec?.name ?? 'one building')
+    api.me().then((m) => setLive(m.role === 'admin')).catch(() => setLive(false))
+  }, [])
+  useEffect(() => (live ? connectWorld() : undefined), [live])
+  const loadBuilding = useBuilding((b) => b.load)
+  const [publicName, setPublicName] = useState('')
+  useEffect(() => {
+    if (live) loadBuilding().catch(() => {})
+    else api.building().then((b) => setPublicName(b.name)).catch(() => {})
+  }, [live, loadBuilding])
+  const buildingName = useBuilding((b) => b.spec?.name) ?? (publicName || 'one building')
   return (
     <div className="argus argus-page">
       <Nav />
@@ -486,7 +494,7 @@ export function Story() {
         <How />
         <AgentField />
         <LiveState />
-        <UnderTheHood />
+        <UnderTheHood live={live} />
         <Final />
       </main>
       <footer>

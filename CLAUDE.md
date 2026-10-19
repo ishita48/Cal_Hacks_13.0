@@ -86,6 +86,13 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     Frontend: `src/state/me.ts` (`useMe`), `api.ts` sends the token (`setTokenGetter`, set by `auth.tsx`) or the
     demo role (localStorage `haven.role`); `src/lib/theme.ts` follows the device unless the viewer picks
     light/dark (`haven.theme`), applied before first paint by `index.html`.
+  - `haven/api/portal.py` the multi-role workspace (`docs/MVP.md`): housing records are `HousingEvent` inputs
+    (requests, profiles, contacts, duties, inbox, assignments) that survive resets; `snapshot(engine, viewer)` is the
+    only thing a non-admin receives (`GET /api/portal/snapshot`, `/ws/portal`, credentials in the first frame), built
+    from scratch per role, never a redacted `WorldState`. `incident_for` cuts a live incident per role (residents get
+    their own plan message and no step titles, which name others; RAs get people on their floors by situation; maintenance
+    gets down plant and facilities steps). Every legacy `/api/*` route and `/ws` is admin-only (middleware in `app.py`).
+    `tests/test_portal.py` checks no other resident's name reaches a resident's snapshot.
   - `haven/agents/negotiation.py` (Phase 9): the negotiation for real. `AgentStance` is an input event
     (agent, situation key, round, stance, reason, constraint code, step ids, source); `state.spoken` keeps them
     per `situation#round`; `planner._evaluate` uses a spoken stance over the rule function, so a model's answer
@@ -120,7 +127,10 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     event a button sends). Buds never mutates anything on its own.
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
-- `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. `src/state/world.ts` is a read-only mirror of `/ws`;
+- `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. Routes: `/app` the role workspace (`src/portal/`: `Portal.tsx`
+  shell, `data.ts` snapshot + socket, `Home` per-role overview + incident card, `Requests`, `Comms` inbox + Contact
+  Corner, `Ask`, `Settings` preferences + team, `Building` the privacy-scoped 3D from the snapshot only, `RolePicker`
+  demo-only; liquid-glass `portal.css`), `/command` the admin command centre (`App.tsx`, described below). `src/state/world.ts` is a read-only mirror of `/ws`;
   `src/state/building.ts` caches the static spec + roster + agent registry (not world state). Components:
   `StoryStrip` (the narrative, the stage rail, the facts, Approve and the hero agent switch), `FloorPlan`
   (SVG from the spec, view fitted to the level, coloured only by world state, labels laid out apart),

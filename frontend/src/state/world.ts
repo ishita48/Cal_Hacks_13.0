@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Clock, StateMessage, WorldState } from './types'
+import { identity } from '../lib/api'
 
 type Connection = 'connecting' | 'open' | 'closed'
 
@@ -30,15 +31,18 @@ export function connectWorld(): () => void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const url = import.meta.env.VITE_HAVEN_WS ?? `${proto}://${location.host}/ws`
     useWorld.setState({ connection: 'connecting' })
-    const ws = new WebSocket(url)
+    const ws = new WebSocket(`${url}${url.includes('?') ? '&' : '?'}identity=1`)
     mine = ws
-    ws.onopen = () => {
+    ws.onopen = async () => {
       // Closed before it opened (React StrictMode mounts twice): let it open, then let it go quietly.
       if (stopped) {
         ws.close()
         return
       }
       retry = 0
+      const headers = await identity()
+      if (ws.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ token: headers.Authorization?.replace(/^Bearer /, ''), role: headers['X-Haven-Role'], person: headers['X-Haven-Person'] }))
       useWorld.setState({ connection: 'open' })
     }
     ws.onmessage = (ev) => {

@@ -155,19 +155,6 @@
 .mac-main.is-solo-left .mac-hero { grid-column: 1 / -1; }
 
 .mac-titlebar { display: flex; align-items: center; gap: 14px; flex-shrink: 0; min-height: 50px; padding: 8px 12px 8px 16px; }
-.mac-lights { display: flex; gap: 8px; flex-shrink: 0; }
-.mac-light { position: relative; width: 12px; height: 12px; border-radius: 999px; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18); transition: transform 200ms var(--ease-spring), filter 150ms ease; }
-.mac-light.is-close { background: #ff5f57; }
-.mac-light.is-min { background: #febc2e; }
-.mac-light.is-zoom { background: #28c840; }
-.mac-light:disabled { background: rgba(40, 50, 110, 0.16); }
-.dark .mac-light:disabled { background: rgba(255, 255, 255, 0.14); }
-.mac-light::after { position: absolute; inset: 0; display: grid; place-items: center; font: 700 9px/1 var(--font-sans); color: rgba(0, 0, 0, 0.55); opacity: 0; transition: opacity 150ms ease; }
-.mac-light.is-close::after { content: "\00d7"; font-size: 11px; }
-.mac-light.is-min::after { content: "\2212"; }
-.mac-light.is-zoom::after { content: "+"; }
-.mac-lights:hover .mac-light:not(:disabled)::after { opacity: 1; }
-.mac-light:not(:disabled):hover { transform: scale(1.15); }
 .mac-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .mac-title-main { font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink-1); white-space: nowrap; }
 .mac-title-sub { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

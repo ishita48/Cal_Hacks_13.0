@@ -8,7 +8,7 @@ Derived happenings (a lift going offline, a room losing power) are NOT input eve
 the reducer computes them and records them on the timeline.
 """
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal, Union, Any
 
 from pydantic import BaseModel, Field
 
@@ -100,8 +100,18 @@ class WorkOrder(BaseModel):
     detail: str = ""              # the ticket id when filed in Linear, "simulated" otherwise
 
 
+class HousingEvent(BaseModel):
+    """Validated housing operation. The API authorizes it; the reducer owns its state."""
+
+    type: Literal["housing"] = "housing"
+    collection: Literal["requests", "profiles", "contacts", "duties", "inbox", "assignments"]
+    record_id: str
+    value: dict[str, Any]
+    actor: str
+
+
 InputEvent = Annotated[
-    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent, AgentStance, WorkOrder],
+    Union[SensorReading, EquipmentCommand, AgentToggle, ManagerRule, PlanDecision, ActionEvent, AgentStance, WorkOrder, HousingEvent],
     Field(discriminator="type"),
 ]
 

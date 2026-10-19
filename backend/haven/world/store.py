@@ -40,6 +40,17 @@ CREATE TABLE IF NOT EXISTS outcomes (
 
 
 class EventStore:
+    def housing_records(self) -> dict:
+        """Housing records survive incident resets and process restarts; the input log remains authoritative."""
+        records: dict = {}
+        with self._lock:
+            rows = self._conn.execute("SELECT payload FROM events ORDER BY seq").fetchall()
+        for (payload,) in rows:
+            event = json.loads(payload)
+            if event.get("type") == "housing":
+                records.setdefault(event["collection"], {})[event["record_id"]] = event["value"]
+        return records
+
     def __init__(self, path: str | Path = ":memory:") -> None:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)

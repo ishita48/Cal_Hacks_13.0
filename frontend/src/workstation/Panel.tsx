@@ -124,9 +124,13 @@ export function Panel({ world, clock, onDrill, onDemo, onOps, onPlan, details, s
         {approved && !done && prog && <Underway world={world} prog={prog} onPlan={onPlan} />}
         {done && approved && <Resolved world={world} />}
 
-        {/* ---- routine work ---- */}
-        <RoutineCheck world={world} clock={clock} refresh={refreshOps} />
-        <Checklist ops={ops} world={world} inWing={(id) => inWing(id ? equipment[id]?.space : null)} wingName={wingName} onChanged={refreshOps} onOps={onOps} />
+        {/* ---- routine work: only when nothing is happening, so an incident has the panel to itself ---- */}
+        {(quiet || done) && (
+          <>
+            <RoutineCheck world={world} clock={clock} refresh={refreshOps} />
+            <Checklist ops={ops} world={world} inWing={(id) => inWing(id ? equipment[id]?.space : null)} wingName={wingName} onChanged={refreshOps} onOps={onOps} />
+          </>
+        )}
         {quiet && (
           <p className="ws2-drill">
             Practise:{' '}
@@ -379,8 +383,15 @@ function Response({ world, onPlan }: { world: WorldState; onPlan: () => void }) 
         <button className={`ws2-btn ${review ? 'is-on' : ''}`} onClick={() => setReview((r) => !r)} aria-expanded={review}>
           Review
         </button>
-        <button className="ws2-btn is-primary" disabled={world.mode === 'replay' || busy || plan.status !== 'draft'} onClick={approve} data-buds="panel:approve">
-          <Check className="h-4 w-4" /> {left.length ? `Approve anyway` : 'Approve'}
+        {/* A plan that fails a hard check cannot be approved (the backend refuses it too): fix it, then approve. */}
+        <button
+          className="ws2-btn is-primary"
+          disabled={world.mode === 'replay' || busy || plan.status !== 'draft' || failing.length > 0}
+          onClick={approve}
+          data-buds="panel:approve"
+          title={failing.length ? 'Every hard safety check must pass before this plan can be approved' : undefined}
+        >
+          <Check className="h-4 w-4" /> {failing.length ? 'Fix the checks to approve' : 'Approve'}
         </button>
       </div>
       {error && <p className="mt-2 text-[12px] text-haven-danger">{error}</p>}

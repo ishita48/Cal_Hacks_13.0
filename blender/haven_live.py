@@ -22,6 +22,7 @@ Headless, for a still of the live world from the saved scene (``*_check.png`` is
 """
 
 import json
+import os
 import math
 import sys
 import threading
@@ -87,13 +88,18 @@ class Link:
     # -- http ----------------------------------------------------------------------------------------
 
     def get(self, path, timeout=4.0):
-        with urllib.request.urlopen(self.url.rstrip("/") + path, timeout=timeout) as r:
+        token = os.environ.get("HAVEN_BLENDER_TOKEN", "")
+        req = urllib.request.Request(self.url.rstrip("/") + path,
+                                     headers={"Authorization": f"Bearer {token}"} if token else {})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 
     def post(self, path, payload, timeout=6.0):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self.url.rstrip("/") + path, data=data, method="POST",
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json", **(
+                                         {"Authorization": f"Bearer {os.environ['HAVEN_BLENDER_TOKEN']}"}
+                                         if os.environ.get("HAVEN_BLENDER_TOKEN") else {})})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 

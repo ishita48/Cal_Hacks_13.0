@@ -4,16 +4,18 @@ import { Gate } from './components/Gate.tsx'
 import { setTokenGetter } from './lib/api'
 import { useMe } from './state/me'
 
-/** Clerk, loaded only when a publishable key is set: the command centre and the phones sit behind it. */
-export default function Auth({ publishableKey, children }: { publishableKey: string; children: ReactNode }) {
+/**
+ * Clerk, loaded only when a publishable key is set. Guarded pages (the workspace, the command centre, the phones)
+ * show the sign-in gate to anyone signed out; an `optional` page (the story) renders for everyone and only
+ * carries the session when there is one.
+ */
+export default function Auth({ publishableKey, optional, children }: { publishableKey: string; optional?: boolean; children: ReactNode }) {
   return (
     <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
       <SignedIn>
         <Session>{children}</Session>
       </SignedIn>
-      <SignedOut>
-        <Gate />
-      </SignedOut>
+      <SignedOut>{optional ? children : <Gate />}</SignedOut>
     </ClerkProvider>
   )
 }

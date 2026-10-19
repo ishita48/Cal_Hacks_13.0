@@ -21,7 +21,7 @@ from ..building.graph import POWER_RELS, powered_levels
 from .cascade import Forecast, Impact, assess, describe, forecast
 from .context import WorldContext
 from .events import (ActionEvent, AgentStance, AgentToggle, EquipmentCommand, InputEvent, ManagerRule, PlanDecision,
-                     SensorReading, WorkOrder)
+                     SensorReading, WorkOrder, HousingEvent)
 from .narrative import Narrative
 from .narrative import narrate as tell_story
 from .physics import Happening, Hydraulics, step
@@ -133,6 +133,7 @@ class SpokenStance(BaseModel):
 
 
 class WorldState(BaseModel):
+    housing: dict[str, dict[str, dict[str, Any]]] = Field(default_factory=dict)
     run_id: str
     scenario: str
     mode: Literal["live", "replay"] = "live"
@@ -200,6 +201,10 @@ def default_agents(ctx: WorldContext) -> list[str]:
 
 
 def apply_input(state: WorldState, event: InputEvent, ctx: WorldContext) -> None:
+    if isinstance(event, HousingEvent):
+        state.housing.setdefault(event.collection, {})[event.record_id] = dict(event.value)
+        state.version += 1
+        return
     changed = True
     physical = True      # does the event move water or power? If not, the forecast stands.
     if isinstance(event, SensorReading):
@@ -363,6 +368,9 @@ def _apply_decision(state: WorldState, ev: PlanDecision) -> None:
                      "warning")
         return
     if ev.decision == "approve":
+        if any(not check.ok for check in state.plan.checks):
+            state.record("command_rejected", "Resolve the plan's hard safety checks before approval", "warning")
+            return
         state.approved_plan_version = ev.plan_version
         state.approved_plan = state.plan.model_copy(deep=True)
         state.approved_plan.status = "approved"

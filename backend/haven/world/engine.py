@@ -58,6 +58,7 @@ class WorldEngine:
         self._last_plan_version = -1
         self.plan_listeners: list[Callable[[WorldState], None]] = []   # called when the plan version changes
         self.state: WorldState = initial_state(store.create_run(scenario), scenario, self.ctx)
+        self.state.housing = store.housing_records()
 
     # ---- lifecycle -------------------------------------------------------------------
 
@@ -93,6 +94,7 @@ class WorldEngine:
     async def reset(self) -> WorldState:
         async with self._lock:
             self.state = initial_state(self.store.create_run(self.scenario), self.scenario, self.ctx)
+            self.state.housing = self.store.housing_records()
             self._replay_queue = []
             self._step_budget = 0.0
         await self._broadcast(force=True)

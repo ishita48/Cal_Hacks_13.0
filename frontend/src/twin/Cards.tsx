@@ -88,16 +88,16 @@ export function ViewLegend({ mode, level }: { mode: Tab; level: string }) {
     return <div className="tw-legend-card is-hint">{level === 'all' ? 'Click a floor to look inside. Drag to turn, scroll to zoom.' : 'Click a room for its record.'}</div>
   if (mode === 'status')
     return (
-      <div className="tw-legend-card">
-        <div className="tw-legend-title">Live status</div>
+      <details className="tw-legend-card">
+        <summary className="tw-legend-title">Key · live status</summary>
         <Legend items={[['#6cc3ff', 'water'], [TONE.critical, 'no power'], ['#ffc56b', 'loses power if nobody acts'], ['#ff7a6b', 'equipment failed', true], ['#ffb84d', 'water will reach it', true], ['#5fd4a0', 'lift running']]} />
-      </div>
+      </details>
     )
   return (
-    <div className="tw-legend-card">
-      <div className="tw-legend-title">The response</div>
+    <details className="tw-legend-card">
+      <summary className="tw-legend-title">Key · the response</summary>
       <Legend items={[['#5aa8ff', 'step under way', true], ['#5fd4a0', 'step done', true], ['#c9c6e6', 'not started yet', true], ['#ff7a6b', 'step failed', true], [TONE.moved, 'moved to safety', true], [TONE.left, 'left behind', true]]} />
-    </div>
+    </details>
   )
 }
 

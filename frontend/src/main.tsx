@@ -4,33 +4,38 @@ import './index.css'
 import { initTheme } from './lib/theme'
 
 // Each page is its own chunk, so the landing page does not download the command centre and vice versa.
-const App = lazy(() => import('./App.tsx'))
+const Portal = lazy(() => import('./portal/Portal.tsx'))
+const Command = lazy(() => import('./App.tsx'))
 const Phone = lazy(() => import('./components/Phone.tsx').then((m) => ({ default: m.Phone })))
 const Story = lazy(() => import('./story/Story.tsx').then((m) => ({ default: m.Story })))
 const Landing = lazy(() => import('./landing/Landing.tsx'))
 // Clerk is its own chunk too, fetched only when a key is set and a guarded page is opened.
 const Auth = lazy(() => import('./auth.tsx'))
 
-// / is the landing page, the command centre lives at /app (or #app), the manager's phone view at
-// /phone (or #phone), the story page at /story (or #story).
+// / is the landing page, /app the role workspace everyone signs in to, /command the admin's command centre
+// (the live simulation, the agents and approval), /phone the responder's phone, /story the story page.
+// The backend enforces who may use each; these routes only choose what to load.
 const path = location.pathname.replace(/\/+$/, '')
 const phone = path === '/phone' || location.hash === '#phone'
 const story = path === '/story' || location.hash === '#story'
+const command = path === '/command' || location.hash === '#command'
 const app = path === '/app' || location.hash === '#app'
-const landing = !phone && !story && !app
+const landing = !phone && !story && !app && !command
 
 // Sign-in is optional and key-gated like every other integration: with VITE_CLERK_PUBLISHABLE_KEY set,
-// the command centre and the phones sit behind Clerk and the landing and story pages stay public;
+// the workspace, the command centre and the phones sit behind Clerk and the landing and story pages stay public;
 // without it the demo runs open, as it always has.
 const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined
 
 initTheme()
 
-const page = phone ? <Phone /> : story ? <Story /> : landing ? <Landing /> : <App />
+const page = phone ? <Phone /> : story ? <Story /> : command ? <Command /> : landing ? <Landing /> : <Portal />
 const guarded = clerkKey && !story && !landing
+// The story page is public, but a signed-in admin's session rides along so the live parts can load.
+const wrapped = guarded ? <Auth publishableKey={clerkKey}>{page}</Auth> : clerkKey && story ? <Auth publishableKey={clerkKey} optional>{page}</Auth> : page
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Suspense fallback={null}>{guarded ? <Auth publishableKey={clerkKey}>{page}</Auth> : page}</Suspense>
+    <Suspense fallback={null}>{wrapped}</Suspense>
   </StrictMode>,
 )

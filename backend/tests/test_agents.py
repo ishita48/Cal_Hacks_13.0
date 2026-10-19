@@ -146,6 +146,12 @@ def test_api_toggle_and_decision():
         # A decision on a plan the agents have since replaced is refused out loud, not logged as rejected.
         stale = client.post("/api/plan/decision", json={"plan_version": plan["version"] - 1, "decision": "approve"})
         assert stale.status_code == 409 and "changed" in stale.json()["detail"]
+        # A plan that fails a hard check (Maya left behind) cannot be approved: the human gate is not a bypass.
+        r = client.post("/api/plan/decision", json={"plan_version": plan["version"], "decision": "approve"})
+        assert r.status_code == 409 and "safety" in r.json()["detail"]
+        assert client.post("/api/agent", json={"agent": "resident:maya", "enabled": True}).status_code == 200
+        plan = client.get("/api/state").json()["state"]["plan"]
+        assert plan["left_behind"] == []
         r = client.post("/api/plan/decision", json={"plan_version": plan["version"], "decision": "approve"})
         assert r.status_code == 200
         assert client.get("/api/state").json()["state"]["plan"]["status"] == "approved"

@@ -381,16 +381,16 @@ function Floors({ world, levels, level, setLevel, planLevel, view }: { world: Wo
 function TitleBar({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose?: () => void; children?: ReactNode }) {
   return (
     <header className="mac-titlebar">
-      <div className="mac-lights" aria-hidden={!onClose}>
-        <button className="mac-light is-close" onClick={onClose} disabled={!onClose} title={onClose ? 'Close' : undefined} aria-label="Close" />
-        <span className="mac-light is-min" />
-        <span className="mac-light is-zoom" />
-      </div>
       <div className="mac-title">
         <span className="mac-title-main">{title}</span>
         {subtitle && <span className="mac-title-sub">{subtitle}</span>}
       </div>
       {children && <div className="mac-toolbar">{children}</div>}
+      {onClose && (
+        <button className="mac-nav-btn" onClick={onClose} title="Hide" aria-label="Hide this window">
+          <X className="h-4 w-4" />
+        </button>
+      )}
     </header>
   )
 }
@@ -440,7 +440,7 @@ function Nav({ mode, setMode, world, clock, connection, buildingName, responder,
   const dot = quiet ? 'is-calm' : done ? 'is-ok' : world.approved_plan ? 'is-acting' : 'is-hot'
   return (
     <header className="mac-nav">
-      <a href="/story" className="mac-brand" title="The story: how HAVEN works">
+      <a href="/app" className="mac-brand" title="Back to the workspace">
         <span className="mac-logo">
           <span />
         </span>

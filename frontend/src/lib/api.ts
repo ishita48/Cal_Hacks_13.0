@@ -18,16 +18,17 @@ export function demoRole(): Role | null {
   }
 }
 
-async function identity(): Promise<Record<string, string>> {
+export async function identity(): Promise<Record<string, string>> {
   if (tokenGetter) {
     const token = await tokenGetter()
     return token ? { Authorization: `Bearer ${token}` } : {}
   }
   const role = demoRole()
-  return role ? { 'X-Haven-Role': role } : {}
+  const person = localStorage.getItem('haven.person')
+  return { ...(role ? { 'X-Haven-Role': role } : {}), ...(person ? { 'X-Haven-Person': person } : {}) }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: { ...(await identity()), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
