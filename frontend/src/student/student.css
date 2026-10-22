@@ -552,6 +552,29 @@
 }
 
 /* ---- states, toasts, sheets ---------------------------------------------------------------- */
+.st-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -20px 0 24px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: var(--st-navy);
+  color: #fff;
+  font-weight: 500;
+}
+.st-preview span {
+  flex: 1;
+}
+.st-preview button {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
 .st-empty {
   display: grid;
   justify-items: start;

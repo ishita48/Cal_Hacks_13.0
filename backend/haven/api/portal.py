@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from . import auth
@@ -295,8 +295,17 @@ async def socket_viewer(socket: WebSocket) -> tuple[Viewer, dict]:
     return v, payload
 
 
+# An admin's preview may look and ask, never act: a write would be made in another person's name.
+PREVIEW_READS = {"/api/portal/ask"}
+
+
+async def read_only_preview(request: Request, v: Viewer = Depends(auth.viewer)):
+    if v.preview_by and request.method not in {"GET", "HEAD"} and request.url.path not in PREVIEW_READS:
+        raise HTTPException(403, "Preview is read-only: sign in as this person to act")
+
+
 def install(app, engine):
-    router = APIRouter(prefix="/api/portal")
+    router = APIRouter(prefix="/api/portal", dependencies=[Depends(read_only_preview)])
     mutation = asyncio.Lock()
 
     async def save(collection, rid, value, v):
@@ -515,7 +524,8 @@ def install(app, engine):
                 await asyncio.wait_for(q.get(), timeout=30)
                 # Revalidate token expiry and current role; role changes cannot retain an old projection.
                 if auth.configured():
-                    v = await auth.viewer(authorization=f"Bearer {credentials.get('token', '')}", x_haven_role=None, x_haven_person=None)
+                    v = await auth.viewer(authorization=f"Bearer {credentials.get('token', '')}",
+                                          x_haven_role=credentials.get("role"), x_haven_person=credentials.get("person"))
                 await socket.send_json(snapshot(engine, v))
         except (HTTPException, ValueError, KeyError, asyncio.TimeoutError):
             await socket.close(code=4401)

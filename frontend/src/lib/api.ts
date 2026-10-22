@@ -18,10 +18,38 @@ export function demoRole(): Role | null {
   }
 }
 
-export async function identity(): Promise<Record<string, string>> {
+/** An admin looking through another role's eyes (the server honours it for a verified admin only, read-only). */
+export interface Preview {
+  role: Role
+  person: string | null
+}
+const PREVIEW_KEY = 'haven.preview'
+export function getPreview(): Preview | null {
+  try {
+    const raw = localStorage.getItem(PREVIEW_KEY)
+    return raw ? (JSON.parse(raw) as Preview) : null
+  } catch {
+    return null
+  }
+}
+export function setPreview(p: Preview | null) {
+  try {
+    if (p) localStorage.setItem(PREVIEW_KEY, JSON.stringify(p))
+    else localStorage.removeItem(PREVIEW_KEY)
+  } catch {
+    /* private window */
+  }
+}
+
+/** The request's credentials. `portal` adds an admin's preview, which only the role-scoped portal reads. */
+export async function identity(portal = false): Promise<Record<string, string>> {
   if (tokenGetter) {
     const token = await tokenGetter()
-    return token ? { Authorization: `Bearer ${token}` } : {}
+    const preview = portal ? getPreview() : null
+    return {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(preview ? { 'X-Haven-Role': preview.role, ...(preview.person ? { 'X-Haven-Person': preview.person } : {}) } : {}),
+    }
   }
   const role = demoRole()
   const person = localStorage.getItem('haven.person')
@@ -31,7 +59,7 @@ export async function identity(): Promise<Record<string, string>> {
 export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     method,
-    headers: { ...(await identity()), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    headers: { ...(await identity(path.startsWith('/api/portal/'))), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {

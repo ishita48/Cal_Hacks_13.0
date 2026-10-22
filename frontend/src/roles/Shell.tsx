@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
-import { LayoutGrid, type LucideIcon } from 'lucide-react'
-import { useMe } from '../state/me'
+import { Eye, LayoutGrid, type LucideIcon } from 'lucide-react'
+import { getPreview, setPreview } from '../lib/api'
+import { ROLE_LABEL, useMe } from '../state/me'
 import '../student/student.css'
 
 export interface RailItem {
@@ -31,7 +32,10 @@ export function Shell({ items, initial, tone = 'blue', children }: { items: Rail
         </a>
         <span className="st-rail-foot">{Account ? <Account /> : initial ? <Avatar initial={initial} small tone={tone} /> : null}</span>
       </nav>
-      <main className="st-main">{children}</main>
+      <main className="st-main">
+        <PreviewBar />
+        {children}
+      </main>
     </div>
   )
 }
@@ -42,3 +46,23 @@ export function Avatar({ initial, small, tone = 'blue' }: { initial: string; sma
 
 /** Scroll a card into view (the rail's targets). */
 export const reveal = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+/** Shown while an admin previews another role: whose eyes, that it is read-only, and the way out. */
+function PreviewBar() {
+  const me = useMe((m) => m.me)
+  const preview = getPreview()
+  if (!preview || me?.role !== 'admin' || me.source !== 'clerk') return null
+  const exit = () => {
+    setPreview(null)
+    location.assign('/app')
+  }
+  return (
+    <p className="st-preview" role="status">
+      <Eye size={16} />
+      <span>
+Admin preview: exactly what this {ROLE_LABEL[preview.role]} sees · read-only
+      </span>
+      <button onClick={exit}>Exit preview</button>
+    </p>
+  )
+}

@@ -82,6 +82,10 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     decided by the server. With CLERK_SECRET_KEY the `viewer` dependency verifies the Bearer session token against
     Clerk's JWKS and reads `public_metadata.role` (none = resident) and `person_id` (roster link); without it the
     demo is open and `X-Haven-Role` declares the role (default admin, `source: "demo"`). `GET /api/me`.
+    With Clerk, those headers mean something only to a verified admin: `auth.preview` gives that role's viewer
+    (`preview_by` set), the portal's `read_only_preview` refuses every write but `/api/portal/ask`, and the frontend
+    sends them on portal calls only (`getPreview`/`setPreview`, localStorage `haven.preview`), so `/api/me` and
+    `/command` always see the real admin.
     `integrations/resend.py` email (RESEND_API_KEY, RESEND_FROM), `POST /api/notify/test` (admin).
     Frontend: `src/state/me.ts` (`useMe`), `api.ts` sends the token (`setTokenGetter`, set by `auth.tsx`) or the
     demo role (localStorage `haven.role`); `src/lib/theme.ts` follows the device unless the viewer picks

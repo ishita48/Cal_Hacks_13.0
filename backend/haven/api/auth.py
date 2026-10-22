@@ -8,6 +8,10 @@ account to a roster id (a resident or an RA), which is how "my room" and "my flo
 
 Without Clerk the demo runs open as it always has: the viewer is whatever `X-Haven-Role` says (default
 `admin`), and `source == "demo"` says so to every surface that shows it.
+
+With Clerk, `X-Haven-Role` / `X-Haven-Person` mean something only to a verified admin: a preview, the exact
+projection that role (and roster person) receives, marked `preview_by`. An admin may already see everything,
+so a preview widens nothing; the portal keeps it read-only so nobody acts in another person's name.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ class Viewer:
     name: str | None = None
     email: str | None = None
     person_id: str | None = None       # roster id: the resident or RA this account is
+    preview_by: str | None = None      # the admin's user id when an admin looks through this role's eyes
 
     def public(self) -> dict:
         return asdict(self)
@@ -128,7 +133,15 @@ async def viewer(authorization: str | None = Header(default=None),
         return Viewer(role=_role(x_haven_role) if x_haven_role else "admin", source="demo", person_id=x_haven_person)
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "sign in first")
-    return await clerk.viewer(authorization.split(" ", 1)[1].strip())
+    return preview(await clerk.viewer(authorization.split(" ", 1)[1].strip()), x_haven_role, x_haven_person)
+
+
+def preview(v: Viewer, role: str | None, person: str | None) -> Viewer:
+    """A verified admin asking to see as another role gets that role's viewer; anyone else is who they are."""
+    if v.role != "admin" or role not in ROLES or role == "admin":
+        return v
+    return Viewer(role=role, source=v.source, user_id=v.user_id, email=v.email, person_id=person or None,  # type: ignore[arg-type]
+                  preview_by=v.user_id)
 
 
 def require(viewer_: Viewer, *roles: Role) -> Viewer:

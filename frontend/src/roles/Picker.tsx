@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowRight, Building2, GraduationCap, HeartHandshake, Lock, ShieldAlert, Wrench } from 'lucide-react'
-import { request } from '../lib/api'
+import { api, request, setPreview } from '../lib/api'
 import { ROLE_LABEL, useMe } from '../state/me'
 import { WORKSPACES, canOpen, readChoice, writeChoice, type Slug, type Workspace } from './workspaces'
 import '../student/student.css'
@@ -28,6 +28,16 @@ export default function Picker() {
 
   const enter = async (ws: Workspace) => {
     writeChoice(ws.slug)
+    // Signed in as an admin, another role's workspace is a read-only preview of that role's own projection:
+    // the building's first story resident, and the RA on that resident's floor.
+    if (me?.source === 'clerk') {
+      if (me.role === 'admin' && ws.role && ws.role !== 'admin') {
+        const roster = await api.people().catch(() => null)
+        const hero = roster?.residents.find((r) => r.story && r.role === 'resident')
+        const person = ws.role === 'resident' ? hero?.id : ws.role === 'ra' ? roster?.residents.find((r) => r.role === 'ra' && r.level === hero?.level)?.id : undefined
+        setPreview({ role: ws.role, person: person ?? null })
+      } else setPreview(null)
+    }
     // The open demo has no accounts: the chosen role (and, for a student or an RA, a roster person) rides on each request.
     if (me?.source === 'demo' && ws.role) {
       let person: string | null = null
@@ -61,7 +71,7 @@ export default function Picker() {
             ? error || 'Checking your account…'
             : me.source === 'demo'
               ? 'Demo mode: every workspace is open, with synthetic people.'
-              : `Signed in as ${me.email ?? me.name ?? 'you'} · ${ROLE_LABEL[me.role]}`}
+              : `Signed in as ${me.email ?? me.name ?? 'you'} · ${ROLE_LABEL[me.role]}${me.role === 'admin' ? '. Other roles open as a read-only preview.' : ''}`}
         </p>
         <div className="wp-grid" role="radiogroup" aria-label="Workspace">
           {WORKSPACES.map((ws) => {

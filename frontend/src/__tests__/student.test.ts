@@ -136,11 +136,12 @@ describe('workspaces', () => {
     expect(workspaceFromPath('/app/nope')).toBeNull()
   })
 
-  it('opens only the server role’s own door when signed in, every door in the demo', () => {
+  it('opens the server role’s own door when signed in, every door to an admin and in the demo', () => {
     const student = workspace('student')!
     const security = workspace('security')!
     expect(canOpen(student, { role: 'resident', source: 'clerk' })).toBe(true)
-    expect(canOpen(student, { role: 'admin', source: 'clerk' })).toBe(false)
+    expect(canOpen(student, { role: 'ra', source: 'clerk' })).toBe(false)
+    expect(canOpen(student, { role: 'admin', source: 'clerk' })).toBe(true)
     expect(canOpen(security, { role: 'admin', source: 'clerk' })).toBe(true)
     expect(canOpen(security, { role: 'ra', source: 'clerk' })).toBe(false)
     expect(canOpen(student, { role: 'admin', source: 'demo' })).toBe(true)

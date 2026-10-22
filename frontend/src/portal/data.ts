@@ -22,7 +22,7 @@ export function usePortal() {
     refresh().catch((e: Error) => setError(e.message))
     const open = async () => {
       try {
-        const headers = await identity()
+        const headers = await identity(true)
         if (stopped) return
         const configured = import.meta.env.VITE_HAVEN_WS as string | undefined
         const base = configured ? configured.replace(/\/ws\/?$/, '') : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`

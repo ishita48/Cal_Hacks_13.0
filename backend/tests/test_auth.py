@@ -86,3 +86,34 @@ def test_resend_is_key_gated(monkeypatch):
         assert client.get("/api/integrations").json()["resend"] is False
         assert client.post("/api/notify/test", json={"to": "a@b.c"}).status_code == 503
         assert client.post("/api/notify/test", json={"to": "a@b.c"}, headers={"X-Haven-Role": "resident"}).status_code == 403
+
+
+def test_an_admin_may_preview_a_role_read_only_and_nobody_else_can(monkeypatch):
+    monkeypatch.setenv("CLERK_SECRET_KEY", "sk_test_x")
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+    jwk["kid"] = "k1"
+    clerk = auth.Clerk()
+
+    async def jwks():
+        return {"keys": [jwk]}
+
+    async def user(uid):
+        return {"public_metadata": {"role": "admin" if uid == "user_a" else "maintenance"}, "first_name": "Ana",
+                "primary_email_address_id": "e1", "email_addresses": [{"id": "e1", "email_address": "ana@example.edu"}]}
+
+    monkeypatch.setattr(clerk, "jwks", jwks)
+    monkeypatch.setattr(clerk, "user", user)
+    monkeypatch.setattr(auth, "clerk", clerk)
+    with _client() as client:
+        hero = client.app.state.engine.ctx.story_order[0]
+        admin = {"Authorization": f"Bearer {_signed(key, 'k1', sub='user_a')}"}
+        as_hero = {**admin, "X-Haven-Role": "resident", "X-Haven-Person": hero}
+        snap = client.get("/api/portal/snapshot", headers=as_hero).json()
+        assert snap["viewer"]["role"] == "resident" and snap["viewer"]["person_id"] == hero
+        assert client.post("/api/portal/requests", json={"title": "Leaky tap"}, headers=as_hero).status_code == 403
+        assert client.post("/api/portal/ask", json={"text": "who is my RA?"}, headers=as_hero).status_code == 200
+        assert client.get("/api/portal/snapshot", headers=admin).json()["viewer"]["role"] == "admin"
+        # Only an admin's headers mean anything: maintenance stays maintenance.
+        staff = {"Authorization": f"Bearer {_signed(key, 'k1', sub='user_m')}", "X-Haven-Role": "resident", "X-Haven-Person": hero}
+        assert client.get("/api/portal/snapshot", headers=staff).json()["viewer"]["role"] == "maintenance"
