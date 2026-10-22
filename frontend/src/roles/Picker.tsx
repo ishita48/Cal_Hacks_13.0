@@ -28,12 +28,12 @@ export default function Picker() {
 
   const enter = async (ws: Workspace) => {
     writeChoice(ws.slug)
-    // The open demo has no accounts: the chosen role (and, for a student, a roster resident) rides on each request.
+    // The open demo has no accounts: the chosen role (and, for a student or an RA, a roster person) rides on each request.
     if (me?.source === 'demo' && ws.role) {
       let person: string | null = null
-      if (ws.role === 'resident') {
+      if (ws.role === 'resident' || ws.role === 'ra') {
         const people = await request<{ id: string; role: string }[]>('GET', '/api/portal/demo-people').catch(() => [])
-        person = people.find((p) => p.role === 'resident')?.id ?? null
+        person = people.find((p) => p.role === ws.role)?.id ?? null
       }
       try {
         localStorage.setItem('haven.role', ws.role)

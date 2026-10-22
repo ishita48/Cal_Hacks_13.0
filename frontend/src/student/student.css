@@ -11,7 +11,7 @@
   --st-blue: #2f6df0;
   --st-green: #13936b;
   --st-amber: #e08a2b;
-  --st-red: #d14343;
+  --st-red: #d64d43;
   --st-ink: #0f1b2d;
   --st-ink-2: #5b6678;
   --st-ink-3: #8a94a6;
@@ -163,6 +163,9 @@
   font-weight: 600;
   font-size: 20px;
   flex: none;
+}
+.st-avatar.is-green {
+  background: linear-gradient(135deg, #22b07f, #13936b);
 }
 .st-avatar.is-small {
   width: 52px;

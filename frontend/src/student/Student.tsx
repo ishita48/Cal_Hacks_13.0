@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { Accessibility, AlertTriangle, Bell, CalendarClock, Check, ClipboardList, Home, LayoutGrid, LifeBuoy, Mail, Route as RouteIcon, Siren, X } from 'lucide-react'
+import { Accessibility, AlertTriangle, Bell, CalendarClock, Check, ClipboardList, Home, LifeBuoy, Mail, Route as RouteIcon, Siren, X } from 'lucide-react'
 import { api, request } from '../lib/api'
 import { usePortal } from '../portal/data'
-import { useMe } from '../state/me'
+import { Avatar, Shell as Frame, reveal } from '../roles/Shell'
 import type { BuildingSpec } from '../state/types'
 import { ago, greeting, studentView, type InboxRow, type Route, type StudentView } from './model'
 import './student.css'
@@ -56,7 +56,7 @@ function Dashboard({ view, portal }: { view: StudentView; portal: ReturnType<typ
   const [sheet, setSheet] = useState<'ask' | 'message' | null>(null)
   const routeRef = useRef<HTMLElement>(null)
   const inboxRef = useRef<HTMLElement>(null)
-  const go = (ref: React.RefObject<HTMLElement | null>) => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const go = (ref: React.RefObject<HTMLElement | null>) => reveal(ref.current)
   const today = new Date().toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
 
   return (
@@ -161,36 +161,18 @@ function Dashboard({ view, portal }: { view: StudentView; portal: ReturnType<typ
   )
 }
 
+/** The student rail: overview, inbox, way out. */
 function Shell({ children, onInbox, onRoute, initial, unread = 0 }: { children: ReactNode; onInbox?: () => void; onRoute?: () => void; initial?: string; unread?: number }) {
-  const Account = useMe((m) => m.AccountButton)
+  const items = [
+    { label: 'Overview', icon: Home, on: true, onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' }) },
+    { label: unread ? `Inbox, ${unread} unread` : 'Inbox', icon: Mail, onClick: onInbox, dot: !!unread },
+    { label: 'Your way out', icon: RouteIcon, onClick: onRoute },
+  ]
   return (
-    <div className="st">
-      <nav className="st-rail" aria-label="Student">
-        <a className="st-logo" href="/" aria-label="HAVEN home">
-          H
-        </a>
-        <button className="is-on" aria-label="Overview" aria-current="page" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-          <Home size={20} />
-        </button>
-        <button aria-label={`Inbox${unread ? `, ${unread} unread` : ''}`} onClick={onInbox} disabled={!onInbox}>
-          <Mail size={20} />
-          {!!unread && <b className="st-dot" />}
-        </button>
-        <button aria-label="Your way out" onClick={onRoute} disabled={!onRoute}>
-          <RouteIcon size={20} />
-        </button>
-        <a href="/app" aria-label="Switch workspace">
-          <LayoutGrid size={20} />
-        </a>
-        <span className="st-rail-foot">{Account ? <Account /> : initial ? <Avatar initial={initial} small /> : null}</span>
-      </nav>
-      <main className="st-main">{children}</main>
-    </div>
+    <Frame items={items} initial={initial}>
+      {children}
+    </Frame>
   )
-}
-
-function Avatar({ initial, small }: { initial: string; small?: boolean }) {
-  return <span className={`st-avatar ${small ? 'is-small' : ''}`}>{initial.toUpperCase()}</span>
 }
 
 const ICON = { alert: Bell, visit: CalendarClock, notice: ClipboardList }

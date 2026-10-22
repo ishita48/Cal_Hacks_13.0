@@ -132,7 +132,12 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   the remembered choice lives only in `readChoice`/`writeChoice`), `/app/student` the student dashboard (`src/student/`:
   `model.ts` `studentView(snapshot, spec)` is pure and tested in `__tests__/student.test.ts`: `outcome.status` ok/assisted/
   escalated from the resident's own `/api/portal/snapshot`, `reachable_refuge` = a step-free way out via the spec's
-  `verticals` and live lift status; in an incident the hero shows the server's message verbatim), `/app/<staff>` stubs,
+  `verticals` and live lift status; in an incident the hero shows the server's message verbatim), `/app/ra` the RA
+  dashboard (`src/ra/`: `model.ts` `raView(snapshot)` ranks `incident.people` escalated (left behind, or priority before
+  approval) > assisted > check-in due > safe, then by situation gravity (stranded first); the floor roster is `team`;
+  Confirm = `POST /api/portal/tasks/{id}/done` on the RA's own approved step naming the resident; no resident phone
+  numbers exist, so Call stays disabled and says so; tested in `__tests__/ra.test.ts`), shared rail `roles/Shell.tsx`,
+  `/app/<staff>` stubs,
   `/app/workspace` the multi-role workspace (`src/portal/`: `Portal.tsx`
   shell, `data.ts` snapshot + socket, `Home` per-role overview + incident card, `Requests`, `Comms` inbox + Contact
   Corner, `Ask`, `Settings` preferences + team, `Building` the privacy-scoped 3D from the snapshot only, `RolePicker`
