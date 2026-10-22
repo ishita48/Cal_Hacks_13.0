@@ -537,6 +537,17 @@ export interface Equipment {
   props: Record<string, unknown>
 }
 
+/** A stair or lift shaft: the space it occupies on each level it serves (backend VerticalLink). */
+export interface Vertical {
+  id: string
+  kind: 'stair' | 'lift'
+  name: string
+  spaces: Record<string, string>
+  step_free: boolean
+  equipment: string | null
+  seconds_per_level: number
+}
+
 export interface BuildingSpec {
   id: string
   name: string
@@ -545,6 +556,7 @@ export interface BuildingSpec {
   levels: Level[]
   spaces: Space[]
   openings: Opening[]
+  verticals?: Vertical[]
   equipment: Equipment[]
 }
 

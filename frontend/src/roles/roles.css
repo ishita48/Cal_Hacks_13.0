@@ -1,0 +1,99 @@
+/* The workspace picker and the staff stubs (/app, /app/<role>): the student page's tokens, one column. */
+
+.wp {
+  justify-content: center;
+}
+.wp-main {
+  width: min(980px, 100%);
+  padding: 40px 16px 64px;
+}
+.wp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 56px;
+}
+.wp-head .st-logo {
+  margin: 0;
+}
+.wp h1 {
+  margin: 0 0 8px;
+  font-size: clamp(1.9rem, 3vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.wp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+  margin: 32px 0 28px;
+}
+.wp-card {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 6px;
+  padding: 24px;
+  border: 1px solid var(--st-hair);
+  border-radius: var(--st-radius);
+  background: var(--st-card);
+  box-shadow: var(--st-shadow);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+}
+.wp-card:hover:not(:disabled) {
+  border-color: #c9d6f5;
+}
+.wp-card.is-on {
+  border-color: var(--st-blue);
+  box-shadow: var(--st-shadow), 0 0 0 3px rgba(47, 109, 240, 0.16);
+}
+.wp-card:disabled {
+  background: #f8f9fc;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.wp-card:disabled strong,
+.wp-card:disabled .wp-icon {
+  color: var(--st-ink-3);
+}
+.wp-card:focus-visible {
+  outline: 3px solid rgba(47, 109, 240, 0.35);
+  outline-offset: 2px;
+}
+.wp-card strong {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.wp-card small {
+  color: var(--st-ink-2);
+  font-size: 0.95rem;
+}
+.wp-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: #e8f0fe;
+  color: var(--st-blue);
+}
+.wp-card:disabled .wp-icon {
+  background: var(--st-well);
+}
+.wp-go {
+  min-width: 220px;
+}
+.wp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+@media (max-width: 720px) {
+  .wp-go {
+    width: 100%;
+  }
+}

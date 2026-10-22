@@ -127,7 +127,13 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
     event a button sends). Buds never mutates anything on its own.
 - Scenario timing (Phase 2 tuned): riser burst 150 L/s → MSB-B + ATS-EQ flood ≈ 12.5 min (lifts dead,
   floors 3–4 dark) → original switchgear on its pad ≈ 34 min (whole building dark) → ATS-EM ≈ 50 min.
-- `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. Routes: `/app` the role workspace (`src/portal/`: `Portal.tsx`
+- `frontend/` — React 19 + Vite + TS + Tailwind v4 + Zustand. Routes: `/app` the workspace picker after sign-in (`src/roles/`:
+  `workspaces.ts` Student / RA / Maintenance / Security / Admin, `canOpen` = the server's role, the open demo opens all;
+  the remembered choice lives only in `readChoice`/`writeChoice`), `/app/student` the student dashboard (`src/student/`:
+  `model.ts` `studentView(snapshot, spec)` is pure and tested in `__tests__/student.test.ts`: `outcome.status` ok/assisted/
+  escalated from the resident's own `/api/portal/snapshot`, `reachable_refuge` = a step-free way out via the spec's
+  `verticals` and live lift status; in an incident the hero shows the server's message verbatim), `/app/<staff>` stubs,
+  `/app/workspace` the multi-role workspace (`src/portal/`: `Portal.tsx`
   shell, `data.ts` snapshot + socket, `Home` per-role overview + incident card, `Requests`, `Comms` inbox + Contact
   Corner, `Ask`, `Settings` preferences + team, `Building` the privacy-scoped 3D from the snapshot only, `RolePicker`
   demo-only; liquid-glass `portal.css`), `/command` the admin command centre (`App.tsx`, described below). `src/state/world.ts` is a read-only mirror of `/ws`;
