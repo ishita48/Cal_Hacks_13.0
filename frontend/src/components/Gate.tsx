@@ -62,7 +62,8 @@ export function Gate() {
             </p>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <SignIn routing="hash" appearance={appearance} />
+            {/* Back to the page that asked (/app, /command, /phone), not Clerk's default "/", the public landing. */}
+            <SignIn routing="hash" appearance={appearance} forceRedirectUrl={location.pathname} signUpForceRedirectUrl={location.pathname} />
           </div>
         </div>
       </main>

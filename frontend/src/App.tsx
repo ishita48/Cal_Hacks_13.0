@@ -66,6 +66,41 @@ function loadCards(): Record<CardId, boolean> {
  * the one world store; every control sends an input event to the backend.
  */
 export default function App() {
+  // Signed in with Clerk, the command centre is the admin's: anyone else would get a shell of 403s, so they
+  // get a door back to their own workspace instead. The role is the server's (GET /api/me), never guessed here.
+  const me = useMe((m) => m.me)
+  const signedIn = useMe((m) => m.AccountButton) !== null
+  const error = useMe((m) => m.error)
+  if (signedIn && !me) return error ? <NotHere title="We could not check your access" detail={error} /> : null
+  if (me?.source === 'clerk' && me.role !== 'admin')
+    return (
+      <NotHere
+        title="The command centre is for housing admins"
+        detail={`You are signed in as ${me.email ?? me.name ?? 'you'} with the ${ROLE_LABEL[me.role]} role. An admin role is set on your Clerk account (public_metadata.role), not in the app.`}
+      />
+    )
+  return <CommandCentre />
+}
+
+function NotHere({ title, detail }: { title: string; detail: string }) {
+  const AccountButton = useMe((m) => m.AccountButton)
+  return (
+    <main className="grid min-h-svh place-items-center p-6 text-t1">
+      <div className="max-w-md space-y-4 text-center">
+        <h1 className="text-2xl font-semibold">{title}</h1>
+        <p className="text-t2">{detail}</p>
+        <div className="flex items-center justify-center gap-3">
+          <a href="/app" className="rounded-full bg-haven-blue px-5 py-2 font-medium text-white">
+            Open my workspace
+          </a>
+          {AccountButton && <AccountButton />}
+        </div>
+      </div>
+    </main>
+  )
+}
+
+function CommandCentre() {
   useEffect(() => connectWorld(), [])
   const loadBuilding = useBuilding((b) => b.load)
   const spec = useBuilding((b) => b.spec)

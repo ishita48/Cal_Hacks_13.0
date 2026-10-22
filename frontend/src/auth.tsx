@@ -11,7 +11,7 @@ import { useMe } from './state/me'
  */
 export default function Auth({ publishableKey, optional, children }: { publishableKey: string; optional?: boolean; children: ReactNode }) {
   return (
-    <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+    <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/" signInFallbackRedirectUrl="/app" signUpFallbackRedirectUrl="/app">
       <SignedIn>
         <Session>{children}</Session>
       </SignedIn>

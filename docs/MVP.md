@@ -33,7 +33,7 @@ Not done yet: per-role AI agents beyond Ask HAVEN, calendar-backed duty schedule
 | Maintenance | Explicitly assigned jobs | Job rooms, plant, shared access; relevant entry preferences | Start/complete work, message owner, propose visits, availability |
 | Housing Admin | All housing requests, teams and command centre | Full authorized simulation and housing records | Assign staff/floors, edit contacts/procedures, approve feasible plans |
 
-Demo selection is not a production role grant. Clerk `public_metadata.role` is authoritative; missing role means resident. `public_metadata.person_id` links a roster resident, RA or staff identity. Configure metadata in Clerk, never browser storage. Unlinked residents receive shared spaces, not a guessed room assignment.
+Demo selection is not a production role grant. Clerk `public_metadata.role` is authoritative; missing role means resident. `public_metadata.person_id` links a roster resident, RA or staff identity. Configure metadata in Clerk, never browser storage: in the dashboard, or from `backend/` with `uv run --env-file .env python tools/set_role.py <email> <role> [person_id]` (no arguments lists every account and its role). A fresh instance has no admin until one is granted this way. Unlinked residents receive shared spaces, not a guessed room assignment.
 
 ## Clerk and Resend
 
