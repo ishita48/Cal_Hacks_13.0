@@ -4,6 +4,8 @@ import { getPreview, setPreview } from '../lib/api'
 import { ROLE_LABEL, useMe } from '../state/me'
 import '../student/student.css'
 
+type Tone = 'blue' | 'green' | 'red'
+
 export interface RailItem {
   label: string
   icon: LucideIcon
@@ -13,7 +15,7 @@ export interface RailItem {
 }
 
 /** The role screens' frame: a slim icon rail (a bottom bar on phones) and the page. */
-export function Shell({ items, initial, tone = 'blue', children }: { items: RailItem[]; initial?: string; tone?: 'blue' | 'green'; children: ReactNode }) {
+export function Shell({ items, initial, tone = 'blue', children }: { items: RailItem[]; initial?: string; tone?: Tone; children: ReactNode }) {
   const Account = useMe((m) => m.AccountButton)
   return (
     <div className="st">
@@ -40,8 +42,8 @@ export function Shell({ items, initial, tone = 'blue', children }: { items: Rail
   )
 }
 
-export function Avatar({ initial, small, tone = 'blue' }: { initial: string; small?: boolean; tone?: 'blue' | 'green' }) {
-  return <span className={`st-avatar ${small ? 'is-small' : ''} ${tone === 'green' ? 'is-green' : ''}`}>{initial.toUpperCase()}</span>
+export function Avatar({ initial, small, tone = 'blue' }: { initial: string; small?: boolean; tone?: Tone }) {
+  return <span className={`st-avatar ${small ? 'is-small' : ''} is-${tone}`}>{initial.toUpperCase()}</span>
 }
 
 /** Scroll a card into view (the rail's targets). */

@@ -167,6 +167,9 @@
 .st-avatar.is-green {
   background: linear-gradient(135deg, #22b07f, #13936b);
 }
+.st-avatar.is-red {
+  background: linear-gradient(135deg, #e5716a, #d64d43);
+}
 .st-avatar.is-small {
   width: 52px;
   height: 52px;

@@ -48,11 +48,19 @@ describe('dispatch view', () => {
     const v = securityView(world({ residents: [malik, maya], liftDown: true, flooded: true }), spec)
     expect(v.active).toBe(2)
     expect(v.hero).toMatchObject({ name: 'Maya Reyes', title: 'Shelter in place · Floor 4', where: 'sheltering at Room 412', status: 'escalated' })
-    expect(v.info).toEqual(['Elevators offline', 'needs step-free assisted evacuation', 'nearest accessible entrance: North entrance · Stiles hall'])
+    expect(v.brief).toEqual({ liftsDown: true, need: 'step-free assisted evacuation', entrance: 'North entrance (Stiles hall)', responder: 'Nobody moves until the plan is approved', noSelfRoute: true })
     expect(v.map?.entrance?.id).toBe('exit_stiles')
+    // From just outside the north door, in through it, to the refuge.
+    expect(v.map?.unit).toEqual({ x: 26, y: 87 })
+    expect(v.map?.route?.[0]).toEqual({ x: 26, y: 87 })
     expect(v.map?.route?.at(-1)).toEqual({ x: 22, y: 68 })
-    expect(v.queue.map((q) => q.tag)).toEqual(['critical', 'critical', 'monitor', 'clear'])
-    expect(v.responders).toEqual(['Planned: Marcus stays with Maya in Room 412. Nobody moves until the plan is approved.'])
+    expect(v.queue.map((q) => [q.title, q.tag])).toEqual([
+      ['Maya Reyes · shelter in place', 'critical'],
+      ['Malik Rahman · escalation', 'critical'],
+      ['MSB section B hazard', 'monitor'],
+      ['Entrances clear of water', 'clear'],
+    ])
+    expect(v.queue[2].sub).toBe('No facilities step yet · monitor')
     expect(v.dispatchBlocked).toBe('')
   })
 
@@ -60,8 +68,7 @@ describe('dispatch view', () => {
     const actors = { ra_4: { actor: 'ra_4', label: 'RA Marcus', at: null, heading: 'room_412', step_id: 'shelter_maya', status: 'moving', since_step: 0 } } as WorldState['actors']
     const v = securityView(world({ residents: [maya], approved: true, actors }), spec)
     expect(v.hero?.status).toBe('assisted')
-    expect(v.responders).toEqual(['RA Marcus · En route · to Room 412'])
-    expect(v.units).toEqual([{ id: 'ra_4', label: 'RA Marcus', status: 'En route', tone: 'moving', sub: 'Marcus stays with Maya in Room 412 · to Room 412' }])
+    expect(v.brief?.responder).toBe('RA Marcus is on the way')
     expect(v.dispatchBlocked).toMatch(/already|dispatched/)
   })
 
@@ -69,6 +76,7 @@ describe('dispatch view', () => {
     const v = securityView(world({ residents: [maya, malik], approved: true }), spec)
     expect(v.hero).toMatchObject({ name: 'Malik Rahman', status: 'escalated', title: 'Escalation · Floor 4', where: 'in Room 429', step: null })
     expect(v.queue.slice(0, 2).map((q) => q.tag)).toEqual(['critical', 'assisted'])
+    expect(v.brief?.responder).toBe('The plan names nobody for this person yet')
   })
 
   it('keeps someone the plan left out escalated even after approval', () => {

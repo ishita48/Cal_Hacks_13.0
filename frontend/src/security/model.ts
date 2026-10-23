@@ -1,4 +1,4 @@
-import type { ActorState, BuildingSpec, PlanStep, Rect, ResidentImpact, WorldState } from '../state/types'
+import type { ActorStatus, BuildingSpec, PlanStep, Rect, ResidentImpact, WorldState } from '../state/types'
 
 /**
  * Everything the dispatch dashboard shows, as a pure function of the live world (the admin's /ws frames) and
@@ -32,6 +32,9 @@ export interface Exit {
   x: number
   y: number
   label: string
+  side: 'North' | 'South' | 'East' | 'West'
+  /** The space behind the door, e.g. "Stiles hall". */
+  place: string
   stepFree: boolean
 }
 
@@ -42,7 +45,18 @@ export interface SiteMap {
   entrance: Exit | null
   refuge: { x: number; y: number; label: string } | null
   route: { x: number; y: number }[] | null
+  /** Where responders arrive from, just outside the chosen door. */
+  unit: { x: number; y: number } | null
   lifts: { x: number; y: number; down: boolean }[]
+}
+
+/** The hero's facts, in the order the info line says them. */
+export interface Brief {
+  liftsDown: boolean
+  need: string
+  entrance: string | null
+  responder: string
+  noSelfRoute: boolean
 }
 
 export interface QueueRow {
@@ -53,14 +67,6 @@ export interface QueueRow {
   tag: 'critical' | 'assisted' | 'monitor' | 'clear'
 }
 
-export interface Unit {
-  id: string
-  label: string
-  status: string
-  tone: 'moving' | 'done' | 'idle' | 'offsite'
-  sub: string
-}
-
 export interface SecurityView {
   incident: boolean
   approved: boolean
@@ -69,15 +75,15 @@ export interface SecurityView {
   dispatchBlocked: string
   active: number
   hero: Escalation | null
-  info: string[]
-  responders: string[]
+  brief: Brief | null
   map: SiteMap | null
   queue: QueueRow[]
-  units: Unit[]
 }
 
 const MOVES = new Set(['escort', 'relocate', 'shelter'])
 const KIND_TITLE: Record<string, string> = { escort: 'Assisted evacuation', relocate: 'Relocation', shelter: 'Shelter in place' }
+const KIND_SHORT: Record<string, string> = { escort: 'assisted evac', relocate: 'relocation', shelter: 'shelter in place' }
+const DOING: Record<ActorStatus, string> = { moving: 'is on the way', done: 'has finished their step', idle: 'is assigned', offsite: 'is off site' }
 
 const centre = (r: Rect) => ({ x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2 })
 
@@ -91,12 +97,11 @@ export function exitsOf(spec: BuildingSpec): Exit[] {
     .filter((o) => o.kind === 'exit')
     .map((o) => {
       const d = { South: o.y - y0, North: y1 - o.y, West: o.x - x0, East: x1 - o.x }
-      const side = (Object.entries(d).sort((a, b) => a[1] - b[1])[0]?.[0] ?? '') as string
-      const inner = names.get(o.a === 'outside' ? o.b : o.a)
-      return { id: o.id, x: o.x, y: o.y, label: `${side} entrance · ${inner?.name ?? o.id}`, stepFree: o.step_free, inner: inner?.kind }
+      const side = (Object.entries(d).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'South') as Exit['side']
+      const place = names.get(o.a === 'outside' ? o.b : o.a)?.name ?? o.id
+      return { id: o.id, x: o.x, y: o.y, label: `${side} entrance · ${place}`, side, place, stepFree: o.step_free }
     })
     .sort((a, b) => a.label.localeCompare(b.label))
-    .map(({ inner: _inner, ...e }) => e)
 }
 
 export function securityView(world: WorldState, spec: BuildingSpec | null): SecurityView {
@@ -155,36 +160,35 @@ export function securityView(world: WorldState, spec: BuildingSpec | null): Secu
     ? ([...exits.filter((e) => e.stepFree)].sort((a, b) => Math.hypot(a.x - from.x, a.y - from.y) - Math.hypot(b.x - from.x, b.y - from.y))[0] ?? null)
     : null
 
-  const info: string[] = hero
-    ? [
-        liftsDown ? 'Elevators offline' : 'Elevators running',
-        hero.stepFree ? (liftsDown ? 'needs step-free assisted evacuation' : 'needs a step-free route') : hero.stranded ? 'cannot get out alone' : 'needs a responder',
-        entrance ? `nearest accessible entrance: ${entrance.label}` : '',
-      ].filter(Boolean)
-    : []
-
-  const actorsOn = (step: PlanStep | null) => Object.values(world.actors).filter((a) => step && a.step_id === step.id)
-  const responders = hero
-    ? (() => {
-        const on = actorsOn(hero.step)
-        if (on.length) return on.map((a) => `${a.label} · ${statusWord(a)}${a.heading ? ` · to ${place(a.heading)}` : a.at ? ` · at ${place(a.at)}` : ''}`)
-        if (!hero.step) return ['The plan names nobody for this person yet']
-        if (!approved) return [`Planned: ${hero.step.title}. Nobody moves until the plan is approved.`]
-        return [`Assigned: ${hero.step.actor.split(',').join(', ')}`]
-      })()
-    : []
+  const on = hero ? Object.values(world.actors).filter((a) => hero.step && a.step_id === hero.step.id) : []
+  const brief: Brief | null = hero
+    ? {
+        liftsDown,
+        need: hero.stepFree ? (liftsDown ? 'step-free assisted evacuation' : 'step-free route out') : hero.stranded ? 'assisted evacuation' : 'responder check',
+        entrance: entrance ? `${entrance.side} entrance (${entrance.place})` : null,
+        responder: on.length
+          ? on.map((a) => `${a.label} ${DOING[a.status]}`).join('; ')
+          : !hero.step
+            ? 'The plan names nobody for this person yet'
+            : !approved
+              ? 'Nobody moves until the plan is approved'
+              : `Assigned to ${hero.step.actor.split(',').join(', ')}`,
+        noSelfRoute: hero.stranded,
+      }
+    : null
 
   const lifts = (spec?.equipment ?? [])
     .filter((e) => e.kind === 'lift')
     .map((e) => ({ x: e.x, y: e.y, down: world.equipment[e.id]?.status !== 'online' }))
   const map: SiteMap | null = spec
     ? {
-        box: spec.footprint.reduce((b, r) => ({ x0: Math.min(b.x0, r.x0), y0: Math.min(b.y0, r.y0), x1: Math.max(b.x1, r.x1), y1: Math.max(b.y1, r.y1) }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }),
+        box: map0(spec),
         footprint: spec.footprint,
         exits,
         entrance,
         refuge: from && hero ? { ...from, label: `${hero.room} · ${hero.levelName}` } : null,
-        route: from && entrance ? [{ x: entrance.x, y: entrance.y }, { x: entrance.x, y: from.y }, from] : null,
+        unit: entrance ? outside(entrance, map0(spec)) : null,
+        route: from && entrance ? [outside(entrance, map0(spec)), { x: entrance.x, y: entrance.y }, { x: entrance.x, y: from.y }, from] : null,
         lifts,
       }
     : null
@@ -200,26 +204,19 @@ export function securityView(world: WorldState, spec: BuildingSpec | null): Secu
     ...escalations.map((e) => ({
       id: `p:${e.id}`,
       kind: 'person' as const,
-      title: `${e.name} · ${e.title.split(' · ')[0].toLowerCase()}`,
-      sub: `${e.room} · ${e.levelName}${e.leftBehind ? ' · nobody assigned' : ''}`,
+      title: `${e.name} · ${e.step ? KIND_SHORT[e.step.kind] : 'escalation'}`,
+      sub: `${e.levelName} · ${e.room}${e.leftBehind ? ' · nobody assigned' : !e.step ? ' · not in the plan' : ''}`,
       tag: (e.status === 'assisted' ? 'assisted' : 'critical') as QueueRow['tag'],
     })),
     ...flooded.map(([id]) => {
       const eq = spec?.equipment.find((x) => x.id === id)
       const s = facilitiesStep(id)
-      return { id: `h:${id}`, kind: 'hazard' as const, title: `${eq?.name ?? id} · water hazard`, sub: `${place(eq?.space)} · ${s ? 'facilities step in the plan' : 'no facilities step yet'}`, tag: 'monitor' as const }
+      return { id: `h:${id}`, kind: 'hazard' as const, title: `${eq?.name ?? id} hazard`, sub: `${s ? 'Facilities handling' : 'No facilities step yet'} · monitor`, tag: 'monitor' as const }
     }),
     ...(wetExits.length
       ? wetExits.map((e) => ({ id: `x:${e.id}`, kind: 'entrance' as const, title: `${e.label} · water at the door`, sub: 'Send responders another way', tag: 'monitor' as const }))
       : [{ id: 'x:all', kind: 'entrance' as const, title: 'Entrances clear of water', sub: `${exits.filter((e) => e.stepFree).length} step-free entrances`, tag: 'clear' as const }]),
   ]
-
-  const units: Unit[] = Object.values(world.actors)
-    .map((a) => {
-      const step = plan.steps.find((s) => s.id === a.step_id)
-      return { id: a.actor, label: a.label, status: statusWord(a), tone: a.status, sub: [step?.title, a.heading ? `to ${place(a.heading)}` : a.at ? `at ${place(a.at)}` : ''].filter(Boolean).join(' · ') || 'No step assigned' }
-    })
-    .sort((a, b) => ['moving', 'done', 'idle', 'offsite'].indexOf(a.tone) - ['moving', 'done', 'idle', 'offsite'].indexOf(b.tone) || a.label.localeCompare(b.label))
 
   const failing = world.plan.checks.filter((c) => !c.ok)
   return {
@@ -235,14 +232,16 @@ export function securityView(world: WorldState, spec: BuildingSpec | null): Secu
           : '',
     active: escalations.length,
     hero,
-    info,
-    responders,
+    brief,
     map,
     queue,
-    units,
   }
 }
 
-function statusWord(a: ActorState) {
-  return { moving: 'En route', done: 'Done', idle: 'Available', offsite: 'Off site' }[a.status]
+const map0 = (spec: BuildingSpec) =>
+  spec.footprint.reduce((b, r) => ({ x0: Math.min(b.x0, r.x0), y0: Math.min(b.y0, r.y0), x1: Math.max(b.x1, r.x1), y1: Math.max(b.y1, r.y1) }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity })
+
+/** A point a few metres out from a door, on the street side. */
+function outside(e: Exit, box: Rect, m = 7) {
+  return { North: { x: e.x, y: box.y1 + m }, South: { x: e.x, y: box.y0 - m }, East: { x: box.x1 + m, y: e.y }, West: { x: box.x0 - m, y: e.y } }[e.side]
 }

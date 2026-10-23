@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Accessibility, CheckCircle2, DoorOpen, Home, ListOrdered, Radio, ShieldAlert, Siren, Truck, Zap, type LucideIcon } from 'lucide-react'
-import { api, formatTimeOfDay } from '../lib/api'
+import { Accessibility, Ambulance, ArrowBigUp, Car, CheckCircle2, DoorOpen, Flame, Radio, ShieldCheck, Siren, Zap, type LucideIcon } from 'lucide-react'
+import { api } from '../lib/api'
 import { Avatar, Shell, reveal, type RailItem } from '../roles/Shell'
 import { useMe } from '../state/me'
 import type { BuildingSpec } from '../state/types'
 import { connectWorld, useWorld } from '../state/world'
 import { greeting } from '../student/model'
-import { securityView, type QueueRow, type SecurityView, type SiteMap } from './model'
+import { securityView, type Escalation, type QueueRow, type SecurityView, type SiteMap } from './model'
 import './security.css'
 
 /**
  * Dispatch (/app/security): the life-safety escalation that needs responders first (hero, with the footprint and
- * the nearest step-free entrance), the escalation queue, and the responders who are moving. It reads the live
- * world over /ws (only an admin opens it), holds no copy of it, and its one action is the human gate itself:
+ * the nearest step-free entrance), the escalation queue, and the responder units. It reads the live world over
+ * /ws (only an admin opens it), holds no copy of it, and its one real action is the human gate itself:
  * "Dispatch responders" approves the plan on the table, the same decision the command centre makes.
  */
 export default function Security() {
@@ -28,16 +28,16 @@ export default function Security() {
   const view = useMemo(() => (world ? securityView(world, spec) : null), [world, spec])
   const queue = useRef<HTMLElement>(null)
   const units = useRef<HTMLElement>(null)
-  const name = me?.name ?? me?.email?.split('@')[0] ?? (me?.source === 'demo' ? 'Dispatch' : '')
+  const name = me?.name ?? me?.email?.split('@')[0] ?? ''
   const rail: RailItem[] = [
-    { label: 'Overview', icon: Home, on: true, onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' }) },
-    { label: 'Escalation queue', icon: ListOrdered, onClick: () => reveal(queue.current), dot: !!view?.active },
-    { label: 'Responders', icon: Radio, onClick: () => reveal(units.current) },
+    { label: 'Overview', icon: ShieldCheck, on: true, onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' }) },
+    { label: 'Escalation queue', icon: ArrowBigUp, onClick: () => reveal(queue.current), dot: !!view?.active },
+    { label: 'Responder units', icon: Radio, onClick: () => reveal(units.current) },
   ]
 
   if (!view)
     return (
-      <Shell items={rail}>
+      <Shell items={rail} tone="red">
         <div className="st-empty">
           <h1>{connection === 'closed' ? 'Dispatch is reconnecting…' : 'Opening dispatch…'}</h1>
           <p>Dispatch reads the live building. It opens for housing admins.</p>
@@ -45,8 +45,9 @@ export default function Security() {
       </Shell>
     )
 
+  const date = new Date().toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
   return (
-    <Shell items={rail} initial={name[0] ?? 'D'}>
+    <Shell items={rail} initial={name[0] ?? 'D'} tone="red">
       <header className="st-top">
         <div>
           <h1>
@@ -54,7 +55,8 @@ export default function Security() {
             {name ? `, ${name.split(' ')[0]}` : ''}
           </h1>
           <p className="st-sub">
-            Campus Safety · {spec?.name ?? 'the building'} · {clock ? formatTimeOfDay(clock.time_of_day).slice(0, 5) : '--:--'}
+            {spec?.name ?? 'The building'} · Campus Safety · {date}
+            {clock ? ` · ${clockTime(clock.time_of_day)}` : ''}
           </p>
         </div>
         <div className="st-who">
@@ -66,12 +68,19 @@ export default function Security() {
             <strong>{name || 'Dispatch'}</strong>
             <small>Security · Dispatch</small>
           </div>
-          <Avatar initial={name[0] ?? 'D'} />
+          <Avatar initial={name[0] ?? 'D'} tone="red" />
         </div>
       </header>
       <Body view={view} runId={world?.run_id ?? ''} queueRef={queue} unitsRef={units} />
     </Shell>
   )
+}
+
+/** The building's clock (seconds since midnight) the way a dispatcher reads it: 11:43 PM. */
+function clockTime(seconds: number) {
+  const s = Math.floor(seconds) % 86400
+  const h = Math.floor(s / 3600)
+  return `${h % 12 || 12}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
 }
 
 function Body({ view, runId, queueRef, unitsRef }: { view: SecurityView; runId: string; queueRef: React.RefObject<HTMLElement | null>; unitsRef: React.RefObject<HTMLElement | null> }) {
@@ -104,12 +113,12 @@ function Body({ view, runId, queueRef, unitsRef }: { view: SecurityView; runId: 
       <div className="st-grid sc-grid">
         {hero ? (
           <section className={`st-card sc-hero is-${hero.status}`} aria-live="polite">
-            <header className="sc-hero-head">
-              <span className="st-eyebrow">Active escalation</span>
-              <span className={`sc-tag is-${hero.status === 'assisted' ? 'assisted' : 'critical'}`}>{hero.status === 'assisted' ? 'Responders assigned' : hero.leftBehind ? 'Nobody assigned' : !hero.step ? 'Not in the plan' : 'Awaiting dispatch'}</span>
+            <header className="sc-head">
+              <h3 className="st-eyebrow">Active escalation</h3>
+              <span className="sc-aside">priority · life-safety</span>
             </header>
             <div className="sc-who">
-              <span className="sc-badge">{hero.stepFree ? <Accessibility size={28} /> : <Siren size={28} />}</span>
+              <span className="sc-badge">{hero.stepFree ? <Accessibility size={30} /> : <Siren size={30} />}</span>
               <div>
                 <h2>{hero.title}</h2>
                 <p className="sc-sub">
@@ -117,24 +126,35 @@ function Body({ view, runId, queueRef, unitsRef }: { view: SecurityView; runId: 
                 </p>
               </div>
             </div>
-            {!!view.info.length && <p className="sc-info">{view.info.join(' · ')}</p>}
+            {view.brief && (
+              <p className="sc-info">
+                {view.brief.liftsDown ? 'Elevator offline' : 'Elevators running'} — resident needs {/^[aeiou]/.test(view.brief.need) ? 'an' : 'a'}{' '}
+                <b>{view.brief.need}</b>.
+                {view.brief.entrance && (
+                  <>
+                    {' '}
+                    Nearest accessible way in is the <b>{view.brief.entrance}</b>.
+                  </>
+                )}{' '}
+                {view.brief.responder}
+                {view.brief.noSelfRoute ? '; no safe self-evacuation route exists.' : '.'}
+              </p>
+            )}
             {view.map && <SiteMapView map={view.map} />}
-            <div className="sc-enroute">
-              <Truck size={18} />
-              <span>{view.responders.join(' · ')}</span>
-            </div>
+            <p className="sc-enroute">
+              <Car size={18} />
+              <span>Unit 1 en route · ETA 4 min{view.map?.entrance ? ` · via ${view.map.entrance.side} entrance` : ''}</span>
+              <em>simulated</em>
+            </p>
             <div className="sc-actions">
               <button className="st-btn sc-red" disabled={busy || !!view.dispatchBlocked} onClick={() => void dispatch()}>
-                <Siren size={17} /> {view.approved ? 'Responders dispatched' : busy ? 'Dispatching…' : 'Dispatch responders'}
+                {view.approved ? 'Responders dispatched' : busy ? 'Dispatching…' : 'Dispatch responders'}
               </button>
               <button className="st-btn is-ghost" disabled={acked.includes(hero.id)} onClick={acknowledge}>
-                {acked.includes(hero.id) ? <><CheckCircle2 size={17} /> Acknowledged</> : 'Acknowledge'}
+                {acked.includes(hero.id) ? 'Acknowledged' : 'Acknowledge'}
               </button>
             </div>
-            <p className="sc-fine">
-              {view.dispatchBlocked || `Dispatch approves plan v${view.planVersion}: every step in it goes out, not just this one.`} Acknowledge is noted on this
-              screen only.
-            </p>
+            <p className="sc-fine">{view.dispatchBlocked || `Dispatch approves plan v${view.planVersion}: every step in it goes out, not just this one.`}</p>
           </section>
         ) : (
           <section className="st-card st-hero is-ok sc-hero">
@@ -153,30 +173,41 @@ function Body({ view, runId, queueRef, unitsRef }: { view: SecurityView; runId: 
         </section>
 
         <section className="st-card sc-units" ref={unitsRef}>
-          <h3 className="st-eyebrow">Responder units</h3>
-          {view.units.length ? (
-            <Capped
-              items={view.units}
-              render={(u) => (
-                <li key={u.id}>
-                  <span className={`sc-icon is-${u.tone}`}>
-                    <Radio size={18} />
-                  </span>
-                  <div>
-                    <strong>{u.label}</strong>
-                    <small>{u.sub}</small>
-                  </div>
-                  <span className={`sc-unit is-${u.tone}`}>{u.status}</span>
-                </li>
-              )}
-            />
-          ) : (
-            <p className="st-muted">No responders are on the move. They appear here once a plan is approved.</p>
-          )}
+          <header className="sc-head">
+            <h3 className="st-eyebrow">Responder units</h3>
+            <span className="sc-aside" title="HAVEN dispatches no campus units yet: these rows are placeholders until a dispatch feed is connected.">
+              simulated
+            </span>
+          </header>
+          <ul className="sc-list">
+            {units(hero).map((u) => (
+              <li key={u.id}>
+                <span className={`sc-icon is-${u.tone}`}>
+                  <u.icon size={20} />
+                </span>
+                <div>
+                  <strong>{u.label}</strong>
+                  <small>{u.sub}</small>
+                </div>
+                <span className={`sc-unit is-${u.tone}`}>{u.status}</span>
+              </li>
+            ))}
+          </ul>
         </section>
       </div>
     </>
   )
+}
+
+// Simulated until a dispatch (CAD) feed exists: HAVEN itself sends no campus unit and calls no fire department.
+// The card says "simulated"; the people, plan and responders elsewhere on this page are real.
+function units(hero: Escalation | null): { id: string; icon: LucideIcon; label: string; sub: string; status: string; tone: string }[] {
+  const first = hero?.name.split(' ')[0]
+  return [
+    { id: 'unit1', icon: Car, label: 'Campus Safety · Unit 1', sub: first ? `Assigned to ${first} · ETA 4 min` : 'On patrol', status: first ? 'En route' : 'Available', tone: first ? 'moving' : 'clear' },
+    { id: 'ems', icon: Ambulance, label: 'Campus EMS', sub: 'Standing by', status: 'Available', tone: 'clear' },
+    { id: 'sffd', icon: Flame, label: 'SFFD', sub: first ? 'Notified · auto-brief sent' : 'Not contacted', status: first ? 'Notified' : 'Idle', tone: first ? 'monitor' : 'idle' },
+  ]
 }
 
 /** A list that shows five and folds the rest behind "Show all". */
@@ -194,15 +225,14 @@ function Capped<T>({ items, render }: { items: T[]; render: (item: T) => React.R
   )
 }
 
-const QUEUE_ICON: Record<QueueRow['kind'], LucideIcon> = { person: Accessibility, hazard: Zap, entrance: DoorOpen }
 const QUEUE_TAG: Record<QueueRow['tag'], string> = { critical: 'Critical', assisted: 'Assisted', monitor: 'Monitor', clear: 'Clear' }
 
 function QueueItem({ q }: { q: QueueRow }) {
-  const Icon = q.tag === 'critical' ? ShieldAlert : QUEUE_ICON[q.kind]
+  const Icon: LucideIcon = q.kind === 'person' ? Accessibility : q.kind === 'hazard' ? Zap : q.tag === 'clear' ? CheckCircle2 : DoorOpen
   return (
     <li>
       <span className={`sc-icon is-${q.tag}`}>
-        <Icon size={18} />
+        <Icon size={20} />
       </span>
       <div>
         <strong>{q.title}</strong>
@@ -213,9 +243,11 @@ function QueueItem({ q }: { q: QueueRow }) {
   )
 }
 
-/** Top-down footprint: the street doors, the step-free one responders should use, the refuge, the way in. */
+const SHORT = { North: 'N', South: 'S', East: 'E', West: 'W' }
+
+/** Top-down footprint: the street doors, the step-free one responders use, the refuge, the way in. */
 function SiteMapView({ map }: { map: SiteMap }) {
-  const pad = 6
+  const pad = 12
   const { x0, y0, x1, y1 } = map.box
   // A tall building turns a quarter (north to the right) so it fills the landscape card.
   const tall = y1 - y0 > x1 - x0
@@ -227,13 +259,22 @@ function SiteMapView({ map }: { map: SiteMap }) {
     const b = P(r.x1, r.y1)
     return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) }
   }
+  const unit = map.unit && P(map.unit.x, map.unit.y)
+  const door = map.entrance && P(map.entrance.x, map.entrance.y)
+  // Labels stand clear of the way in: the unit's beyond it, outward from the door; the door's beside it.
+  const out = unit && door ? (() => {
+    const dx = unit.x - door.x
+    const dy = unit.y - door.y
+    const n = Math.hypot(dx, dy) || 1
+    return { x: dx / n, y: dy / n }
+  })() : null
   return (
     <figure className="sc-map">
-      <figcaption className="sc-map-head">
+      <figcaption className="sc-head">
         <span className="st-eyebrow">Building &amp; entrances</span>
-        {map.entrance && <span className="sc-map-door">Use: {map.entrance.label}</span>}
+        <span className="sc-aside">{map.route ? 'responder route' : `${map.exits.length} entrances`}</span>
       </figcaption>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Footprint with ${map.exits.length} entrances${map.entrance ? `; responders enter at ${map.entrance.label}` : ''}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Footprint with ${map.exits.length} entrances${map.entrance ? `; responders enter at the ${map.entrance.label}` : ''}`}>
         {map.footprint.map((r, i) => (
           <rect key={i} className="sc-fp" {...R(r)} rx={0.8} />
         ))}
@@ -247,9 +288,17 @@ function SiteMapView({ map }: { map: SiteMap }) {
           const on = map.entrance?.id === e.id
           return (
             <g key={e.id}>
-              <circle className={`sc-door ${on ? 'is-on' : ''}`} cx={p.x} cy={p.y} r={on ? 2.4 : 1.6}>
+              <rect className={`sc-door ${on ? 'is-on' : ''}`} x={p.x - (on ? 3 : 2)} y={p.y - (on ? 2 : 1.4)} width={on ? 6 : 4} height={on ? 4 : 2.8} rx={0.8}>
                 <title>{e.label}</title>
-              </circle>
+              </rect>
+              <text
+                className={`sc-door-label ${on ? 'is-on' : ''}`}
+                x={on && out ? p.x - out.y * 4.2 : p.x}
+                y={on && out ? p.y + out.x * 4.2 + 1 : p.y - 2.6}
+                style={{ textAnchor: on && out ? (-out.y > 0.5 ? 'start' : -out.y < -0.5 ? 'end' : 'middle') : 'middle' }}
+              >
+                {on ? `${SHORT[e.side]} door ♿` : SHORT[e.side]}
+              </text>
             </g>
           )
         })}
@@ -258,13 +307,26 @@ function SiteMapView({ map }: { map: SiteMap }) {
             const p = P(map.refuge.x, map.refuge.y)
             return (
               <g>
-                <circle className="sc-refuge" cx={p.x} cy={p.y} r={2.4} />
-                <text className="sc-refuge-label" x={p.x} y={p.y - 4}>
+                <circle className="sc-refuge" cx={p.x} cy={p.y} r={2.2} />
+                <text className="sc-refuge-label" x={p.x} y={p.y + 5.2}>
                   {map.refuge.label}
                 </text>
               </g>
             )
           })()}
+        {unit && (
+          <g>
+            <circle className="sc-unit-dot" cx={unit.x} cy={unit.y} r={3.2} />
+            <text className="sc-unit-label" x={unit.x + (out?.x ?? 0) * 6} y={unit.y + (out?.y ?? 1) * 6 + 1}>
+              Unit 1
+            </text>
+          </g>
+        )}
+        {tall && (
+          <text className="sc-compass" x={W - 2} y={H - 2}>
+            N →
+          </text>
+        )}
       </svg>
       <div className="sc-key">
         <span>
