@@ -86,6 +86,13 @@ class ActionState(BaseModel):
     status: Literal["assigned", "done", "failed"]
     step: int
     detail: str = ""
+    # Who reported it: "haven" (the system acted) or "haven:auto" (nobody answered by the deadline) is not a
+    # person on site; anyone else is. A shutdown counts as verified only when a person confirmed it.
+    actor: str = "haven"
+
+    @property
+    def verified(self) -> bool:
+        return self.status == "done" and not self.actor.startswith("haven")
 
 
 class PowerState(BaseModel):
@@ -388,7 +395,7 @@ def _apply_action(state: WorldState, ev: ActionEvent, ctx: WorldContext) -> None
     if step is None:
         state.record("command_rejected", f"Action on unknown step {ev.step_id}", "warning")
         return
-    state.actions[ev.step_id] = ActionState(step_id=ev.step_id, status=ev.status, step=state.step, detail=ev.detail)
+    state.actions[ev.step_id] = ActionState(step_id=ev.step_id, status=ev.status, step=state.step, detail=ev.detail, actor=ev.actor)
     sev = "warning" if ev.status == "failed" else "info"
     verb = {"assigned": "assigned", "done": "done", "failed": "FAILED"}[ev.status]
     state.record("action", f"{verb}: {step.title}" + (f" — {ev.detail}" if ev.detail else ""), sev,

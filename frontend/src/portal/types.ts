@@ -62,6 +62,8 @@ export interface IncidentTask {
   target: string
   target_name: string
   status: 'proposed' | 'assigned' | 'done' | 'failed'
+  /** A person confirmed it on site (done by HAVEN or auto-confirmed at a deadline is not verified). */
+  verified?: boolean
 }
 
 export interface Incident {

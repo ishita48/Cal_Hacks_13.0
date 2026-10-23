@@ -1,4 +1,5 @@
 """Authorization at the transport boundary and a real resident → staff → resident workflow."""
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from haven.api.app import create_app
 from haven.api.auth import Viewer
 from haven.api.portal import snapshot
+from haven.world.events import ActionEvent
 from haven.world.store import EventStore
 
 
@@ -186,6 +188,22 @@ def test_responders_confirm_only_their_own_steps(env):
     assert client.post(f"/api/portal/tasks/{fix.id}/done", headers=identity("maintenance")).status_code == 200
     tasks = client.get("/api/portal/snapshot", headers=identity("maintenance")).json()["incident"]["tasks"]
     assert next(t for t in tasks if t["id"] == fix.id)["status"] == "done"
+
+
+def test_a_shutdown_is_verified_only_when_a_person_confirms_it(env):
+    client, engine = env
+    client.post("/api/sensor", json={"sensor_id": engine.ctx.sensor_ids[0], "value": 0.9}, headers=identity("admin"))
+    plan = engine.state.plan
+    assert client.post("/api/plan/decision", headers=identity("admin"),
+                       json={"plan_version": plan.version, "decision": "approve"}).status_code == 200
+    fix = next(s for s in engine.state.approved_plan.steps if "facilities" in s.actor)
+    # Nobody answered: HAVEN auto-confirms at the deadline. Done, but not verified, and still confirmable.
+    asyncio.run(engine.submit(ActionEvent(step_id=fix.id, status="done", actor="haven:auto", detail="auto-confirmed at the deadline")))
+    task = lambda: next(t for t in client.get("/api/portal/snapshot", headers=identity("maintenance")).json()["incident"]["tasks"] if t["id"] == fix.id)
+    assert task()["status"] == "done" and task()["verified"] is False
+    assert client.post(f"/api/portal/tasks/{fix.id}/done", headers=identity("maintenance")).status_code == 200
+    assert task()["verified"] is True
+    assert client.post(f"/api/portal/tasks/{fix.id}/done", headers=identity("maintenance")).status_code == 409
 
 
 def test_ask_answers_from_the_viewers_own_projection(env, monkeypatch):

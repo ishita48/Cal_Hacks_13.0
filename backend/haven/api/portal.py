@@ -66,7 +66,9 @@ def _task(engine, step, approved) -> dict:
     done = engine.state.actions.get(step.id)
     return {"id": step.id, "title": step.title, "reason": step.reason, "target": step.target or "",
             "target_name": engine.ctx.short_name if not step.target else _place(engine, step.target),
-            "status": done.status if done else ("assigned" if approved else "proposed")}
+            "status": done.status if done else ("assigned" if approved else "proposed"),
+            # Done by the system or auto-confirmed at a deadline is not verified: a person must confirm on site.
+            "verified": bool(done and done.verified)}
 
 
 def _place(engine, target: str) -> str:
@@ -471,8 +473,9 @@ def install(app, engine):
         if not mine & _actors(step):
             raise HTTPException(403, "This step is someone else's")
         cur = engine.state.actions.get(step.id)
-        if cur is not None and cur.status == "done":
-            raise HTTPException(409, "Already done")
+        # Done by HAVEN or auto-confirmed at the deadline still needs a person's confirmation; a person's is final.
+        if cur is not None and cur.verified:
+            raise HTTPException(409, "Already confirmed")
         actor = next(iter(mine & _actors(step)))
         try:
             await engine.submit(ActionEvent(step_id=step.id, status="done", actor=actor,

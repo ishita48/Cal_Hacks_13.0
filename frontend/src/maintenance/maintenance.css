@@ -1,0 +1,290 @@
+/* Facilities dashboard (/app/maintenance): the student page's tokens and frame (.st), the fault, the way to it. */
+
+.mt-grid {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+}
+.mt-hero {
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* ---- hero ---------------------------------------------------------------------------------- */
+.mt-sev {
+  margin-bottom: 18px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mt-sev.is-hazard {
+  background: #fbe7e5;
+  color: var(--st-red);
+}
+.mt-sev.is-isolated {
+  background: #fdf0e1;
+  color: #b8691a;
+}
+.mt-hero.is-hazard {
+  border-color: #f2c9c5;
+}
+.mt-hero-who {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.mt-badge {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #e5716a, var(--st-red));
+  color: #fff;
+  flex: none;
+}
+.mt-hero.is-isolated .mt-badge {
+  background: linear-gradient(135deg, #f0a24c, var(--st-amber));
+}
+.mt-hero h2 {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.2vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+.mt-hero.is-ok h2,
+.mt-hero.st-hero h2 {
+  margin: 22px 0 10px;
+}
+.mt-where {
+  margin: 2px 0 0;
+  color: var(--st-ink-2);
+  font-size: 1.05rem;
+}
+.mt-note {
+  display: flex;
+  gap: 10px;
+  max-width: 620px;
+  margin: 22px 0 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #fbe7e5;
+  color: #8f2f28;
+  line-height: 1.5;
+}
+.mt-hero.is-isolated .mt-note {
+  background: #fdf0e1;
+  color: #8a4d10;
+}
+.mt-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.mt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+.mt-actions .st-btn {
+  min-height: 50px;
+  font-size: 1rem;
+}
+.mt-fine {
+  margin: 10px 0 0;
+  color: var(--st-ink-3);
+  font-size: 0.85rem;
+}
+.mt-steps {
+  margin: 14px 0 0;
+  padding-left: 20px;
+  color: var(--st-ink-2);
+  line-height: 1.7;
+}
+
+/* ---- side elevation ------------------------------------------------------------------------ */
+.mt-elev {
+  align-self: stretch;
+  margin: 24px 0 0;
+  padding: 16px 16px 12px 34px;
+  border: 1px solid var(--st-hair);
+  border-radius: 18px;
+  background: #f7f9fd;
+}
+.mt-elev svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  overflow: visible;
+}
+.mt-floor {
+  fill: #fff;
+  stroke: #dfe5ef;
+  stroke-width: 0.2;
+}
+.mt-floor.is-hot {
+  fill: #fdecea;
+  stroke: #efb3ad;
+}
+.mt-floor-label {
+  fill: var(--st-ink-3);
+  font-size: 1.5px;
+  font-weight: 600;
+  text-anchor: end;
+  dominant-baseline: central;
+}
+.mt-riser {
+  fill: #e3e8f1;
+}
+.mt-riser.is-hot {
+  fill: var(--st-red);
+}
+.mt-path {
+  fill: none;
+  stroke: var(--st-blue);
+  stroke-width: 0.45;
+  stroke-dasharray: 1.2 0.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mt-from {
+  fill: var(--st-blue);
+}
+.mt-to {
+  fill: var(--st-red);
+  stroke: #fff;
+  stroke-width: 0.4;
+}
+.mt-elev figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 10px;
+  color: var(--st-ink-2);
+  font-size: 0.85rem;
+}
+.mt-key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+.mt-key.is-from {
+  background: var(--st-blue);
+}
+.mt-key.is-to {
+  background: var(--st-red);
+}
+
+/* ---- work orders + shutdowns ---------------------------------------------------------------- */
+.mt-list,
+.mt-shut ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mt-list.is-all {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.mt-list li,
+.mt-shut-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--st-hair);
+}
+.mt-list li:first-child,
+.mt-shut-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.mt-list strong,
+.mt-shut-row strong {
+  display: block;
+  font-weight: 600;
+}
+.mt-list small,
+.mt-shut-row small {
+  color: var(--st-ink-2);
+}
+.mt-icon,
+.mt-shut-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #eef1f6;
+  color: #55627a;
+}
+.mt-icon.is-urgent {
+  background: #fbe7e5;
+  color: var(--st-red);
+}
+.mt-icon.is-done,
+.mt-shut-row.is-verified .mt-shut-mark {
+  background: #e3f4ee;
+  color: var(--st-green);
+}
+.mt-shut-row.is-confirm .mt-shut-mark {
+  background: #fdf0e1;
+  color: var(--st-amber);
+}
+.mt-shut-row.is-confirm small {
+  color: #b8691a;
+  font-weight: 500;
+}
+.mt-tag {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mt-tag.is-urgent {
+  background: #fbe7e5;
+  color: var(--st-red);
+}
+.mt-tag.is-open {
+  background: #eef1f6;
+  color: #55627a;
+}
+.mt-tag.is-done {
+  background: #e3f4ee;
+  color: var(--st-green);
+}
+.mt-more {
+  margin-top: 10px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--st-blue);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .mt-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mt-hero {
+    grid-row: auto;
+  }
+}
+@media (max-width: 720px) {
+  .mt-actions .st-btn {
+    width: 100%;
+  }
+}

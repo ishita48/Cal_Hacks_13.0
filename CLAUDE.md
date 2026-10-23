@@ -140,7 +140,13 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   dashboard (`src/ra/`: `model.ts` `raView(snapshot)` ranks `incident.people` escalated (left behind, or priority before
   approval) > assisted > check-in due > safe, then by situation gravity (stranded first); the floor roster is `team`;
   Confirm = `POST /api/portal/tasks/{id}/done` on the RA's own approved step naming the resident; no resident phone
-  numbers exist, so Call stays disabled and says so; tested in `__tests__/ra.test.ts`), shared rail `roles/Shell.tsx`,
+  numbers exist, so Call stays disabled and says so; tested in `__tests__/ra.test.ts`), `/app/maintenance` the
+  facilities dashboard (`src/maintenance/`: `maintenanceView(snapshot, spec)` ranks `incident.equipment` flooded = hazard >
+  isolated / valve closed > offline; the hero's safety note is its facilities step's own reason; `routeTo` draws a side
+  elevation from the facilities office down the nearest stair; work orders = one per fault + maintenance requests;
+  S4: a shutdown reads Verified only when `task.verified`, i.e. a person confirmed it (`ActionState.actor` not `haven*`):
+  done by HAVEN or auto-confirmed at a deadline still asks for an on-site Confirm, which `tasks/{id}/done` now accepts
+  once; tested in `__tests__/maintenance.test.ts`), shared rail `roles/Shell.tsx`,
   `/app/<staff>` stubs,
   `/app/workspace` the multi-role workspace (`src/portal/`: `Portal.tsx`
   shell, `data.ts` snapshot + socket, `Home` per-role overview + incident card, `Requests`, `Comms` inbox + Contact
