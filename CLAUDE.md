@@ -146,7 +146,12 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   elevation from the facilities office down the nearest stair; work orders = one per fault + maintenance requests;
   S4: a shutdown reads Verified only when `task.verified`, i.e. a person confirmed it (`ActionState.actor` not `haven*`):
   done by HAVEN or auto-confirmed at a deadline still asks for an on-site Confirm, which `tasks/{id}/done` now accepts
-  once; tested in `__tests__/maintenance.test.ts`), shared rail `roles/Shell.tsx`,
+  once; tested in `__tests__/maintenance.test.ts`), `/app/security` dispatch (`src/security/`, admin only: it reads the live
+  world over `/ws`; `securityView(world, spec)` takes critical residents now + forecast, escalated (left behind or not
+  covered by an approved escort/shelter/relocate step) before assisted, then stranded; `exitsOf` names each street
+  door by side + the space behind it and the hero gets the nearest step-free one; responder units are `state.actors`,
+  never invented; "Dispatch responders" is `decidePlan(approve)`, the same human gate; Acknowledge is per-viewer
+  localStorage; tested in `__tests__/security.test.ts`), shared rail `roles/Shell.tsx`,
   `/app/<staff>` stubs,
   `/app/workspace` the multi-role workspace (`src/portal/`: `Portal.tsx`
   shell, `data.ts` snapshot + socket, `Home` per-role overview + incident card, `Requests`, `Comms` inbox + Contact

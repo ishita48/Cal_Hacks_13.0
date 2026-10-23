@@ -15,11 +15,12 @@ const Student = lazy(() => import('./student/Student.tsx'))
 const Stub = lazy(() => import('./roles/Stub.tsx'))
 const RA = lazy(() => import('./ra/RA.tsx'))
 const Maintenance = lazy(() => import('./maintenance/Maintenance.tsx'))
+const Security = lazy(() => import('./security/Security.tsx'))
 // Clerk is its own chunk too, fetched only when a key is set and a guarded page is opened.
 const Auth = lazy(() => import('./auth.tsx'))
 
 // / is the landing page, /app the workspace picker everyone lands on after sign-in, /app/<role> that role's
-// workspace (/app/student, /app/ra and /app/maintenance are built, the other staff ones are stubs, /app/workspace is the multi-role workspace),
+// workspace (student, ra, maintenance and security are built; admin is a stub that opens the command centre; /app/workspace is the multi-role workspace),
 // /command the admin's command centre (the live simulation, the agents and approval), /phone the responder's
 // phone, /story the story page.
 // The backend enforces who may use each; these routes only choose what to load.
@@ -38,7 +39,7 @@ const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefine
 initTheme()
 
 const ws = workspaceFromPath(path)
-const appPage = path === '/app/workspace' ? <Portal /> : ws?.slug === 'student' ? <Student /> : ws?.slug === 'ra' ? <RA /> : ws?.slug === 'maintenance' ? <Maintenance /> : ws ? <Stub ws={ws} /> : <Picker />
+const appPage = path === '/app/workspace' ? <Portal /> : ws?.slug === 'student' ? <Student /> : ws?.slug === 'ra' ? <RA /> : ws?.slug === 'maintenance' ? <Maintenance /> : ws?.slug === 'security' ? <Security /> : ws ? <Stub ws={ws} /> : <Picker />
 const page = phone ? <Phone /> : story ? <Story /> : command ? <Command /> : landing ? <Landing /> : appPage
 const guarded = clerkKey && !story && !landing
 // The story page is public, but a signed-in admin's session rides along so the live parts can load.

@@ -39,14 +39,16 @@ export default function Picker() {
       } else setPreview(null)
     }
     // The open demo has no accounts: the chosen role (and, for a student or an RA, a roster person) rides on each request.
-    if (me?.source === 'demo' && ws.role) {
+    // Dispatch reads the whole building, which only an admin may: the open demo enters it as one.
+    const demoRole = ws.role ?? 'admin'
+    if (me?.source === 'demo') {
       let person: string | null = null
-      if (ws.role === 'resident' || ws.role === 'ra') {
+      if (demoRole === 'resident' || demoRole === 'ra') {
         const people = await request<{ id: string; role: string }[]>('GET', '/api/portal/demo-people').catch(() => [])
-        person = people.find((p) => p.role === ws.role)?.id ?? null
+        person = people.find((p) => p.role === demoRole)?.id ?? null
       }
       try {
-        localStorage.setItem('haven.role', ws.role)
+        localStorage.setItem('haven.role', demoRole)
         if (person) localStorage.setItem('haven.person', person)
         else localStorage.removeItem('haven.person')
       } catch {
