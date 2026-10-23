@@ -145,8 +145,15 @@ describe('the workstation panel', () => {
     fireEvent.click(screen.getByText('Review'))
     expect(screen.getAllByText('Make the building safe').length).toBeGreaterThan(0)
     expect(calls.filter((c) => c.startsWith('POST'))).toHaveLength(0)
-    fireEvent.click(screen.getByText('Approve'))
+    // incident command: the verdict and what the plan does for people
+    expect(screen.getByText('Plan is safe to approve')).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'Resident outcomes under this plan' }).textContent).toMatch(/Safe.*Assisted.*Unresolved/)
+    // approve & dispatch goes out once, however often it is pressed
+    const approve = screen.getByText('Approve & dispatch')
+    fireEvent.click(approve)
+    fireEvent.click(approve)
     await waitFor(() => expect(calls).toContain('POST /api/plan/decision'))
+    expect(calls.filter((c) => c === 'POST /api/plan/decision')).toHaveLength(1)
   })
 
   it('a quiet night: the routine check and the checklist use the audit; ticking closes a work order', async () => {

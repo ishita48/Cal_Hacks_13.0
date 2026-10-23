@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, CircleDashed, ClipboardList, Loader2, MapPin, Phone, PhoneCall, ScanLine, Siren, UserRound, Users, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, CircleDashed, ClipboardList, Loader2, MapPin, Phone, PhoneCall, ScanLine, ScrollText, ShieldAlert, ShieldCheck, Siren, UserRound, Users, X, XCircle } from 'lucide-react'
 import { VoiceRule } from '../components/VoiceRule'
 import { select } from '../components/Inspector'
 import { useRemembered } from '../components/StoryStrip'
 import { api, formatClockHM, formatCountdown } from '../lib/api'
+import { approveOnce } from '../lib/approve'
 import { useBuilding } from '../state/building'
-import type { Clock, OpsSnapshot, WorldState } from '../state/types'
+import type { Clock, OpsSnapshot, Plan, RuleParse, WorldState } from '../state/types'
 import { useWorld } from '../state/world'
 import { upcoming } from '../twin/model'
-import { actorName, buildingStatus, checklist, greeting, incidentInfo, maintenance, needingHelp, phases, progress, raAvailability, routineCheck, wingOfSpace, wingsOf, type CheckLine, type NeedsHelp, type Phase, type WingId } from './logic'
+import { actorName, buildingStatus, checklist, greeting, incidentInfo, ledger, maintenance, needingHelp, outcomes, phases, progress, raAvailability, residentsHere, routineCheck, wingOfSpace, wingsOf, type CheckLine, type NeedsHelp, type Phase, type WingId } from './logic'
 import './panel.css'
 
 /**
@@ -123,6 +124,7 @@ export function Panel({ world, clock, onDrill, onDemo, onOps, onPlan, details, s
         {draft && <Response world={world} onPlan={onPlan} />}
         {approved && !done && prog && <Underway world={world} prog={prog} onPlan={onPlan} />}
         {done && approved && <Resolved world={world} />}
+        {!quiet && <Ledger world={world} clock={clock} />}
 
         {/* ---- routine work: only when nothing is happening, so an incident has the panel to itself ---- */}
         {(quiet || done) && (
@@ -353,16 +355,18 @@ function Response({ world, onPlan }: { world: WorldState; onPlan: () => void }) 
   const groups = phases(plan, world.actions)
   const crew = maintenance(plan, world.actors)
   const ras = raAvailability(world.actors)
+  // Approve the version on the table right now, once: the run and that version are the idempotency key.
   const approve = () => {
+    const live = useWorld.getState().world ?? world
     setError(null)
     setBusy(true)
-    api
-      .decidePlan(useWorld.getState().world?.plan.version ?? plan.version, 'approve')
+    approveOnce(live.run_id, live.plan.version, live.approved_plan_version)
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
   }
   return (
     <Card id="ws-response" title="HAVEN response" icon={<ClipboardList className="h-4 w-4" />} tone={left.length ? 'hot' : 'acting'} aside={<span className="ws2-muted ml-auto">plan v{plan.version}</span>}>
+      <Command plan={plan} />
       <p className="ws2-reco fade-swap" key={world.narrative.next}>{world.narrative.next.replace(/^The agents propose: /, '')}</p>
       <ol className="ws2-mini">
         {groups.slice(0, 4).map((g, i) => (
@@ -372,10 +376,10 @@ function Response({ world, onPlan }: { world: WorldState; onPlan: () => void }) 
           </li>
         ))}
       </ol>
-      {(left.length > 0 || failing.length > 0) && (
+      {left.length > 0 && (
         <div className="ws2-warn">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>{left.length ? `Leaves ${left.map((id) => residents[id]?.name.split(' ')[0] ?? id).join(', ')} behind: nobody spoke for them.` : `${failing.length} check${failing.length === 1 ? '' : 's'} fail: ${failing.map((c) => c.label).join('; ')}`}</span>
+          <span>Leaves {left.map((id) => residents[id]?.name.split(' ')[0] ?? id).join(', ')} behind: nobody spoke for them.</span>
         </div>
       )}
       {left.length > 0 && heroId && left.includes(heroId) && <AgentSwitch world={world} />}
@@ -391,10 +395,11 @@ function Response({ world, onPlan }: { world: WorldState; onPlan: () => void }) 
           data-buds="panel:approve"
           title={failing.length ? 'Every hard safety check must pass before this plan can be approved' : undefined}
         >
-          <Check className="h-4 w-4" /> {failing.length ? 'Fix the checks to approve' : 'Approve'}
+          <Check className="h-4 w-4" /> {failing.length ? 'Fix the checks to approve' : busy ? 'Dispatching…' : 'Approve & dispatch'}
         </button>
       </div>
       {error && <p className="mt-2 text-[12px] text-haven-danger">{error}</p>}
+      <Preference world={world} />
       {review && (
         <div className="ws2-review enter">
           <ol className="ws2-phases">
@@ -449,12 +454,127 @@ function AgentSwitch({ world }: { world: WorldState }) {
   )
 }
 
+/** Incident command: whether the plan may be approved, what it does for people, and every hard check it fails. */
+function Command({ plan, approved }: { plan: Plan; approved?: boolean }) {
+  const residents = useBuilding((b) => b.residents)
+  const o = outcomes(plan, residentsHere(residents))
+  return (
+    <div className="ws2-cmd">
+      <p className={`ws2-verdict ${approved || o.feasible ? 'is-ok' : 'is-blocked'}`}>
+        {approved || o.feasible ? <ShieldCheck className="h-5 w-5 shrink-0" /> : <ShieldAlert className="h-5 w-5 shrink-0" />}
+        <span className="min-w-0">
+          <b>{approved ? 'Plan approved and dispatched' : o.feasible ? 'Plan is safe to approve' : 'Plan is blocked'}</b>
+          <small>
+            {o.violations.length
+              ? `${o.violations.length} hard check${o.violations.length === 1 ? ' fails' : 's fail'}`
+              : `All ${plan.checks.length} hard safety & access checks pass`}
+          </small>
+        </span>
+        <em>accessibility-aware</em>
+      </p>
+      <div className="ws2-counts" role="list" aria-label="Resident outcomes under this plan">
+        <span role="listitem" className="is-safe">
+          <b>{o.safe}</b>Safe
+        </span>
+        <span role="listitem" className="is-assisted">
+          <b>{o.assisted}</b>Assisted
+        </span>
+        <span role="listitem" className={o.unresolved ? 'is-unresolved' : 'is-zero'}>
+          <b>{o.unresolved}</b>Unresolved
+        </span>
+      </div>
+      {o.violations.length > 0 && (
+        <ul className="ws2-violations">
+          {o.violations.map((c) => (
+            <li key={c.code}>
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                <b>{c.label}.</b> {c.detail}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** Governance in a sentence: parsed into a constraint the planner enforces, or advisory (nothing changes). */
+function Preference({ world }: { world: WorldState }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<RuleParse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const said = text.trim()
+    if (!said || busy) return
+    setBusy(true)
+    setError(null)
+    api
+      .parseRule(said, 'manager', true)
+      .then((r) => {
+        setResult(r)
+        if (r.confident) setText('')
+      })
+      .catch((er: Error) => setError(er.message))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <form className="ws2-pref" onSubmit={submit}>
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={'Add a preference… e.g. "nobody gets moved off campus"'}
+        aria-label="Add a preference for the plan"
+        disabled={world.mode === 'replay' || busy}
+      />
+      {result &&
+        (result.confident ? (
+          <p className="ws2-pref-result is-parsed">
+            <b>Parsed</b> {result.summary} <code>{result.code}</code> · now a rule every agent obeys; the plan re-computes.
+          </p>
+        ) : (
+          <p className="ws2-pref-result is-advisory">
+            <b>Advisory</b> &ldquo;{result.text}&rdquo; is not a rule HAVEN can enforce, so the plan does not change. Try one like &ldquo;nobody moves after midnight&rdquo;.
+          </p>
+        ))}
+      {error && <p className="ws2-pref-result is-error">{error}</p>}
+    </form>
+  )
+}
+
+/** The after-action ledger: the world's timeline, newest last, kept scrolled to the newest. */
+function Ledger({ world, clock }: { world: WorldState; clock: Clock }) {
+  const rows = ledger(world, clock)
+  const list = useRef<HTMLOListElement>(null)
+  const last = rows.at(-1)?.step
+  useEffect(() => {
+    const el = list.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [last])
+  return (
+    <Card id="ws-ledger" title="After-action ledger" icon={<ScrollText className="h-4 w-4" />} aside={<span className="ws2-muted ml-auto">{world.timeline.length} events</span>}>
+      <ol className="ws2-ledger" ref={list}>
+        {rows.map((r, i) => (
+          <li key={`${r.step}-${i}`} className={`is-${r.severity}`}>
+            <i />
+            <span>{r.message}</span>
+            <time>{formatClockHM(r.at)}</time>
+          </li>
+        ))}
+      </ol>
+    </Card>
+  )
+}
+
 function Underway({ world, prog, onPlan }: { world: WorldState; prog: NonNullable<ReturnType<typeof progress>>; onPlan: () => void }) {
   const plan = world.approved_plan!
   const [review, setReview] = useState(false)
   const total = plan.steps.length
   return (
     <Card id="ws-progress" title="HAVEN response" icon={<ClipboardList className="h-4 w-4" />} tone="acting" aside={<span className="ws2-muted ml-auto">approved · {prog.done.length} of {total} done</span>}>
+      <Command plan={plan} approved />
       <div className="progress my-2">
         <span style={{ width: `${total ? (prog.done.length / total) * 100 : 0}%` }} />
       </div>

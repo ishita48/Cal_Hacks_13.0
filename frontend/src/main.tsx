@@ -20,7 +20,7 @@ const Security = lazy(() => import('./security/Security.tsx'))
 const Auth = lazy(() => import('./auth.tsx'))
 
 // / is the landing page, /app the workspace picker everyone lands on after sign-in, /app/<role> that role's
-// workspace (student, ra, maintenance and security are built; admin is a stub that opens the command centre; /app/workspace is the multi-role workspace),
+// workspace (student, ra, maintenance and security; /app/admin is the command centre at /command; /app/workspace is the multi-role workspace),
 // /command the admin's command centre (the live simulation, the agents and approval), /phone the responder's
 // phone, /story the story page.
 // The backend enforces who may use each; these routes only choose what to load.
@@ -39,6 +39,8 @@ const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefine
 initTheme()
 
 const ws = workspaceFromPath(path)
+// The admin's workspace is the command centre itself: one view of the building, not a second copy of it.
+if (ws?.slug === 'admin') location.replace('/command')
 const appPage = path === '/app/workspace' ? <Portal /> : ws?.slug === 'student' ? <Student /> : ws?.slug === 'ra' ? <RA /> : ws?.slug === 'maintenance' ? <Maintenance /> : ws?.slug === 'security' ? <Security /> : ws ? <Stub ws={ws} /> : <Picker />
 const page = phone ? <Phone /> : story ? <Story /> : command ? <Command /> : landing ? <Landing /> : appPage
 const guarded = clerkKey && !story && !landing

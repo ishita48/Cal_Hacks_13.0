@@ -1,5 +1,5 @@
 import { IMPACT_LABEL, NEED_LABEL } from '../lib/labels'
-import type { ActorState, Equipment, Level, OpsFinding, OpsSnapshot, Plan, PlanStep, Rect, Resident, ResidentImpact, Space, StepKind, WorldState } from '../state/types'
+import type { ActorState, Check, Equipment, Level, OpsFinding, OpsSnapshot, Plan, PlanStep, Rect, Resident, ResidentImpact, Space, StepKind, TimelineEntry, WorldState } from '../state/types'
 
 /**
  * The workstation's reading of the world: pure functions over the frame, the spec and the ops snapshot, so
@@ -206,6 +206,43 @@ export function progress(world: WorldState): Progress | null {
     .map(({ s, a }) => ({ id: s.id, title: s.title, detail: a!.detail, step: a!.step }))
     .sort((x, y) => y.step - x.step)
   return { done: by('done'), assigned: by('assigned'), failed: by('failed'), waiting: plan.steps.filter((s) => !world.actions[s.id]), acks }
+}
+
+// ---- incident command: what the plan does for people, and whether it may be approved ---------------------
+
+export interface Outcomes {
+  /** At home and needing nothing from the plan. */
+  safe: number
+  /** Escorted, relocated or sheltered by a step (the step's own head count, not its sample of names). */
+  assisted: number
+  /** The plan's own left-behind list: someone with a critical need nobody covered. */
+  unresolved: number
+  /** Hard checks the plan fails: safety, access, the manager's rules, capacity. */
+  violations: Check[]
+  /** The backend approves only a plan with steps and no failing check; so does this. */
+  feasible: boolean
+}
+
+const ASSISTS = new Set<StepKind>(['escort', 'relocate', 'shelter'])
+
+export function outcomes(plan: Plan, home: number): Outcomes {
+  const assisted = plan.steps.filter((s) => ASSISTS.has(s.kind)).reduce((n, s) => n + Math.max(s.count, s.people.length), 0)
+  const unresolved = plan.left_behind.length
+  const violations = plan.checks.filter((c) => !c.ok)
+  return { safe: Math.max(0, home - assisted - unresolved), assisted, unresolved, violations, feasible: plan.steps.length > 0 && violations.length === 0 }
+}
+
+export interface LedgerRow {
+  step: number
+  at: number
+  kind: string
+  severity: TimelineEntry['severity']
+  message: string
+}
+
+/** The after-action ledger: the world's own timeline, oldest first so the newest reads last. */
+export function ledger(world: WorldState, clock: { step: number; time_of_day: number; dt: number }, limit = 40): LedgerRow[] {
+  return world.timeline.slice(-limit).map((t) => ({ step: t.step, at: clock.time_of_day - (clock.step - t.step) * clock.dt, kind: t.kind, severity: t.severity, message: t.message }))
 }
 
 export function residentsHere(residents: Record<string, Resident>): number {

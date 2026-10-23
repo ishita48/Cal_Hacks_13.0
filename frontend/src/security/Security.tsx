@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Accessibility, Ambulance, ArrowBigUp, Car, CheckCircle2, DoorOpen, Flame, Radio, ShieldCheck, Siren, Zap, type LucideIcon } from 'lucide-react'
 import { api } from '../lib/api'
+import { approveOnce } from '../lib/approve'
 import { Avatar, Shell, reveal, type RailItem } from '../roles/Shell'
 import { useMe } from '../state/me'
 import type { BuildingSpec } from '../state/types'
@@ -92,7 +93,7 @@ function Body({ view, runId, queueRef, unitsRef }: { view: SecurityView; runId: 
     setBusy(true)
     setNote(null)
     try {
-      await api.decidePlan(view.planVersion, 'approve', 'dispatch')
+      await approveOnce(runId, view.planVersion, view.approved ? view.planVersion : null, 'dispatch')
       setNote({ ok: true, text: `Plan v${view.planVersion} approved: every responder in it is dispatched.` })
     } catch (e) {
       setNote({ ok: false, text: e instanceof Error ? e.message : String(e) })

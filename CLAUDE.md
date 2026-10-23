@@ -175,7 +175,12 @@ governs by voice and approves, then the system acts. PRDs: `HAVEN_PRD (1).docx` 
   wing picker (`wingsOf`: the spec has no wings, so each footprint rectangle is named by the side it stands on;
   it filters the people and the checklist by room position); three widgets (active incidents, steps to approve,
   people needing help) with Gmail-style red badges for urgent counts, details only on a click; HAVEN response
-  (recommendation, 2-4 phases, Review = phases + checks + the Maya switch + a rule, Approve); a routine check
+  (incident command: a verdict, "Plan is safe to approve" only when `logic.outcomes` says feasible = steps and no failing
+  hard check; Safe / Assisted / Unresolved counts from step head counts and the plan's `left_behind`; every failing check;
+  recommendation, 2-4 phases, Review = phases + checks + the Maya switch + a rule; "Approve & dispatch" through
+  `lib/approve.ts` `approveOnce`, idempotent on run + plan version; an inline preference that reports Parsed (a rule
+  code) or Advisory (nothing changes); while an incident runs, the After-action ledger = `state.timeline`, newest last).
+  `/app/admin` redirects here: the admin's workspace is the command centre; a routine check
   read from sensors, power, lifts, leaks and the audit (`routineCheck`, cleared when the situation changes);
   today's checklist = the audit's findings (tick = `POST /api/ops/work-order` done, Schedule = open); three
   emergency actions pinned to the bottom: Call 911 and emergency services confirm, then open the dialer
